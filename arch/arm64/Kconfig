@@ -1670,3 +1670,42 @@ source "arch/arm64/kvm/Kconfig"
 if CRYPTO
 source "arch/arm64/crypto/Kconfig"
 endif
+
+menu "Xiaomi board selection"
+
+config MACH_XIAOMI_ALIOTH
+	bool "alioth board"
+	help
+		Support for Redmi K40
+
+config MACH_XIAOMI_APOLLO
+	bool "apollo board"
+	help
+		Support for Mi 10T (Pro) / Redmi K30S Ultra
+
+config MACH_XIAOMI_CAS
+	bool "cas board"
+	help
+		Support for Mi 10 Ultra
+
+config MACH_XIAOMI_CMI
+	bool "cmi board"
+	help
+		Support for Mi 10 Pro
+
+config MACH_XIAOMI_LMI
+	bool "lmi board"
+	help
+		Support for Redmi K30 Pro / Poco F2 Pro
+
+config MACH_XIAOMI_THYME
+	bool "thyme board"
+	help
+		Support for Mi 10S
+
+config MACH_XIAOMI_UMI
+	bool "umi board"
+	help
+		Support for Mi 10
+
+endmenu
