@@ -13668,6 +13668,9 @@ static const struct snd_kcontrol_new tx_voip_mixer_controls[] = {
 	SOC_DOUBLE_EXT("TX_CDC_DMA_TX_5_Voip", SND_SOC_NOPM,
 	MSM_BACKEND_DAI_TX_CDC_DMA_TX_5, MSM_FRONTEND_DAI_VOIP,
 	1, 0, msm_routing_get_voice_mixer, msm_routing_put_voice_mixer),
+	SOC_SINGLE_EXT("PRI_TDM_TX_3_Voip", MSM_BACKEND_DAI_PRI_TDM_TX_3,
+	MSM_FRONTEND_DAI_VOIP, 1, 0, msm_routing_get_voice_mixer,
+	msm_routing_put_voice_mixer),
 };
 
 static const struct snd_kcontrol_new tx_voice_stub_mixer_controls[] = {
@@ -18088,6 +18091,9 @@ static int msm_audio_sound_focus_derive_port_id(struct snd_kcontrol *kcontrol,
 	} else if (!strcmp(kcontrol->id.name + strlen(prefix),
 					"QUIN_TDM_TX_0")) {
 		*port_id = AFE_PORT_ID_QUINARY_TDM_TX;
+	} else if (!strcmp(kcontrol->id.name + strlen(prefix),
+					"PRIMARY_TDM")) {
+		*port_id = AFE_PORT_ID_PRIMARY_TDM_TX;
 	} else {
 		pr_err("%s: mixer ctl name=%s, could not derive valid port id\n",
 			__func__, kcontrol->id.name);
@@ -18464,6 +18470,21 @@ static const struct snd_kcontrol_new msm_source_tracking_controls[] = {
 		.name	= "Source Tracking Audio Tx QUIN_TDM_TX_0",
 		.info	= msm_source_tracking_info,
 		.get	= msm_audio_source_tracking_get,
+	},
+	{
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.iface  = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name   = "Sound Focus Audio Tx PRIMARY_TDM",
+		.info   = msm_sound_focus_info,
+		.get    = msm_audio_sound_focus_get,
+		.put    = msm_audio_sound_focus_put,
+	},
+	{
+		.access = SNDRV_CTL_ELEM_ACCESS_READ,
+		.iface  = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name   = "Source Tracking Audio Tx PRIMARY_TDM",
+		.info   = msm_source_tracking_info,
+		.get    = msm_audio_source_tracking_get,
 	},
 	{
 		.access = SNDRV_CTL_ELEM_ACCESS_READ,
@@ -23917,6 +23938,11 @@ static uint32_t msm_routing_get_topology(size_t data_size, void *data)
 	uint32_t size = 0;
 
 	/* Retrieve cal_info size from cal data*/
+	if (data_size < sizeof(struct audio_cal_type_basic) +
+			sizeof(struct audio_cal_info_adm_top)) {
+		pr_err("%s: Invalid data size: %zd\n", __func__, data_size);
+		goto done;
+	}
 	size = data_size - sizeof(struct audio_cal_type_basic);
 	cal_info = kzalloc(size, GFP_KERNEL);
 
