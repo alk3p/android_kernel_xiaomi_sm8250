@@ -69,7 +69,7 @@
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 #define WMI_BTK_KEY_LEN     32
 #define WMI_ROAM_R0KH_ID_MAX_LEN    48
-#define WMI_ROAM_SCAN_PSK_SIZE    32
+#define WMI_ROAM_SCAN_PSK_SIZE    48
 #endif
 #define WMI_NOISE_FLOOR_DBM_DEFAULT      (-96)
 #define WMI_EXTSCAN_MAX_HOTLIST_SSIDS                    8
@@ -461,6 +461,7 @@ typedef enum {
 	WMI_HOST_MODE_MAX = 24
 } WMI_HOST_WLAN_PHY_MODE;
 
+#ifndef CMN_VDEV_MGR_TGT_IF_ENABLE
 typedef enum {
 	WMI_HOST_VDEV_START_OK = 0,
 	WMI_HOST_VDEV_START_CHAN_INVALID,
@@ -468,6 +469,7 @@ typedef enum {
 	WMI_HOST_VDEV_START_CHAN_DFS_VIOLATION,
 	WMI_HOST_VDEV_START_TIMEOUT,
 } WMI_HOST_VDEV_START_STATUS;
+#endif
 
 /*
  * Needs to be removed and use channel_param based
@@ -1270,7 +1272,7 @@ typedef struct {
  * @peer_he_cap_macinfo: Peer HE Cap MAC info
  * @peer_he_ops: Peer HE operation info
  * @peer_he_cap_phyinfo: Peer HE Cap PHY info
- * @peer_he_cap_info_internal: Peer HE Proprietary PHY capability info
+ * @peer_he_cap_info_internal: Peer HE internal PHY capability info
  * @peer_he_mcs_count: Peer HE MCS TX/RX MAP count
  * @peer_he_rx_mcs_set: Peer HE RX MCS MAP
  * @peer_he_tx_mcs_set: Peer HE TX MCS MAP
@@ -1897,6 +1899,7 @@ typedef struct {
 #define WMI_FILS_MAX_RIK_LENGTH WMI_FILS_MAX_RRK_LENGTH
 #define WMI_FILS_MAX_REALM_LENGTH 256
 #define WMI_FILS_MAX_USERNAME_LENGTH 16
+#define WMI_FILS_FT_MAX_LEN 48
 
 /**
  * struct roam_fils_params - Roam FILS params
@@ -1909,6 +1912,8 @@ typedef struct {
  * @rik_length: length of @rik
  * @realm: realm
  * @realm_len: length of @realm
+ * @fils_ft: xx_key for FT-FILS connection
+ * @fils_ft_len: length of FT-FILS
  */
 struct roam_fils_params {
 	uint8_t username[WMI_FILS_MAX_USERNAME_LENGTH];
@@ -1920,6 +1925,8 @@ struct roam_fils_params {
 	uint32_t rik_length;
 	uint8_t realm[WMI_FILS_MAX_REALM_LENGTH];
 	uint32_t realm_len;
+	uint8_t fils_ft[WMI_FILS_FT_MAX_LEN];
+	uint8_t fils_ft_len;
 };
 
 /* struct roam_offload_scan_params - structure
@@ -1956,6 +1963,12 @@ struct roam_fils_params {
  * @roam_fils_params: roam fils params
  * @rct_validity_timer: duration value for which the entries in
  * roam candidate table are valid
+ * @roam_scan_inactivity_time: inactivity monitoring time in ms for which the
+ * device is considered to be inactive
+ * @roam_inactive_data_packet_count: Maximum allowed data packets count during
+ * roam_scan_inactivity_time.
+ * @roam_scan_period_after_inactivity: Roam scan period in ms after device is
+ * in inactive state.
  */
 struct roam_offload_scan_params {
 	uint8_t is_roam_req_valid;
@@ -1978,6 +1991,7 @@ struct roam_offload_scan_params {
 	bool fw_okc;
 	bool fw_pmksa_cache;
 	uint32_t rct_validity_timer;
+	bool is_adaptive_11r;
 #endif
 	uint32_t min_delay_btw_roam_scans;
 	uint32_t roam_trigger_reason_bitmask;
@@ -1990,6 +2004,9 @@ struct roam_offload_scan_params {
 	uint32_t assoc_ie_length;
 	uint8_t  assoc_ie[MAX_ASSOC_IE_LENGTH];
 	bool add_fils_tlv;
+	uint32_t roam_scan_inactivity_time;
+	uint32_t roam_inactive_data_packet_count;
+	uint32_t roam_scan_period_after_inactivity;
 #ifdef WLAN_FEATURE_FILS_SK
 	struct roam_fils_params roam_fils_params;
 #endif
@@ -2395,28 +2412,28 @@ struct mac_tspec_ie {
 
 /**
  * struct add_ts_param - ADDTS related parameters
- * @staIdx: station index
- * @tspecIdx: TSPEC handler uniquely identifying a TSPEC for a STA in a BSS
- * @tspec: tspec value
- * @status: CDF status
- * @sessionId: session id
- * @tsm_interval: TSM interval period passed from UMAC to WMI
- * @setRICparams: RIC parameters
  * @vdev_id: vdev id
+ * @sta_idx: station index
+ * @tspec_idx: TSPEC handle uniquely identifying a TSPEC for a STA in a BSS
+ * @tspec: tspec value
+ * @status: QDF status
+ * @pe_session_id: protocol engine session id
+ * @tsm_interval: TSM interval period passed from UMAC to WMI
+ * @set_ric_params: Should RIC parameters be set?
  */
 struct add_ts_param {
-	uint16_t staIdx;
-	uint16_t tspecIdx;
+	uint8_t vdev_id;
+	uint16_t sta_idx;
+	uint16_t tspec_idx;
 	struct mac_tspec_ie tspec;
 	QDF_STATUS status;
-	uint8_t sessionId;
+	uint8_t pe_session_id;
 #ifdef FEATURE_WLAN_ESE
 	uint16_t tsm_interval;
 #endif /* FEATURE_WLAN_ESE */
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
-	uint8_t setRICparams;
+	bool set_ric_params;
 #endif /* WLAN_FEATURE_ROAM_OFFLOAD */
-	uint8_t vdev_id;
 };
 
 /**
@@ -3039,17 +3056,19 @@ struct set_custom_aggr_size_params {
 };
 #endif
 
+#ifndef CMN_VDEV_MGR_TGT_IF_ENABLE
 /**
- * enum wmi_host_custom_aggr_type_t: custon aggregate type
+ * enum wmi_host_custom_aggr_type: custon aggregate type
  * @WMI_HOST_CUSTOM_AGGR_TYPE_AMPDU: A-MPDU aggregation
  * @WMI_HOST_CUSTOM_AGGR_TYPE_AMSDU: A-MSDU aggregation
  * @WMI_HOST_CUSTOM_AGGR_TYPE_MAX: Max type
  */
-enum wmi_host_custom_aggr_type_t {
+enum wmi_host_custom_aggr_type {
 	WMI_HOST_CUSTOM_AGGR_TYPE_AMPDU = 0,
 	WMI_HOST_CUSTOM_AGGR_TYPE_AMSDU = 1,
 	WMI_HOST_CUSTOM_AGGR_TYPE_MAX,
 };
+#endif
 
 /*
  * msduq_update_params - MSDUQ update param structure
@@ -4081,6 +4100,8 @@ struct rx_reorder_queue_remove_params {
  * @num_pdev_ext_stats: number of pdev ext stats event structures
  * @num_vdev_stats: number of vdev stats
  * @num_peer_stats: number of peer stats event structures 0 or max peers
+ * @num_peer_extd_stats: number of peer extended stats event structures 0
+ * or max peers
  * @num_bcnflt_stats: number of beacon filter stats
  * @num_chan_stats: number of channel stats
  * @pdev_id: device id for the radio
@@ -4095,6 +4116,7 @@ typedef struct {
 	uint32_t num_pdev_ext_stats;
 	uint32_t num_vdev_stats;
 	uint32_t num_peer_stats;
+	uint32_t num_peer_extd_stats;
 	uint32_t num_bcnflt_stats;
 	uint32_t num_chan_stats;
 	uint32_t pdev_id;
@@ -4117,7 +4139,10 @@ typedef struct {
  * @atf_tokens_utilized: atf tokens utilized
  * @num_mu_tx_blacklisted: Blacklisted MU Tx count
  * @sgi_count: sgi count of the peer
- * @reserved: for future use
+ * @rx_mc_bc_cnt: Total number of received multicast & broadcast data frames
+ * corresponding to this peer, 1 in the MSB of rx_mc_bc_cnt represents a
+ * valid data
+ * @rx_retry_cnt: Number of rx retries received from current station
  */
 typedef struct {
 	wmi_host_mac_addr peer_macaddr;
@@ -4131,7 +4156,8 @@ typedef struct {
 	uint32_t atf_tokens_utilized;
 	uint32_t num_mu_tx_blacklisted;
 	uint32_t sgi_count;
-	uint32_t reserved[2];
+	uint32_t rx_mc_bc_cnt;
+	uint32_t rx_retry_cnt;
 } wmi_host_peer_extd_stats;
 
 /**
@@ -4968,6 +4994,7 @@ typedef enum {
 	wmi_pdev_param_ul_ppdu_duration,
 	wmi_pdev_param_equal_ru_allocation_enable,
 	wmi_pdev_param_per_peer_prd_cfr_enable,
+	wmi_pdev_param_nav_override_config,
 	wmi_pdev_param_max,
 } wmi_conv_pdev_params_id;
 
@@ -5280,10 +5307,16 @@ typedef enum {
 	wmi_service_nan_sap_support,
 	wmi_service_ndi_sap_support,
 	wmi_service_nan_disable_support,
+	wmi_service_sta_plus_sta_support,
 	wmi_service_hw_db2dbm_support,
 	wmi_service_wlm_stats_support,
 	wmi_service_ul_ru26_allowed,
 	wmi_service_cfr_capture_support,
+	wmi_service_bcast_twt_support,
+	wmi_service_wpa3_ft_sae_support,
+	wmi_service_wpa3_ft_suite_b_support,
+	wmi_service_ft_fils,
+	wmi_service_adaptive_11r_support,
 	wmi_services_max,
 } wmi_conv_service_ids;
 #define WMI_SERVICE_UNAVAILABLE 0xFFFF
@@ -5501,6 +5534,7 @@ typedef struct {
 	u_int8_t dest_mac[QDF_MAC_ADDR_SIZE];
 	uint32_t vdev_id;
 } wds_addr_event_t;
+
 /**
  * Enum replicated for host abstraction with FW
  */
@@ -5961,10 +5995,13 @@ typedef enum {
 
 #define WMI_HOST_FIXED_RATE_NONE	(0xff)
 
+#ifndef CMN_VDEV_MGR_TGT_IF_ENABLE
 /** slot time long */
 #define WMI_HOST_VDEV_SLOT_TIME_LONG	0x1
 /** slot time short */
 #define WMI_HOST_VDEV_SLOT_TIME_SHORT	0x2
+#endif
+
 /** preablbe long */
 #define WMI_HOST_VDEV_PREAMBLE_LONG	0x1
 /** preablbe short */
@@ -6286,6 +6323,7 @@ enum wmi_host_ap_ps_peer_param {
 #define WMI_HOST_RXERR_MIC	0x10 /* Michael MIC decrypt error */
 #define WMI_HOST_RXERR_KEY_CACHE_MISS 0x20 /* No/incorrect key matter in h/w */
 
+#ifndef CMN_VDEV_MGR_TGT_IF_ENABLE
 enum wmi_host_sta_ps_param_uapsd {
 	WMI_HOST_STA_PS_UAPSD_AC0_DELIVERY_EN = (1 << 0),
 	WMI_HOST_STA_PS_UAPSD_AC0_TRIGGER_EN  = (1 << 1),
@@ -6296,6 +6334,7 @@ enum wmi_host_sta_ps_param_uapsd {
 	WMI_HOST_STA_PS_UAPSD_AC3_DELIVERY_EN = (1 << 6),
 	WMI_HOST_STA_PS_UAPSD_AC3_TRIGGER_EN  = (1 << 7),
 };
+#endif
 
 enum wmi_host_sta_ps_param_rx_wake_policy {
 	/* Wake up when ever there is an  RX activity on the VDEV. In this mode
@@ -7896,4 +7935,104 @@ struct mws_antenna_sharing_info {
 	int32_t  mrc_threshold;
 	uint32_t grant_duration;
 };
+
+#ifdef WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG
+/**
+ * enum wmi_pdev_pkt_routing_op_code_type - packet routing supported opcodes
+ * @ADD_PKT_ROUTING: Add packet routing command
+ * @DEL_PKT_ROUTING: Delete packet routing command
+ *
+ * Defines supported opcodes for packet routing/tagging
+ */
+enum wmi_pdev_pkt_routing_op_code_type {
+	ADD_PKT_ROUTING,
+	DEL_PKT_ROUTING,
+};
+
+/**
+ * enum wmi_pdev_pkt_routing_pkt_type - supported packet types for
+ * routing & tagging
+ * @PDEV_PKT_TYPE_ARP_IPV4: Route/Tag for packet type ARP IPv4 (L3)
+ * @PDEV_PKT_TYPE_NS_IPV6: Route/Tag for packet type NS IPv6 (L3)
+ * @PDEV_PKT_TYPE_IGMP_IPV4: Route/Tag for packet type IGMP IPv4 (L3)
+ * @PDEV_PKT_TYPE_MLD_IPV6: Route/Tag for packet type MLD IPv6 (L3)
+ * @PDEV_PKT_TYPE_DHCP_IPV4: Route/Tag for packet type DHCP IPv4 (APP)
+ * @PDEV_PKT_TYPE_DHCP_IPV6: Route/Tag for packet type DHCP IPv6 (APP)
+ * @PDEV_PKT_TYPE_DNS_TCP_IPV4: Route/Tag for packet type TCP DNS IPv4 (APP)
+ * @PDEV_PKT_TYPE_DNS_TCP_IPV6: Route/Tag for packet type TCP DNS IPv6 (APP)
+ * @PDEV_PKT_TYPE_DNS_UDP_IPV4: Route/Tag for packet type UDP DNS IPv4 (APP)
+ * @PDEV_PKT_TYPE_DNS_UDP_IPV6: Route/Tag for packet type UDP DNS IPv6 (APP)
+ * @PDEV_PKT_TYPE_ICMP_IPV4: Route/Tag for packet type ICMP IPv4 (L3)
+ * @PDEV_PKT_TYPE_ICMP_IPV6: Route/Tag for packet type ICMP IPv6 (L3)
+ * @PDEV_PKT_TYPE_TCP_IPV4: Route/Tag for packet type TCP IPv4 (L4)
+ * @PDEV_PKT_TYPE_TCP_IPV6: Route/Tag for packet type TCP IPv6 (L4)
+ * @PDEV_PKT_TYPE_UDP_IPV4: Route/Tag for packet type UDP IPv4 (L4)
+ * @PDEV_PKT_TYPE_UDP_IPV6: Route/Tag for packet type UDP IPv6 (L4)
+ * @PDEV_PKT_TYPE_IPV4: Route/Tag for packet type IPv4 (L3)
+ * @PDEV_PKT_TYPE_IPV6: Route/Tag for packet type IPv6 (L3)
+ * @PDEV_PKT_TYPE_EAP: Route/Tag for packet type EAP (L2)
+ *
+ * Defines supported protocol types for routing/tagging
+ */
+enum wmi_pdev_pkt_routing_pkt_type {
+	PDEV_PKT_TYPE_ARP_IPV4,
+	PDEV_PKT_TYPE_NS_IPV6,
+	PDEV_PKT_TYPE_IGMP_IPV4,
+	PDEV_PKT_TYPE_MLD_IPV6,
+	PDEV_PKT_TYPE_DHCP_IPV4,
+	PDEV_PKT_TYPE_DHCP_IPV6,
+	PDEV_PKT_TYPE_DNS_TCP_IPV4,
+	PDEV_PKT_TYPE_DNS_TCP_IPV6,
+	PDEV_PKT_TYPE_DNS_UDP_IPV4,
+	PDEV_PKT_TYPE_DNS_UDP_IPV6,
+	PDEV_PKT_TYPE_ICMP_IPV4,
+	PDEV_PKT_TYPE_ICMP_IPV6,
+	PDEV_PKT_TYPE_TCP_IPV4,
+	PDEV_PKT_TYPE_TCP_IPV6,
+	PDEV_PKT_TYPE_UDP_IPV4,
+	PDEV_PKT_TYPE_UDP_IPV6,
+	PDEV_PKT_TYPE_IPV4,
+	PDEV_PKT_TYPE_IPV6,
+	PDEV_PKT_TYPE_EAP,
+	PDEV_PKT_TYPE_MAX
+};
+
+/**
+ * enum wmi_pdev_dest_ring_handler_type - packet routing options post CCE
+ * tagging
+ * @PDEV_WIFIRXCCE_USE_CCE_E: Use REO destination ring from CCE
+ * @PDEV_WIFIRXCCE_USE_ASPT_E: Use REO destination ring from ASPT
+ * @PDEV_WIFIRXCCE_USE_FT_E: Use REO destination ring from FSE
+ * @PDEV_WIFIRXCCE_USE_CCE2_E: Use REO destination ring from CCE2
+ *
+ * Defines various options for routing policy
+ */
+enum wmi_pdev_dest_ring_handler_type {
+	PDEV_WIFIRXCCE_USE_CCE_E  = 0,
+	PDEV_WIFIRXCCE_USE_ASPT_E = 1,
+	PDEV_WIFIRXCCE_USE_FT_E   = 2,
+	PDEV_WIFIRXCCE_USE_CCE2_E = 3,
+};
+
+/**
+ * struct wmi_rx_pkt_protocol_routing_info - RX packet routing/tagging params
+ * @pdev_id: pdev id
+ * @op_code: Opcode option from wmi_pdev_pkt_routing_op_code_type enum
+ * @routing_type_bitmap: Bitmap of protocol that is being configured. Only
+ * one protocol can be configured in one command. Supported protocol list
+ * from enum wmi_pdev_pkt_routing_pkt_type
+ * @dest_ring_handler: Destination ring selection from enum
+ * wmi_pdev_dest_ring_handler_type
+ * @dest_ring: Destination ring number to use if dest ring handler is CCE
+ * @meta_data: Metadata to tag with for given protocol
+ */
+struct wmi_rx_pkt_protocol_routing_info {
+	uint32_t      pdev_id;
+	enum wmi_pdev_pkt_routing_op_code_type op_code;
+	uint32_t      routing_type_bitmap;
+	uint32_t      dest_ring_handler;
+	uint32_t      dest_ring;
+	uint32_t      meta_data;
+};
+#endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
 #endif /* _WMI_UNIFIED_PARAM_H_ */

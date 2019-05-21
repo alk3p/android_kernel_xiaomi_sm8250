@@ -3167,7 +3167,43 @@ static QDF_STATUS send_set_sta_ps_mode_cmd_tlv(wmi_unified_t wmi_handle,
 		wmi_buf_free(buf);
 		return QDF_STATUS_E_FAILURE;
 	}
-	return 0;
+	return QDF_STATUS_SUCCESS;
+}
+
+/**
+ * send_idle_roam_monitor_cmd_tlv() - send idle monitor command to fw
+ * @wmi_handle: wmi handle
+ * @vdev_id: vdev id
+ *
+ * Return: QDF_STATUS_SUCCESS for success or error code.
+ */
+static QDF_STATUS send_idle_roam_monitor_cmd_tlv(wmi_unified_t wmi_handle,
+						 uint8_t val)
+{
+	wmi_idle_trigger_monitor_cmd_fixed_param *cmd;
+	wmi_buf_t buf;
+	size_t len = sizeof(*cmd);
+
+	buf = wmi_buf_alloc(wmi_handle, len);
+	if (!buf)
+		return QDF_STATUS_E_NOMEM;
+
+	cmd = (wmi_idle_trigger_monitor_cmd_fixed_param *)wmi_buf_data(buf);
+	WMITLV_SET_HDR(&cmd->tlv_header,
+		       WMITLV_TAG_STRUC_wmi_idle_trigger_monitor_cmd_fixed_param,
+		       WMITLV_GET_STRUCT_TLVLEN(wmi_idle_trigger_monitor_cmd_fixed_param));
+
+	cmd->idle_trigger_monitor = (val ? WMI_IDLE_TRIGGER_MONITOR_ON :
+					   WMI_IDLE_TRIGGER_MONITOR_OFF);
+
+	WMI_LOGD("val:%d", cmd->idle_trigger_monitor);
+
+	if (wmi_unified_cmd_send(wmi_handle, buf, len,
+				 WMI_IDLE_TRIGGER_MONITOR_CMDID)) {
+		wmi_buf_free(buf);
+		return QDF_STATUS_E_FAILURE;
+	}
+	return QDF_STATUS_SUCCESS;
 }
 
 /**
@@ -6450,8 +6486,10 @@ static QDF_STATUS send_log_supported_evt_cmd_tlv(wmi_unified_t wmi_handle,
 			__func__, num_of_diag_events_logs);
 
 	/* Free any previous allocation */
-	if (wmi_handle->events_logs_list)
+	if (wmi_handle->events_logs_list) {
 		qdf_mem_free(wmi_handle->events_logs_list);
+		wmi_handle->events_logs_list = NULL;
+	}
 
 	if (num_of_diag_events_logs >
 		(WMI_SVC_MSG_MAX_SIZE / sizeof(uint32_t))) {
@@ -8341,6 +8379,9 @@ static QDF_STATUS extract_all_stats_counts_tlv(wmi_unified_t wmi_handle,
 	case WMI_REQUEST_BCN_STAT:
 		stats_param->stats_id |= WMI_HOST_REQUEST_BCN_STAT;
 		break;
+	case WMI_REQUEST_PEER_EXTD_STAT:
+		stats_param->stats_id |= WMI_REQUEST_PEER_EXTD_STAT;
+		break;
 
 	case WMI_REQUEST_PEER_EXTD2_STAT:
 		stats_param->stats_id |= WMI_HOST_REQUEST_PEER_ADV_STATS;
@@ -8377,6 +8418,7 @@ static QDF_STATUS extract_all_stats_counts_tlv(wmi_unified_t wmi_handle,
 	stats_param->num_pdev_ext_stats = 0;
 	stats_param->num_vdev_stats = ev->num_vdev_stats;
 	stats_param->num_peer_stats = ev->num_peer_stats;
+	stats_param->num_peer_extd_stats = ev->num_peer_extd_stats;
 	stats_param->num_bcnflt_stats = ev->num_bcnflt_stats;
 	stats_param->num_chan_stats = ev->num_chan_stats;
 	stats_param->num_bcn_stats = ev->num_bcn_stats;
@@ -8821,7 +8863,37 @@ static QDF_STATUS extract_peer_extd_stats_tlv(wmi_unified_t wmi_handle,
 		void *evt_buf, uint32_t index,
 		wmi_host_peer_extd_stats *peer_extd_stats)
 {
+	WMI_UPDATE_STATS_EVENTID_param_tlvs *param_buf;
+	wmi_stats_event_fixed_param *ev_param;
+	uint8_t *data;
+
+	param_buf = (WMI_UPDATE_STATS_EVENTID_param_tlvs *)evt_buf;
+	ev_param = (wmi_stats_event_fixed_param *)param_buf->fixed_param;
+	data = (uint8_t *)param_buf->data;
+	if (!data)
+		return QDF_STATUS_E_FAILURE;
+
+	if (index < ev_param->num_peer_extd_stats) {
+		wmi_peer_extd_stats *ev = (wmi_peer_extd_stats *) (data +
+			(ev_param->num_pdev_stats * sizeof(wmi_pdev_stats)) +
+			(ev_param->num_vdev_stats * sizeof(wmi_vdev_stats)) +
+			(ev_param->num_peer_stats * sizeof(wmi_peer_stats)) +
+			(ev_param->num_bcnflt_stats *
+			sizeof(wmi_bcnfilter_stats_t)) +
+			(ev_param->num_chan_stats * sizeof(wmi_chan_stats)) +
+			(ev_param->num_mib_stats * sizeof(wmi_mib_stats)) +
+			(ev_param->num_bcn_stats * sizeof(wmi_bcn_stats)) +
+			(index * sizeof(wmi_peer_extd_stats)));
+
+		qdf_mem_zero(peer_extd_stats, sizeof(wmi_host_peer_extd_stats));
+		qdf_mem_copy(&peer_extd_stats->peer_macaddr, &ev->peer_macaddr,
+			     sizeof(wmi_mac_addr));
+
+		peer_extd_stats->rx_mc_bc_cnt = ev->rx_mc_bc_cnt;
+	}
+
 	return QDF_STATUS_SUCCESS;
+
 }
 
 /**
@@ -9304,6 +9376,7 @@ static QDF_STATUS extract_mac_phy_cap_service_ready_ext_tlv(
 	qdf_mem_copy(&param->he_ppet5G, &mac_phy_caps->he_ppet5G,
 				sizeof(param->he_ppet5G));
 	param->chainmask_table_id = mac_phy_caps->chainmask_table_id;
+	param->lmac_id = mac_phy_caps->lmac_id;
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -11264,6 +11337,7 @@ struct wmi_ops tlv_ops =  {
 	.send_offchan_data_tx_cmd = send_offchan_data_tx_cmd_tlv,
 	.send_modem_power_state_cmd = send_modem_power_state_cmd_tlv,
 	.send_set_sta_ps_mode_cmd = send_set_sta_ps_mode_cmd_tlv,
+	.send_idle_roam_monitor_cmd = send_idle_roam_monitor_cmd_tlv,
 	.send_set_sta_uapsd_auto_trig_cmd =
 		send_set_sta_uapsd_auto_trig_cmd_tlv,
 	.send_get_temperature_cmd = send_get_temperature_cmd_tlv,
@@ -12050,6 +12124,8 @@ static void populate_tlv_service(uint32_t *wmi_service)
 	wmi_service[wmi_service_ndi_sap_support] = WMI_SERVICE_NDI_SAP_SUPPORT;
 	wmi_service[wmi_service_nan_disable_support] =
 			WMI_SERVICE_NAN_DISABLE_SUPPORT;
+	wmi_service[wmi_service_sta_plus_sta_support] =
+				WMI_SERVICE_STA_PLUS_STA_SUPPORT;
 	wmi_service[wmi_service_hw_db2dbm_support] =
 			WMI_SERVICE_HW_DB2DBM_CONVERSION_SUPPORT;
 	wmi_service[wmi_service_wlm_stats_support] =
@@ -12058,6 +12134,16 @@ static void populate_tlv_service(uint32_t *wmi_service)
 	wmi_service[wmi_service_ul_ru26_allowed] = WMI_SERVICE_UL_RU26_ALLOWED;
 	wmi_service[wmi_service_cfr_capture_support] =
 			WMI_SERVICE_CFR_CAPTURE_SUPPORT;
+	wmi_service[wmi_service_bcast_twt_support] =
+			WMI_SERVICE_BROADCAST_TWT;
+	wmi_service[wmi_service_wpa3_ft_sae_support] =
+			WMI_SERVICE_WPA3_FT_SAE_SUPPORT;
+	wmi_service[wmi_service_wpa3_ft_suite_b_support] =
+			WMI_SERVICE_WPA3_FT_SUITE_B_SUPPORT;
+	wmi_service[wmi_service_ft_fils] =
+			WMI_SERVICE_WPA3_FT_FILS;
+	wmi_service[wmi_service_adaptive_11r_support] =
+			WMI_SERVICE_ADAPTIVE_11R_ROAM;
 }
 
 /**
@@ -12318,6 +12404,8 @@ static void populate_pdev_param_tlv(uint32_t *pdev_param)
 				WMI_PDEV_PARAM_EQUAL_RU_ALLOCATION_ENABLE;
 	pdev_param[wmi_pdev_param_per_peer_prd_cfr_enable] =
 				WMI_PDEV_PARAM_PER_PEER_PERIODIC_CFR_ENABLE;
+	pdev_param[wmi_pdev_param_nav_override_config] =
+				WMI_PDEV_PARAM_NAV_OVERRIDE_CONFIG;
 }
 
 /**

@@ -254,6 +254,12 @@ uint16_t wlan_reg_dmn_get_opclass_from_channel(uint8_t *country,
 						offset);
 }
 
+void wlan_reg_dmn_print_channels_in_opclass(uint8_t *country,
+					    uint8_t opclass)
+{
+	reg_dmn_print_channels_in_opclass(country, opclass);
+}
+
 uint16_t wlan_reg_dmn_get_chanwidth_from_opclass(uint8_t *country,
 						 uint8_t channel,
 						 uint8_t opclass)
@@ -554,6 +560,11 @@ bool wlan_reg_is_etsi13_srd_chan_allowed_master_mode(struct wlan_objmgr_pdev
 						     *pdev)
 {
 	return reg_is_etsi13_srd_chan_allowed_master_mode(pdev);
+}
+
+bool wlan_reg_get_fcc_constraint(struct wlan_objmgr_pdev *pdev, uint32_t freq)
+{
+	return reg_get_fcc_constraint(pdev, freq);
 }
 
 QDF_STATUS wlan_reg_get_chip_mode(struct wlan_objmgr_pdev *pdev,

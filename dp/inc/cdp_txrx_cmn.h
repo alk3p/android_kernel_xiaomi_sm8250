@@ -363,6 +363,34 @@ static inline void cdp_peer_setup
 			peer);
 }
 
+/*
+ * cdp_cp_peer_del_response - Call the peer delete response handler
+ * @soc: Datapath SOC handle
+ * @vdev_hdl: virtual device object
+ * @peer_mac_addr: Mac address of the peer
+ *
+ * Return: void
+ */
+static inline void cdp_cp_peer_del_response
+	(ol_txrx_soc_handle soc,
+	 struct cdp_vdev *vdev_hdl,
+	 uint8_t *peer_mac_addr)
+{
+	if (!soc || !soc->ops) {
+		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
+			  "%s: Invalid Instance:", __func__);
+		QDF_BUG(0);
+		return;
+	}
+
+	if (!soc->ops->cmn_drv_ops ||
+	    !soc->ops->cmn_drv_ops->txrx_cp_peer_del_response)
+		return;
+
+	return soc->ops->cmn_drv_ops->txrx_cp_peer_del_response(soc,
+								vdev_hdl,
+								peer_mac_addr);
+}
 /**
  * cdp_peer_get_ast_info_by_soc() - search the soc AST hash table
  *                                  and return ast entry information
@@ -1850,6 +1878,33 @@ cdp_soc_set_dp_txrx_handle(ol_txrx_soc_handle soc, void *dp_handle)
 
 	soc->ops->cmn_drv_ops->set_soc_dp_txrx_handle((struct cdp_soc *)soc,
 			dp_handle);
+}
+
+/**
+ * cdp_soc_map_pdev_to_lmac() - Save pdev_id to lmac_id mapping
+ * @soc: opaque soc handle
+ * @pdev_handle: data path pdev handle
+ * @lmac_id: lmac id
+ *
+ * Return: void
+ */
+static inline void
+cdp_soc_map_pdev_to_lmac(ol_txrx_soc_handle soc, void *pdev_handle,
+			 uint32_t lmac_id)
+{
+	if (!soc || !soc->ops) {
+		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
+			  "%s: Invalid Instance:", __func__);
+		QDF_BUG(0);
+		return;
+	}
+
+	if (!soc->ops->cmn_drv_ops ||
+	    !soc->ops->cmn_drv_ops->map_pdev_to_lmac)
+		return;
+
+	soc->ops->cmn_drv_ops->map_pdev_to_lmac((struct cdp_pdev *)pdev_handle,
+			lmac_id);
 }
 
 /**

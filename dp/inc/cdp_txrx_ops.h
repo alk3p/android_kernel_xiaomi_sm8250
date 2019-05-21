@@ -99,6 +99,10 @@ struct cdp_cmn_ops {
 	void (*txrx_peer_setup)
 		(struct cdp_vdev *vdev_hdl, void *peer_hdl);
 
+	void (*txrx_cp_peer_del_response)
+		(ol_txrx_soc_handle soc, struct cdp_vdev *vdev_hdl,
+		 uint8_t *peer_mac_addr);
+
 	void (*txrx_peer_teardown)
 		(struct cdp_vdev *vdev_hdl, void *peer_hdl);
 
@@ -401,6 +405,9 @@ struct cdp_cmn_ops {
 	void (*set_soc_dp_txrx_handle)(struct cdp_soc *soc_handle,
 			void *dp_txrx_handle);
 
+	void (*map_pdev_to_lmac)(struct cdp_pdev *pdev_hdl,
+				 uint32_t lmac_id);
+
 	void (*txrx_peer_reset_ast)
 		(ol_txrx_soc_handle soc, uint8_t *ast_macaddr,
 		 uint8_t *peer_macaddr, void *vdev_hdl);
@@ -642,6 +649,17 @@ struct cdp_ctrl_ops {
 			*txrx_pdev_handle, char *macaddr, uint8_t enb_dsb);
 
 	void (*calculate_delay_stats)(struct cdp_vdev *vdev, qdf_nbuf_t nbuf);
+#ifdef WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG
+	QDF_STATUS (*txrx_update_pdev_rx_protocol_tag)(
+			struct cdp_pdev *txrx_pdev_handle,
+			uint32_t protocol_mask, uint16_t protocol_type,
+			uint16_t tag);
+#ifdef WLAN_SUPPORT_RX_TAG_STATISTICS
+	void (*txrx_dump_pdev_rx_protocol_tag_stats)(
+				struct cdp_pdev *txrx_pdev_handle,
+				uint16_t protocol_type);
+#endif /* WLAN_SUPPORT_RX_TAG_STATISTICS */
+#endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
 };
 
 struct cdp_me_ops {
@@ -843,30 +861,6 @@ struct cdp_pflow_ops {
 #define LRO_IPV6_SEED_ARR_SZ 11
 
 /**
- * struct cdp_reorder_q_setup - reorder queue setup params
- * @soc: dp soc pointer
- * @ctrl_pdev: umac ctrl pdev pointer
- * @vdev_id: vdev id
- * @peer_macaddr: peer mac address
- * @hw_qdesc: hw queue descriptor
- * @tid: tid number
- * @queue_no: queue number
- * @ba_window_size_valid: BA window size validity flag
- * @ba_window_size: BA window size
- */
-struct cdp_reorder_q_setup {
-	struct cdp_soc *soc;
-	struct cdp_ctrl_objmgr_pdev *ctrl_pdev;
-	uint8_t vdev_id;
-	uint8_t peer_mac[QDF_MAC_ADDR_SIZE];
-	qdf_dma_addr_t hw_qdesc_paddr;
-	uint8_t tid;
-	uint16_t queue_no;
-	uint8_t ba_window_size_valid;
-	uint16_t ba_window_size;
-};
-
-/**
  * struct cdp_lro_hash_config - set rx_offld(LRO/GRO) init parameters
  * @lro_enable: indicates whether rx_offld is enabled
  * @tcp_flag: If the TCP flags from the packet do not match
@@ -1006,7 +1000,7 @@ struct cdp_misc_ops {
 	qdf_nbuf_t (*tx_non_std)(struct cdp_vdev *vdev,
 		enum ol_tx_spec tx_spec, qdf_nbuf_t msdu_list);
 	uint16_t (*get_vdev_id)(struct cdp_vdev *vdev);
-	uint32_t (*get_tx_ack_stats)(uint8_t vdev_id);
+	uint32_t (*get_tx_ack_stats)(struct cdp_pdev *pdev, uint8_t vdev_id);
 	QDF_STATUS (*set_wisa_mode)(struct cdp_vdev *vdev, bool enable);
 	QDF_STATUS (*txrx_data_stall_cb_register)(data_stall_detect_cb cb);
 	QDF_STATUS (*txrx_data_stall_cb_deregister)(data_stall_detect_cb cb);
@@ -1206,6 +1200,8 @@ struct cdp_ipa_ops {
 	QDF_STATUS (*ipa_disable_pipes)(struct cdp_pdev *pdev);
 	QDF_STATUS (*ipa_set_perf_level)(int client,
 		uint32_t max_supported_bw_mbps);
+	bool (*ipa_rx_intrabss_fwd)(struct cdp_vdev *vdev, qdf_nbuf_t nbuf,
+				    bool *fwd_success);
 };
 #endif
 

@@ -261,6 +261,8 @@ struct wlan_vdev_create_params {
  * @ch_maxpower:  Maximum tx power in dBm.
  * @ch_freq_seg1: Channel Center frequeny for VHT80/160 and HE80/160.
  * @ch_freq_seg2: Second channel Center frequency applicable for 80+80MHz mode.
+ * @ch_cfreq1:    channel center frequency for primary
+ * @ch_cfreq2:    channel center frequency for secondary
  * @ch_width:     Channel width.
  * @ch_phymode:   Channel phymode.
  */
@@ -272,6 +274,8 @@ struct wlan_channel {
 	int8_t       ch_maxpower;
 	uint8_t      ch_freq_seg1;
 	uint8_t      ch_freq_seg2;
+	uint32_t     ch_cfreq1;
+	uint32_t     ch_cfreq2;
 	enum phy_ch_width ch_width;
 	enum wlan_phymode ch_phymode;
 };
@@ -1395,6 +1399,20 @@ static inline struct wlan_objmgr_peer *wlan_vdev_get_bsspeer(
 }
 
 /**
+ * wlan_objmgr_vdev_try_get_bsspeer() - get and increment ref count of BSS peer
+ * of VDEV
+ * @vdev: VDEV object
+ * @id:   Object Manager ref debug id
+ *
+ * API to get and increment ref count of BSS peer of VDEV
+ *
+ * Return:
+ * @peer: BSS peer pointer if bss peer is present and valid else NULL
+ */
+struct wlan_objmgr_peer *wlan_objmgr_vdev_try_get_bsspeer(
+					struct wlan_objmgr_vdev *vdev,
+					wlan_objmgr_ref_dbgid id);
+/**
  * wlan_vdev_get_ospriv() - get os priv pointer
  * @vdev: VDEV object
  *
@@ -1530,14 +1548,6 @@ static inline uint16_t wlan_vdev_get_max_peer_count(
 {
 	return vdev->vdev_objmgr.max_peer_count;
 }
-
-/**
- * wlan_vdev_is_connected() - Check whether peer is associated or not
- * @vdev: pointer to objmgr vdev
- *
- * Return: true in case success else false
- */
-bool wlan_vdev_is_connected(struct wlan_objmgr_vdev *vdev);
 
 /**
  * wlan_vdev_set_dp_handle() - set dp handle

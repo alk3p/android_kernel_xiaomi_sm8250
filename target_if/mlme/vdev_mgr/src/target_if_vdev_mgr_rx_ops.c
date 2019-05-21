@@ -25,6 +25,7 @@
 #include <target_if_vdev_mgr_rx_ops.h>
 #include <target_if_vdev_mgr_tx_ops.h>
 #include <wlan_vdev_mgr_tgt_if_rx_defs.h>
+#include <wlan_vdev_mgr_tgt_if_tx_defs.h>
 #include <wmi_unified_param.h>
 #include <wlan_mlme_dbg.h>
 #include <target_if.h>
@@ -77,7 +78,7 @@ void target_if_vdev_mgr_rsp_timer_mgmt_cb(void *arg)
 		    qdf_atomic_test_bit(RESTART_RESPONSE_BIT,
 					&vdev_rsp->rsp_status)) {
 			start_rsp.vdev_id = wlan_vdev_get_id(vdev);
-			start_rsp.status = WMI_HOST_VDEV_START_TIMEOUT;
+			start_rsp.status = WLAN_MLME_HOST_VDEV_START_TIMEOUT;
 			if (qdf_atomic_test_bit(START_RESPONSE_BIT,
 						&vdev_rsp->rsp_status))
 				start_rsp.resp_type =
@@ -105,10 +106,12 @@ void target_if_vdev_mgr_rsp_timer_mgmt_cb(void *arg)
 	}
 
 	if (target_if_vdev_mgr_is_panic_on_bug()) {
-		QDF_DEBUG_PANIC("VDEV_%d: Panic on bug enabled, rsp status:%d",
+		QDF_DEBUG_PANIC("PSOC_%d VDEV_%d: Panic on bug, rsp status:%d",
+				wlan_psoc_get_id(psoc),
 			        vdev_id, vdev_rsp->rsp_status);
 	} else {
-		mlme_err("VDEV_%d: Trigger Self recovery, rsp status%d",
+		mlme_err("PSOC_%d VDEV_%d: Trigger Self recovery, rsp status%d",
+			 wlan_psoc_get_id(psoc),
 			 vdev_id, vdev_rsp->rsp_status);
 		wmi_handle = target_if_vdev_mgr_wmi_handle_get(vdev);
 

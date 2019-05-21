@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -207,18 +207,15 @@ QDF_STATUS wmi_unified_roam_scan_offload_cmd(void *wmi_hdl,
 /**
  * wmi_unified_roam_scan_offload_scan_period() - set roam offload scan period
  * @wmi_handle: wmi handle
- * @scan_period: scan period
- * @scan_age: scan age
- * @vdev_id: vdev id
+ * @param: pointer to roam scan period params to be sent to fw
  *
  * Send WMI_ROAM_SCAN_PERIOD parameters to fw.
  *
  * Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
  */
-QDF_STATUS wmi_unified_roam_scan_offload_scan_period(void *wmi_hdl,
-						     uint32_t scan_period,
-						     uint32_t scan_age,
-						     uint32_t vdev_id);
+QDF_STATUS
+wmi_unified_roam_scan_offload_scan_period(wmi_unified_t wmi_handle,
+					  struct roam_scan_period_params *param);
 
 /**
  * wmi_unified_roam_scan_offload_chan_list_cmd() - set roam offload channel list
@@ -307,6 +304,29 @@ QDF_STATUS wmi_unified_send_btm_config(void *wmi_hdl,
  */
 QDF_STATUS wmi_unified_send_bss_load_config(void *wmi_hdl,
 					    struct wmi_bss_load_config *params);
+
+/**
+ * wmi_unified_send_disconnect_roam_params() - Send disconnect roam trigger
+ * parameters to firmware
+ * @wmi_hdl:  wmi handle
+ * @params: pointer to wmi_disconnect_roam_params
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+wmi_unified_send_disconnect_roam_params(wmi_unified_t wmi_handle,
+					struct wmi_disconnect_roam_params *req);
+
+/**
+ * wmi_unified_send_idle_roam_params() - Send idle roam trigger params to fw
+ * @wmi_hdl:  wmi handle
+ * @params: pointer to wmi_idle_roam_params
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+wmi_unified_send_idle_roam_params(wmi_unified_t wmi_handle,
+				  struct wmi_idle_roam_params *req);
 
 /**
  * wmi_unified_offload_11k_cmd() - send 11k offload command

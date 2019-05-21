@@ -79,7 +79,7 @@ static void wlan_fill_scan_rand_attrs(struct wlan_objmgr_vdev *vdev,
 	if (wlan_vdev_mlme_get_opmode(vdev) != QDF_STA_MODE)
 		return;
 
-	if (wlan_vdev_is_connected(vdev))
+	if (wlan_vdev_is_up(vdev) == QDF_STATUS_SUCCESS)
 		return;
 
 	*randomize = true;
@@ -1402,7 +1402,7 @@ int wlan_cfg80211_scan(struct wlan_objmgr_vdev *vdev,
 		is_p2p_scan = true;
 
 	if (is_p2p_scan && request->no_cck)
-		req->scan_req.p2p_scan_type = SCAN_P2P_SEARCH;
+		req->scan_req.scan_type = SCAN_TYPE_P2P_SEARCH;
 
 	/* Set dwell time mode according to scan policy type flags */
 	if (req->scan_req.scan_policy_high_accuracy)

@@ -69,6 +69,13 @@
 /* Extender vendor specific IE */
 #define QCA_OUI_EXTENDER_TYPE           0x03
 
+#define ADAPTIVE_11R_OUI      0x964000
+#define ADAPTIVE_11R_OUI_TYPE 0x2C
+
+#define OUI_LENGTH              4
+#define OUI_TYPE_BITS           24
+#define MAX_ADAPTIVE_11R_IE_LEN 8
+
 /* Temporary vendor specific IE for 11n pre-standard interoperability */
 #define VENDOR_HT_OUI       0x00904c
 #define VENDOR_HT_CAP_ID    51
@@ -97,7 +104,9 @@
 /* Individual element IEs length checks */
 
 #define WLAN_SUPPORTED_RATES_IE_MAX_LEN          12
+#define WLAN_FH_PARAM_IE_MAX_LEN                 5
 #define WLAN_DS_PARAM_IE_MAX_LEN                 1
+#define WLAN_CF_PARAM_IE_MAX_LEN                 6
 #define WLAN_COUNTRY_IE_MIN_LEN                  3
 #define WLAN_QUIET_IE_MAX_LEN                    6
 #define WLAN_CSA_IE_MAX_LEN                      3
@@ -109,6 +118,9 @@
 #define WLAN_MOBILITY_DOMAIN_IE_MAX_LEN          3
 #define WLAN_OPMODE_IE_MAX_LEN                   1
 #define WLAN_IBSSDFS_IE_MIN_LEN                  7
+#define WLAN_IBSS_IE_MAX_LEN                     2
+#define WLAN_REQUEST_IE_MAX_LEN                  255
+#define WLAN_RM_CAPABILITY_IE_MAX_LEN            5
 
 /* HT capability flags */
 #define WLAN_HTCAP_C_ADVCODING             0x0001
@@ -289,8 +301,10 @@ enum element_ie {
 	WLAN_ELEMID_TIM              = 5,
 	WLAN_ELEMID_IBSSPARMS        = 6,
 	WLAN_ELEMID_COUNTRY          = 7,
+	/* 8-9 reserved */
 	WLAN_ELEMID_REQINFO          = 10,
 	WLAN_ELEMID_QBSS_LOAD        = 11,
+	WLAN_ELEMID_EDCAPARMS        = 12,
 	WLAN_ELEMID_TCLAS            = 14,
 	WLAN_ELEMID_CHALLENGE        = 16,
 	/* 17-31 reserved for challenge text extension */
@@ -307,6 +321,7 @@ enum element_ie {
 	WLAN_ELEMID_ERP              = 42,
 	WLAN_ELEMID_TCLAS_PROCESS    = 44,
 	WLAN_ELEMID_HTCAP_ANA        = 45,
+	WLAN_ELEMID_QOS_CAPABILITY   = 46,
 	WLAN_ELEMID_RSN              = 48,
 	WLAN_ELEMID_XRATES           = 50,
 	WLAN_ELEMID_HTCAP_VENDOR     = 51,
@@ -1424,6 +1439,21 @@ is_extender_oui(uint8_t *frm)
 {
 	return (frm[1] > 4) && (LE_READ_4(frm + 2) ==
 		((QCA_OUI_EXTENDER_TYPE << 24) | QCA_OUI));
+}
+
+/**
+ * is_adaptive_11r_oui() - Function to check if vendor IE is ADAPTIVE 11R OUI
+ * @frm: vendor IE pointer
+ *
+ * API to check if vendor IE is ADAPTIVE 11R OUI
+ *
+ * Return: true if its ADAPTIVE 11r OUI
+ */
+static inline bool
+is_adaptive_11r_oui(uint8_t *frm)
+{
+	return (frm[1] > OUI_LENGTH) && (LE_READ_4(frm + 2) ==
+		((ADAPTIVE_11R_OUI_TYPE << OUI_TYPE_BITS) | ADAPTIVE_11R_OUI));
 }
 
 /**

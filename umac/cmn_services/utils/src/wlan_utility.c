@@ -251,6 +251,8 @@ QDF_STATUS wlan_util_is_vdev_active(struct wlan_objmgr_pdev *pdev,
 	return QDF_STATUS_E_INVAL;
 }
 
+qdf_export_symbol(wlan_util_is_vdev_active);
+
 #ifdef CMN_VDEV_MLME_SM_ENABLE
 void wlan_util_change_map_index(unsigned long *map, uint8_t id, uint8_t set)
 {
@@ -510,3 +512,45 @@ wlan_util_stats_get_rssi(bool db2dbm_enabled, int32_t bcn_snr, int32_t dat_snr,
 		*rssi = snr + TGT_NOISE_FLOOR_DBM;
 	}
 }
+
+/**
+ * wlan_util_get_mode_specific_peer_count - This api gives vdev mode specific
+ * peer count`
+ * @pdev: PDEV object
+ * @object: vdev object
+ * @arg: argument passed by caller
+ *
+ * Return: void
+ */
+static void
+wlan_util_get_mode_specific_peer_count(struct wlan_objmgr_pdev *pdev,
+				       void *object, void *arg)
+{
+	struct wlan_objmgr_vdev *vdev = object;
+	uint16_t temp_count = 0;
+	struct wlan_op_mode_peer_count *count = arg;
+
+	wlan_vdev_obj_lock(vdev);
+	if (wlan_vdev_mlme_get_opmode(vdev) == count->opmode) {
+		temp_count = wlan_vdev_get_peer_count(vdev);
+		/* Decrement the self peer count */
+		if (temp_count > 1)
+			count->peer_count += (temp_count - 1);
+	}
+	wlan_vdev_obj_unlock(vdev);
+}
+
+uint16_t wlan_util_get_peer_count_for_mode(struct wlan_objmgr_pdev *pdev,
+					   enum QDF_OPMODE mode)
+{
+	struct wlan_op_mode_peer_count count;
+
+	count.opmode = mode;
+	count.peer_count = 0;
+	wlan_objmgr_pdev_iterate_obj_list(pdev, WLAN_VDEV_OP,
+				wlan_util_get_mode_specific_peer_count, &count,
+				0, WLAN_OBJMGR_ID);
+
+	return count.peer_count;
+}
+

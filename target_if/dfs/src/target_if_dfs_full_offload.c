@@ -274,6 +274,7 @@ static int target_if_dfs_reg_ocac_event(struct wlan_objmgr_psoc *psoc)
 }
 #endif
 
+#if defined(WLAN_DFS_FULL_OFFLOAD)
 QDF_STATUS target_if_dfs_reg_offload_events(
 		struct wlan_objmgr_psoc *psoc)
 {
@@ -299,6 +300,7 @@ QDF_STATUS target_if_dfs_reg_offload_events(
 	else
 		return QDF_STATUS_SUCCESS;
 }
+#endif
 
 #if defined(QCA_SUPPORT_AGILE_DFS)
 QDF_STATUS target_send_ocac_abort_cmd(struct wlan_objmgr_pdev *pdev)
@@ -388,7 +390,8 @@ free_vdevref:
 }
 #endif
 
-#if (defined(CONFIG_MCL) || (QCA_WIFI_QCA8074))
+#if (defined(CONFIG_MCL) || defined(QCA_WIFI_QCA8074) || \
+	defined(QCA_WIFI_QCA6018))
 QDF_STATUS target_process_bang_radar_cmd(
 		struct wlan_objmgr_pdev *pdev,
 		struct dfs_emulate_bang_radar_test_cmd *dfs_unit_test)

@@ -1144,28 +1144,186 @@ void dp_rx_compute_delay(struct dp_vdev *vdev, qdf_nbuf_t nbuf)
 	vdev->prev_rx_deliver_tstamp = current_ts;
 }
 
+/**
+ * dp_rx_drop_nbuf_list() - drop an nbuf list
+ * @pdev: dp pdev reference
+ * @buf_list: buffer list to be dropepd
+ *
+ * Return: int (number of bufs dropped)
+ */
+static inline int dp_rx_drop_nbuf_list(struct dp_pdev *pdev,
+				       qdf_nbuf_t buf_list)
+{
+	struct cdp_tid_rx_stats *stats = NULL;
+	uint8_t tid = 0;
+	int num_dropped = 0;
+	qdf_nbuf_t buf, next_buf;
+
+	buf = buf_list;
+	while (buf) {
+		next_buf = qdf_nbuf_queue_next(buf);
+		tid = qdf_nbuf_get_priority(buf);
+		stats = &pdev->stats.tid_stats.tid_rx_stats[tid];
+		stats->fail_cnt[INVALID_PEER_VDEV]++;
+		stats->delivered_to_stack--;
+		qdf_nbuf_free(buf);
+		buf = next_buf;
+		num_dropped++;
+	}
+
+	return num_dropped;
+}
+
+#ifdef PEER_CACHE_RX_PKTS
+/**
+ * dp_rx_flush_rx_cached() - flush cached rx frames
+ * @peer: peer
+ * @drop: flag to drop frames or forward to net stack
+ *
+ * Return: None
+ */
+void dp_rx_flush_rx_cached(struct dp_peer *peer, bool drop)
+{
+	struct dp_peer_cached_bufq *bufqi;
+	struct dp_rx_cached_buf *cache_buf = NULL;
+	ol_txrx_rx_fp data_rx = NULL;
+	int num_buff_elem;
+	QDF_STATUS status;
+
+	if (qdf_atomic_inc_return(&peer->flush_in_progress) > 1) {
+		qdf_atomic_dec(&peer->flush_in_progress);
+		return;
+	}
+
+	qdf_spin_lock_bh(&peer->peer_info_lock);
+	if (peer->state >= OL_TXRX_PEER_STATE_CONN && peer->vdev->osif_rx)
+		data_rx = peer->vdev->osif_rx;
+	else
+		drop = true;
+	qdf_spin_unlock_bh(&peer->peer_info_lock);
+
+	bufqi = &peer->bufq_info;
+
+	qdf_spin_lock_bh(&bufqi->bufq_lock);
+	if (qdf_list_empty(&bufqi->cached_bufq)) {
+		qdf_spin_unlock_bh(&bufqi->bufq_lock);
+		return;
+	}
+	qdf_list_remove_front(&bufqi->cached_bufq,
+			      (qdf_list_node_t **)&cache_buf);
+	while (cache_buf) {
+		num_buff_elem = QDF_NBUF_CB_RX_NUM_ELEMENTS_IN_LIST(
+								cache_buf->buf);
+		bufqi->entries -= num_buff_elem;
+		qdf_spin_unlock_bh(&bufqi->bufq_lock);
+		if (drop) {
+			bufqi->dropped = dp_rx_drop_nbuf_list(peer->vdev->pdev,
+							      cache_buf->buf);
+		} else {
+			/* Flush the cached frames to OSIF DEV */
+			status = data_rx(peer->vdev->osif_vdev, cache_buf->buf);
+			if (status != QDF_STATUS_SUCCESS)
+				bufqi->dropped = dp_rx_drop_nbuf_list(
+							peer->vdev->pdev,
+							cache_buf->buf);
+		}
+		qdf_mem_free(cache_buf);
+		cache_buf = NULL;
+		qdf_spin_lock_bh(&bufqi->bufq_lock);
+		qdf_list_remove_front(&bufqi->cached_bufq,
+				      (qdf_list_node_t **)&cache_buf);
+	}
+	qdf_spin_unlock_bh(&bufqi->bufq_lock);
+	qdf_atomic_dec(&peer->flush_in_progress);
+}
+
+/**
+ * dp_rx_enqueue_rx() - cache rx frames
+ * @peer: peer
+ * @rx_buf_list: cache buffer list
+ *
+ * Return: None
+ */
+static QDF_STATUS
+dp_rx_enqueue_rx(struct dp_peer *peer, qdf_nbuf_t rx_buf_list)
+{
+	struct dp_rx_cached_buf *cache_buf;
+	struct dp_peer_cached_bufq *bufqi = &peer->bufq_info;
+	int num_buff_elem;
+
+	QDF_TRACE_DEBUG_RL(QDF_MODULE_ID_TXRX, "bufq->curr %d bufq->drops %d",
+			   bufqi->entries, bufqi->dropped);
+
+	if (!peer->valid) {
+		bufqi->dropped = dp_rx_drop_nbuf_list(peer->vdev->pdev,
+						      rx_buf_list);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	qdf_spin_lock_bh(&bufqi->bufq_lock);
+	if (bufqi->entries >= bufqi->thresh) {
+		bufqi->dropped = dp_rx_drop_nbuf_list(peer->vdev->pdev,
+						      rx_buf_list);
+		qdf_spin_unlock_bh(&bufqi->bufq_lock);
+		return QDF_STATUS_E_RESOURCES;
+	}
+	qdf_spin_unlock_bh(&bufqi->bufq_lock);
+
+	num_buff_elem = QDF_NBUF_CB_RX_NUM_ELEMENTS_IN_LIST(rx_buf_list);
+
+	cache_buf = qdf_mem_malloc_atomic(sizeof(*cache_buf));
+	if (!cache_buf) {
+		QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_ERROR,
+			  "Failed to allocate buf to cache rx frames");
+		bufqi->dropped = dp_rx_drop_nbuf_list(peer->vdev->pdev,
+						      rx_buf_list);
+		return QDF_STATUS_E_NOMEM;
+	}
+
+	cache_buf->buf = rx_buf_list;
+
+	qdf_spin_lock_bh(&bufqi->bufq_lock);
+	qdf_list_insert_back(&bufqi->cached_bufq,
+			     &cache_buf->node);
+	bufqi->entries += num_buff_elem;
+	qdf_spin_unlock_bh(&bufqi->bufq_lock);
+
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline
+bool dp_rx_is_peer_cache_bufq_supported(void)
+{
+	return true;
+}
+#else
+static inline
+bool dp_rx_is_peer_cache_bufq_supported(void)
+{
+	return false;
+}
+
+static inline QDF_STATUS
+dp_rx_enqueue_rx(struct dp_peer *peer, qdf_nbuf_t rx_buf_list)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
+
 static inline void dp_rx_deliver_to_stack(struct dp_vdev *vdev,
 						struct dp_peer *peer,
 						qdf_nbuf_t nbuf_head,
 						qdf_nbuf_t nbuf_tail)
 {
-	struct cdp_tid_rx_stats *stats = NULL;
-	uint8_t tid = 0;
 	/*
 	 * highly unlikely to have a vdev without a registered rx
 	 * callback function. if so let us free the nbuf_list.
 	 */
 	if (qdf_unlikely(!vdev->osif_rx)) {
-		qdf_nbuf_t nbuf;
-		do {
-			nbuf = nbuf_head;
-			nbuf_head = nbuf_head->next;
-			tid = qdf_nbuf_get_priority(nbuf);
-			stats = &vdev->pdev->stats.tid_stats.tid_rx_stats[tid];
-			stats->fail_cnt[INVALID_PEER_VDEV]++;
-			stats->delivered_to_stack--;
-			qdf_nbuf_free(nbuf);
-		} while (nbuf_head);
+		if (dp_rx_is_peer_cache_bufq_supported())
+			dp_rx_enqueue_rx(peer, nbuf_head);
+		else
+			dp_rx_drop_nbuf_list(vdev->pdev, nbuf_head);
 
 		return;
 	}
@@ -1177,7 +1335,6 @@ static inline void dp_rx_deliver_to_stack(struct dp_vdev *vdev,
 	}
 
 	vdev->osif_rx(vdev->osif_vdev, nbuf_head);
-
 }
 
 /**
@@ -1272,7 +1429,15 @@ static void dp_rx_msdu_stats_update(struct dp_soc *soc,
 	pkt_type = hal_rx_msdu_start_get_pkt_type(rx_tlv_hdr);
 
 	DP_STATS_INC(peer, rx.bw[bw], 1);
-	DP_STATS_INC(peer, rx.nss[nss], 1);
+	/*
+	 * only if nss > 0 and pkt_type is 11N/AC/AX,
+	 * then increase index [nss - 1] in array counter.
+	 */
+	if (nss > 0 && (pkt_type == DOT11_N ||
+			pkt_type == DOT11_AC ||
+			pkt_type == DOT11_AX))
+		DP_STATS_INC(peer, rx.nss[nss - 1], 1);
+
 	DP_STATS_INC(peer, rx.sgi_count[sgi], 1);
 	DP_STATS_INCC(peer, rx.err.mic_err, 1,
 		      hal_rx_mpdu_end_mic_err_get(rx_tlv_hdr));
@@ -1708,7 +1873,7 @@ done:
 					QDF_TRACE_LEVEL_INFO);
 			tid_stats->fail_cnt[MSDU_DONE_FAILURE]++;
 			qdf_nbuf_free(nbuf);
-			qdf_assert_always(0);
+			qdf_assert(0);
 			nbuf = next;
 			continue;
 		}
@@ -1856,6 +2021,10 @@ done:
 
 		dp_set_rx_queue(nbuf, ring_id);
 
+		/* Update the protocol tag in SKB based on CCE metadata */
+		dp_rx_update_protocol_tag(soc, vdev, nbuf, rx_tlv_hdr,
+					  reo_ring_num, false, true);
+
 		/*
 		 * HW structures call this L3 header padding --
 		 * even though this is actually the offset from
@@ -1988,6 +2157,130 @@ dp_rx_pdev_detach(struct dp_pdev *pdev)
 	return;
 }
 
+static QDF_STATUS
+dp_pdev_rx_buffers_attach(struct dp_soc *dp_soc, uint32_t mac_id,
+			  struct dp_srng *dp_rxdma_srng,
+			  struct rx_desc_pool *rx_desc_pool,
+			  uint32_t num_req_buffers,
+			  union dp_rx_desc_list_elem_t **desc_list,
+			  union dp_rx_desc_list_elem_t **tail)
+{
+	struct dp_pdev *dp_pdev = dp_get_pdev_for_mac_id(dp_soc, mac_id);
+	void *rxdma_srng = dp_rxdma_srng->hal_srng;
+	union dp_rx_desc_list_elem_t *next;
+	void *rxdma_ring_entry;
+	qdf_dma_addr_t paddr;
+	void **rx_nbuf_arr;
+	uint32_t nr_descs;
+	uint32_t nr_nbuf;
+	qdf_nbuf_t nbuf;
+	QDF_STATUS ret;
+	int i;
+
+	if (qdf_unlikely(!rxdma_srng)) {
+		DP_STATS_INC(dp_pdev, replenish.rxdma_err, num_req_buffers);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_DEBUG,
+		  "requested %u RX buffers for driver attach", num_req_buffers);
+
+	nr_descs = dp_rx_get_free_desc_list(dp_soc, mac_id, rx_desc_pool,
+					    num_req_buffers, desc_list, tail);
+	if (!nr_descs) {
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+			  "no free rx_descs in freelist");
+		DP_STATS_INC(dp_pdev, err.desc_alloc_fail, num_req_buffers);
+		return QDF_STATUS_E_NOMEM;
+	}
+
+	QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_DEBUG,
+		  "got %u RX descs for driver attach", nr_descs);
+
+	rx_nbuf_arr = qdf_mem_malloc(nr_descs * sizeof(*rx_nbuf_arr));
+	if (!rx_nbuf_arr) {
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+			  "failed to allocate nbuf array");
+		DP_STATS_INC(dp_pdev, replenish.rxdma_err, num_req_buffers);
+		return QDF_STATUS_E_NOMEM;
+	}
+
+	for (nr_nbuf = 0; nr_nbuf < nr_descs; nr_nbuf++) {
+		nbuf = qdf_nbuf_alloc(dp_soc->osdev, RX_BUFFER_SIZE,
+				      RX_BUFFER_RESERVATION,
+				      RX_BUFFER_ALIGNMENT,
+				      FALSE);
+		if (!nbuf) {
+			QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+				  "nbuf alloc failed");
+			DP_STATS_INC(dp_pdev, replenish.nbuf_alloc_fail, 1);
+			break;
+		}
+
+		ret = qdf_nbuf_map_single(dp_soc->osdev, nbuf,
+					  QDF_DMA_BIDIRECTIONAL);
+		if (qdf_unlikely(QDF_IS_STATUS_ERROR(ret))) {
+			qdf_nbuf_free(nbuf);
+			QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+				  "nbuf map failed");
+			DP_STATS_INC(dp_pdev, replenish.map_err, 1);
+			break;
+		}
+
+		paddr = qdf_nbuf_get_frag_paddr(nbuf, 0);
+
+		ret = check_x86_paddr(dp_soc, &nbuf, &paddr, dp_pdev);
+		if (ret == QDF_STATUS_E_FAILURE) {
+			qdf_nbuf_unmap_single(dp_soc->osdev, nbuf,
+					      QDF_DMA_BIDIRECTIONAL);
+			qdf_nbuf_free(nbuf);
+			QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+				  "nbuf check x86 failed");
+			DP_STATS_INC(dp_pdev, replenish.x86_fail, 1);
+			break;
+		}
+
+		rx_nbuf_arr[nr_nbuf] = (void *)nbuf;
+	}
+
+	QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_DEBUG,
+		  "allocated %u nbuf for driver attach", nr_nbuf);
+
+	hal_srng_access_start(dp_soc->hal_soc, rxdma_srng);
+
+	for (i = 0; i < nr_nbuf; i++) {
+		rxdma_ring_entry = hal_srng_src_get_next(dp_soc->hal_soc,
+							 rxdma_srng);
+		qdf_assert_always(rxdma_ring_entry);
+
+		next = (*desc_list)->next;
+		nbuf = rx_nbuf_arr[i];
+		paddr = qdf_nbuf_get_frag_paddr(nbuf, 0);
+
+		dp_rx_desc_prep(&((*desc_list)->rx_desc), nbuf);
+		(*desc_list)->rx_desc.in_use = 1;
+
+		hal_rxdma_buff_addr_info_set(rxdma_ring_entry, paddr,
+					     (*desc_list)->rx_desc.cookie,
+					     rx_desc_pool->owner);
+
+		dp_ipa_handle_rx_buf_smmu_mapping(dp_soc, nbuf, true);
+
+		*desc_list = next;
+	}
+
+	hal_srng_access_end(dp_soc->hal_soc, rxdma_srng);
+
+	QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_DEBUG,
+		  "filled %u RX buffers for driver attach", nr_nbuf);
+	DP_STATS_INC_PKT(dp_pdev, replenish.pkts, nr_nbuf, RX_BUFFER_SIZE *
+			 nr_nbuf);
+
+	qdf_mem_free(rx_nbuf_arr);
+
+	return QDF_STATUS_SUCCESS;
+}
+
 /**
  * dp_rx_attach() - attach DP RX
  * @pdev: core txrx pdev context
@@ -2030,10 +2323,9 @@ dp_rx_pdev_attach(struct dp_pdev *pdev)
 	rx_desc_pool->owner = DP_WBM2SW_RBM;
 	/* For Rx buffers, WBM release ring is SW RING 3,for all pdev's */
 
-	dp_rx_buffers_replenish(soc, pdev_id, dp_rxdma_srng, rx_desc_pool,
-				0, &desc_list, &tail);
-
-	return QDF_STATUS_SUCCESS;
+	return dp_pdev_rx_buffers_attach(soc, pdev_id, dp_rxdma_srng,
+					 rx_desc_pool, rxdma_entries - 1,
+					 &desc_list, &tail);
 }
 
 /*

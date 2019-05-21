@@ -32,6 +32,26 @@
 #include "dp_ratetable.h"
 #endif
 
+#ifdef WLAN_RX_PKT_CAPTURE_ENH
+#include "dp_rx_mon_feature.h"
+#else
+static QDF_STATUS
+dp_rx_handle_enh_capture(struct dp_soc *soc, struct dp_pdev *pdev,
+			 struct hal_rx_ppdu_info *ppdu_info)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static void
+dp_rx_mon_enh_capture_process(struct dp_pdev *pdev, uint32_t tlv_status,
+			      qdf_nbuf_t status_nbuf,
+			      struct hal_rx_ppdu_info *ppdu_info,
+			      bool *nbuf_used,
+			      uint32_t rx_enh_capture_mode)
+{
+}
+#endif
+
 /**
 * dp_rx_populate_cdp_indication_ppdu() - Populate cdp rx indication structure
 * @pdev: pdev ctx
@@ -86,8 +106,8 @@ dp_rx_populate_cdp_indication_ppdu(struct dp_pdev *pdev,
 			cdp_rx_ppdu->udp_msdu_count +
 			cdp_rx_ppdu->other_msdu_count);
 	cdp_rx_ppdu->num_bytes = ppdu_info->rx_status.ppdu_len;
-	if (CDP_FC_IS_RETRY_SET(cdp_rx_ppdu->frame_ctrl))
-		cdp_rx_ppdu->retries += ppdu_info->com_info.mpdu_cnt_fcs_ok;
+	cdp_rx_ppdu->retries = CDP_FC_IS_RETRY_SET(cdp_rx_ppdu->frame_ctrl) ?
+					ppdu_info->com_info.mpdu_cnt_fcs_ok : 0;
 
 	if (ppdu_info->com_info.mpdu_cnt_fcs_ok > 1)
 		cdp_rx_ppdu->is_ampdu = 1;
@@ -168,6 +188,7 @@ static inline void dp_rx_rate_stats_update(struct dp_peer *peer,
 	dp_ath_rate_lpf(peer->stats.rx.avg_rx_rate, ratekbps);
 	ppdu_rx_rate = dp_ath_rate_out(peer->stats.rx.avg_rx_rate);
 	DP_STATS_UPD(peer, rx.rnd_avg_rx_rate, ppdu_rx_rate);
+	ppdu->rx_ratekbps = ratekbps;
 
 	if (peer->vdev)
 		peer->vdev->stats.rx.last_rx_rate = ratekbps;
@@ -199,6 +220,11 @@ static void dp_rx_stats_update(struct dp_pdev *pdev, struct dp_peer *peer,
 		return;
 
 	DP_STATS_UPD(peer, rx.rssi, ppdu->rssi);
+	if (peer->stats.rx.avg_rssi == INVALID_RSSI)
+		peer->stats.rx.avg_rssi = ppdu->rssi;
+	else
+		peer->stats.rx.avg_rssi =
+			DP_GET_AVG_RSSI(peer->stats.rx.avg_rssi, ppdu->rssi);
 
 	if ((preamble == DOT11_A) || (preamble == DOT11_B))
 		ppdu->u.nss = 1;
@@ -526,9 +552,13 @@ dp_rx_mon_status_process_tlv(struct dp_soc *soc, uint32_t mac_id,
 	uint8_t *rx_tlv_start;
 	uint32_t tlv_status = HAL_TLV_STATUS_BUF_DONE;
 	QDF_STATUS m_copy_status = QDF_STATUS_SUCCESS;
+	QDF_STATUS enh_log_status = QDF_STATUS_SUCCESS;
 	struct cdp_pdev_mon_stats *rx_mon_stats;
 	int smart_mesh_status;
 	enum WDI_EVENT pktlog_mode = WDI_NO_VAL;
+	bool nbuf_used;
+	uint32_t rx_enh_capture_mode;
+
 
 	ppdu_info = &pdev->ppdu_info;
 	rx_mon_stats = &pdev->rx_mon_stats;
@@ -536,16 +566,19 @@ dp_rx_mon_status_process_tlv(struct dp_soc *soc, uint32_t mac_id,
 	if (pdev->mon_ppdu_status != DP_PPDU_STATUS_START)
 		return;
 
+	rx_enh_capture_mode = pdev->rx_enh_capture_mode;
+
 	while (!qdf_nbuf_is_queue_empty(&pdev->rx_status_q)) {
 
 		status_nbuf = qdf_nbuf_queue_remove(&pdev->rx_status_q);
 
 		rx_tlv = qdf_nbuf_data(status_nbuf);
 		rx_tlv_start = rx_tlv;
+		nbuf_used = false;
 
 		if ((pdev->monitor_vdev) || (pdev->enhanced_stats_en) ||
-				pdev->mcopy_mode) {
-
+		    pdev->mcopy_mode ||
+		    (rx_enh_capture_mode != CDP_RX_ENH_CAPTURE_DISABLED)) {
 			do {
 				tlv_status = hal_rx_status_get_tlv_info(rx_tlv,
 						ppdu_info, pdev->soc->hal_soc);
@@ -553,12 +586,18 @@ dp_rx_mon_status_process_tlv(struct dp_soc *soc, uint32_t mac_id,
 				dp_rx_mon_update_dbg_ppdu_stats(ppdu_info,
 								rx_mon_stats);
 
+				dp_rx_mon_enh_capture_process(pdev, tlv_status,
+					status_nbuf, ppdu_info,
+					&nbuf_used, rx_enh_capture_mode);
+
 				rx_tlv = hal_rx_status_get_next_tlv(rx_tlv);
 
 				if ((rx_tlv - rx_tlv_start) >= RX_BUFFER_SIZE)
 					break;
 
-			} while (tlv_status == HAL_TLV_STATUS_PPDU_NOT_DONE);
+			} while ((tlv_status == HAL_TLV_STATUS_PPDU_NOT_DONE) ||
+				 (tlv_status == HAL_TLV_STATUS_HEADER) ||
+				 (tlv_status == HAL_TLV_STATUS_MPDU_END));
 		}
 		if (pdev->dp_peer_based_pktlog) {
 			dp_rx_process_peer_based_pktlog(soc, ppdu_info,
@@ -588,6 +627,14 @@ dp_rx_mon_status_process_tlv(struct dp_soc *soc, uint32_t mac_id,
 						pdev, ppdu_info, status_nbuf);
 			if (m_copy_status == QDF_STATUS_SUCCESS)
 				qdf_nbuf_free(status_nbuf);
+		} else if (rx_enh_capture_mode != CDP_RX_ENH_CAPTURE_DISABLED) {
+			if (!nbuf_used)
+				qdf_nbuf_free(status_nbuf);
+
+			if (tlv_status == HAL_TLV_STATUS_PPDU_DONE)
+				enh_log_status =
+				dp_rx_handle_enh_capture(soc,
+							 pdev, ppdu_info);
 		} else {
 			qdf_nbuf_free(status_nbuf);
 		}
@@ -1017,6 +1064,7 @@ dp_rx_pdev_mon_status_attach(struct dp_pdev *pdev, int ring_id) {
 	union dp_rx_desc_list_elem_t *tail = NULL;
 	struct dp_srng *mon_status_ring;
 	uint32_t num_entries;
+	uint32_t i;
 	struct rx_desc_pool *rx_desc_pool;
 	QDF_STATUS status;
 	int mac_for_pdev = dp_get_mac_id_for_mac(soc, ring_id);
@@ -1059,6 +1107,14 @@ dp_rx_pdev_mon_status_attach(struct dp_pdev *pdev, int ring_id) {
 
 	dp_rx_mon_init_dbg_ppdu_stats(&pdev->ppdu_info,
 				      &pdev->rx_mon_stats);
+
+	for (i = 0; i < MAX_MU_USERS; i++) {
+		qdf_nbuf_queue_init(&pdev->mpdu_q[i]);
+		pdev->is_mpdu_hdr[i] = true;
+	}
+	qdf_mem_zero(pdev->msdu_list, sizeof(pdev->msdu_list[MAX_MU_USERS]));
+
+	pdev->rx_enh_capture_mode = CDP_RX_ENH_CAPTURE_DISABLED;
 
 	return QDF_STATUS_SUCCESS;
 }

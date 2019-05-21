@@ -129,7 +129,7 @@ dp_tx_rate_stats_update(struct dp_peer *peer,
 			struct cdp_tx_completion_ppdu_user *ppdu)
 {
 	uint32_t ratekbps = 0;
-	uint32_t ppdu_tx_rate = 0;
+	uint64_t ppdu_tx_rate = 0;
 	uint32_t rix;
 
 	if (!peer || !ppdu)
@@ -149,6 +149,7 @@ dp_tx_rate_stats_update(struct dp_peer *peer,
 		return;
 
 	ppdu->rix = rix;
+	ppdu->tx_ratekbps = ratekbps;
 	peer->stats.tx.avg_tx_rate =
 		dp_ath_rate_lpf(peer->stats.tx.avg_tx_rate, ratekbps);
 	ppdu_tx_rate = dp_ath_rate_out(peer->stats.tx.avg_tx_rate);
@@ -269,6 +270,8 @@ static void dp_tx_stats_update(struct dp_soc *soc, struct dp_peer *peer,
 	DP_STATS_INCC(peer,
 			tx.pkt_type[preamble].mcs_count[mcs], num_msdu,
 			((mcs < (MAX_MCS - 1)) && (preamble == DOT11_AX)));
+	DP_STATS_INCC(peer, tx.ampdu_cnt, num_msdu, ppdu->is_ampdu);
+	DP_STATS_INCC(peer, tx.non_ampdu_cnt, num_msdu, !(ppdu->is_ampdu));
 
 	dp_peer_stats_notify(peer);
 
@@ -2599,6 +2602,7 @@ void dp_ppdu_desc_deliver(struct dp_pdev *pdev,
 		if (!peer)
 			continue;
 
+		ppdu_desc->user[i].cookie = (void *)peer->wlanstats_ctx;
 		if (ppdu_desc->user[i].completion_status !=
 		    HTT_PPDU_STATS_USER_STATUS_OK)
 			tlv_bitmap_expected = tlv_bitmap_expected & 0xFF;
@@ -2607,14 +2611,19 @@ void dp_ppdu_desc_deliver(struct dp_pdev *pdev,
 			dp_peer_unref_del_find_by_id(peer);
 			continue;
 		}
-		if (ppdu_desc->user[i].tid < CDP_DATA_TID_MAX) {
+		/**
+		 * Update tx stats for data frames having Qos as well as
+		 * non-Qos data tid
+		 */
+		if ((ppdu_desc->user[i].tid < CDP_DATA_TID_MAX ||
+		     (ppdu_desc->user[i].tid == CDP_DATA_NON_QOS_TID)) &&
+		      (ppdu_desc->frame_type == CDP_PPDU_FTYPE_DATA)) {
 
 			dp_tx_stats_update(pdev->soc, peer,
 					&ppdu_desc->user[i],
 					ppdu_desc->ack_rssi);
 		}
 
-		ppdu_desc->user[i].cookie = (void *)peer->wlanstats_ctx;
 		dp_tx_rate_stats_update(peer, &ppdu_desc->user[i]);
 		dp_peer_unref_del_find_by_id(peer);
 		tlv_bitmap_expected = tlv_bitmap_default;

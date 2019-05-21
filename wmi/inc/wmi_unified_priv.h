@@ -418,6 +418,9 @@ QDF_STATUS (*send_modem_power_state_cmd)(wmi_unified_t wmi_handle,
 QDF_STATUS (*send_set_sta_ps_mode_cmd)(wmi_unified_t wmi_handle,
 			       uint32_t vdev_id, uint8_t val);
 
+QDF_STATUS (*send_idle_roam_monitor_cmd)(wmi_unified_t wmi_handle,
+					 uint8_t val);
+
 QDF_STATUS (*send_get_temperature_cmd)(wmi_unified_t wmi_handle);
 
 #ifdef CONVERGED_P2P_ENABLE
@@ -550,9 +553,7 @@ QDF_STATUS (*send_roam_scan_offload_cmd)(wmi_unified_t wmi_handle,
 				 uint32_t command, uint32_t vdev_id);
 
 QDF_STATUS (*send_roam_scan_offload_scan_period_cmd)(wmi_unified_t wmi_handle,
-				     uint32_t scan_period,
-				     uint32_t scan_age,
-				     uint32_t vdev_id);
+					struct roam_scan_period_params *params);
 
 QDF_STATUS (*send_roam_scan_offload_chan_list_cmd)(wmi_unified_t wmi_handle,
 				   uint8_t chan_count,
@@ -576,6 +577,13 @@ QDF_STATUS (*send_invoke_neighbor_report_cmd)(wmi_unified_t wmi_handle,
 
 QDF_STATUS (*send_roam_bss_load_config)(wmi_unified_t wmi_handle,
 					struct wmi_bss_load_config *params);
+
+QDF_STATUS (*send_disconnect_roam_params)(
+			wmi_unified_t wmi_handle,
+			struct wmi_disconnect_roam_params *req);
+
+QDF_STATUS (*send_idle_roam_params)(wmi_unified_t wmi_handle,
+				    struct wmi_idle_roam_params *req);
 
 QDF_STATUS (*send_btm_config)(wmi_unified_t wmi_handle,
 			      struct wmi_btm_config *params);
@@ -1930,6 +1938,11 @@ QDF_STATUS (*send_vdev_tidmap_prec_cmd)(wmi_unified_t wmi_handle,
 #endif
 QDF_STATUS (*send_mws_coex_status_req_cmd)(wmi_unified_t wmi_handle,
 					   uint32_t vdev_id, uint32_t cmd_id);
+
+#ifdef WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG
+QDF_STATUS (*set_rx_pkt_type_routing_tag_cmd)(
+	wmi_unified_t wmi_hdl, struct wmi_rx_pkt_protocol_routing_info *param);
+#endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
 };
 
 /* Forward declartion for psoc*/

@@ -38,6 +38,11 @@ struct mlme_mac_ssid {
 	uint8_t mac_ssid[WLAN_SSID_MAX_LEN];
 } qdf_packed;
 
+/** slot time long */
+#define WLAN_MLME_VDEV_SLOT_TIME_LONG   0x1
+/** slot time short */
+#define WLAN_MLME_VDEV_SLOT_TIME_SHORT  0x2
+
 /**
  * enum MLME_bcn_tx_rate_code - beacon tx rate code
  */
@@ -54,6 +59,51 @@ enum mlme_bcn_tx_rate_code {
 	MLME_BCN_TX_RATE_CODE_36_M = 0x05,
 	MLME_BCN_TX_RATE_CODE_48_M = 0x00,
 	MLME_BCN_TX_RATE_CODE_54_M = 0x04,
+};
+
+/**
+ * enum wlan_mlme_host_sta_ps_param_uapsd - STA UPASD params
+ */
+enum wlan_mlme_host_sta_ps_param_uapsd {
+	WLAN_MLME_HOST_STA_PS_UAPSD_AC0_DELIVERY_EN = (1 << 0),
+	WLAN_MLME_HOST_STA_PS_UAPSD_AC0_TRIGGER_EN  = (1 << 1),
+	WLAN_MLME_HOST_STA_PS_UAPSD_AC1_DELIVERY_EN = (1 << 2),
+	WLAN_MLME_HOST_STA_PS_UAPSD_AC1_TRIGGER_EN  = (1 << 3),
+	WLAN_MLME_HOST_STA_PS_UAPSD_AC2_DELIVERY_EN = (1 << 4),
+	WLAN_MLME_HOST_STA_PS_UAPSD_AC2_TRIGGER_EN  = (1 << 5),
+	WLAN_MLME_HOST_STA_PS_UAPSD_AC3_DELIVERY_EN = (1 << 6),
+	WLAN_MLME_HOST_STA_PS_UAPSD_AC3_TRIGGER_EN  = (1 << 7),
+};
+
+/**
+ * enum wlan_mlme_host_vdev_start_status - vdev start status code
+ */
+enum wlan_mlme_host_vdev_start_status {
+	WLAN_MLME_HOST_VDEV_START_OK = 0,
+	WLAN_MLME_HOST_VDEV_START_CHAN_INVALID,
+	WLAN_MLME_HOST_VDEV_START_CHAN_BLOCKED,
+	WLAN_MLME_HOST_VDEV_START_CHAN_DFS_VIOLATION,
+	WLAN_MLME_HOST_VDEV_START_TIMEOUT,
+};
+
+/**
+ * enum wlan_mlme_host_start_event_param - start/restart resp event
+ */
+enum wlan_mlme_host_start_event_param {
+	WLAN_MLME_HOST_VDEV_START_RESP_EVENT = 0,
+	WLAN_MLME_HOST_VDEV_RESTART_RESP_EVENT,
+};
+
+/**
+ * enum wlan_mlme_custom_aggr_type: custon aggregate type
+ * @WLAN_MLME_CUSTOM_AGGR_TYPE_AMPDU: A-MPDU aggregation
+ * @WLAN_MLME_CUSTOM_AGGR_TYPE_AMSDU: A-MSDU aggregation
+ * @WLAN_MLME_CUSTOM_AGGR_TYPE_MAX: Max type
+ */
+enum wlan_mlme_custom_aggr_type {
+	WLAN_MLME_CUSTOM_AGGR_TYPE_AMPDU = 0,
+	WLAN_MLME_CUSTOM_AGGR_TYPE_AMSDU = 1,
+	WLAN_MLME_CUSTOM_AGGR_TYPE_MAX,
 };
 
 /**

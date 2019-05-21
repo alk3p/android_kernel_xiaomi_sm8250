@@ -762,6 +762,28 @@ QDF_STATUS wlan_objmgr_vdev_peer_detach(struct wlan_objmgr_vdev *vdev,
 	return QDF_STATUS_SUCCESS;
 }
 
+struct wlan_objmgr_peer *wlan_objmgr_vdev_try_get_bsspeer(
+					struct wlan_objmgr_vdev *vdev,
+					wlan_objmgr_ref_dbgid id)
+{
+	struct wlan_objmgr_peer *peer;
+	QDF_STATUS status = QDF_STATUS_E_EMPTY;
+
+	if (!vdev)
+		return NULL;
+
+	wlan_vdev_obj_lock(vdev);
+	peer = wlan_vdev_get_bsspeer(vdev);
+	if (peer)
+		status = wlan_objmgr_peer_try_get_ref(peer, id);
+	wlan_vdev_obj_unlock(vdev);
+
+	if (QDF_IS_STATUS_SUCCESS(status))
+		return peer;
+
+	return NULL;
+}
+
 void *wlan_objmgr_vdev_get_comp_private_obj(
 		struct wlan_objmgr_vdev *vdev,
 		enum wlan_umac_comp_id id)
@@ -868,29 +890,6 @@ void wlan_objmgr_vdev_release_ref(struct wlan_objmgr_vdev *vdev,
 	return;
 }
 qdf_export_symbol(wlan_objmgr_vdev_release_ref);
-
-bool wlan_vdev_is_connected(struct wlan_objmgr_vdev *vdev)
-{
-	struct wlan_objmgr_peer *peer;
-	enum wlan_peer_state peer_state;
-
-	wlan_vdev_obj_lock(vdev);
-	peer = wlan_vdev_get_bsspeer(vdev);
-	wlan_vdev_obj_unlock(vdev);
-
-	if (!peer)
-		return false;
-
-	wlan_peer_obj_lock(peer);
-	peer_state = wlan_peer_mlme_get_state(peer);
-	wlan_peer_obj_unlock(peer);
-
-	if (peer_state != WLAN_ASSOC_STATE)
-		return false;
-
-	return true;
-}
-qdf_export_symbol(wlan_vdev_is_connected);
 
 struct wlan_objmgr_vdev *wlan_pdev_vdev_list_peek_active_head(
 			struct wlan_objmgr_pdev *pdev,

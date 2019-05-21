@@ -203,7 +203,7 @@ static void dp_tx_tso_desc_release(struct dp_soc *soc,
  *
  * Return:
  */
-static void
+void
 dp_tx_desc_release(struct dp_tx_desc_s *tx_desc, uint8_t desc_pool_id)
 {
 	struct dp_pdev *pdev = tx_desc->pdev;
@@ -1431,9 +1431,8 @@ static qdf_nbuf_t dp_tx_send_msdu_single(struct dp_vdev *vdev, qdf_nbuf_t nbuf,
 	tx_desc = dp_tx_prepare_desc_single(vdev, nbuf, tx_q->desc_pool_id,
 			msdu_info, tx_exc_metadata);
 	if (!tx_desc) {
-		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
-			  "%s Tx_desc prepare Fail vdev %pK queue %d",
-			  __func__, vdev, tx_q->desc_pool_id);
+		dp_err_rl("Tx_desc prepare Fail vdev %pK queue %d",
+			  vdev, tx_q->desc_pool_id);
 		dp_tx_get_tid(vdev, nbuf, msdu_info);
 		tid_stats = &pdev->stats.tid_stats.tid_tx_stats[msdu_info->tid];
 		tid_stats->swdrop_cnt[TX_DESC_ERR]++;
@@ -2572,8 +2571,7 @@ dp_send_completion_to_stack(struct dp_soc *soc,  struct dp_pdev *pdev,
  *
  * Return: none
  */
-static inline void dp_tx_comp_free_buf(struct dp_soc *soc,
-		struct dp_tx_desc_s *desc)
+void dp_tx_comp_free_buf(struct dp_soc *soc, struct dp_tx_desc_s *desc)
 {
 	struct dp_vdev *vdev = desc->vdev;
 	qdf_nbuf_t nbuf = desc->nbuf;
@@ -2980,47 +2978,36 @@ static inline void dp_tx_sojourn_stats_process(struct dp_pdev *pdev,
 {
 	uint64_t delta_ms;
 	struct cdp_tx_sojourn_stats *sojourn_stats;
-	uint8_t tidno;
 
-	if (pdev->enhanced_stats_en == 0)
+	if (qdf_unlikely(pdev->enhanced_stats_en == 0))
 		return;
 
-	if (pdev->sojourn_stats.ppdu_seq_id == 0)
-		pdev->sojourn_stats.ppdu_seq_id = ppdu_id;
-
-	if (ppdu_id != pdev->sojourn_stats.ppdu_seq_id) {
-		if (!pdev->sojourn_buf)
-			return;
-
-		sojourn_stats = (struct cdp_tx_sojourn_stats *)
-					qdf_nbuf_data(pdev->sojourn_buf);
-
-		qdf_mem_copy(sojourn_stats, &pdev->sojourn_stats,
-			     sizeof(struct cdp_tx_sojourn_stats));
-
-		sojourn_stats->cookie = (void *)peer->wlanstats_ctx;
-
-		for (tidno = 0; tidno < CDP_DATA_TID_MAX; tidno++) {
-			pdev->sojourn_stats.sum_sojourn_msdu[tidno] = 0;
-			pdev->sojourn_stats.num_msdus[tidno] = 0;
-		}
-
-		dp_wdi_event_handler(WDI_EVENT_TX_SOJOURN_STAT, pdev->soc,
-				     pdev->sojourn_buf, HTT_INVALID_PEER,
-				     WDI_NO_VAL, pdev->pdev_id);
-
-		pdev->sojourn_stats.ppdu_seq_id = ppdu_id;
-	}
-
-	if (tid == HTT_INVALID_TID)
+	if (qdf_unlikely(tid == HTT_INVALID_TID ||
+			 tid >= CDP_DATA_TID_MAX))
 		return;
+
+	if (qdf_unlikely(!pdev->sojourn_buf))
+		return;
+
+	sojourn_stats = (struct cdp_tx_sojourn_stats *)
+		qdf_nbuf_data(pdev->sojourn_buf);
+
+	sojourn_stats->cookie = (void *)peer->wlanstats_ctx;
 
 	delta_ms = qdf_ktime_to_ms(qdf_ktime_get()) -
 				txdesc_ts;
-	qdf_ewma_tx_lag_add(&pdev->sojourn_stats.avg_sojourn_msdu[tid],
+	qdf_ewma_tx_lag_add(&peer->avg_sojourn_msdu[tid],
 			    delta_ms);
-	pdev->sojourn_stats.sum_sojourn_msdu[tid] += delta_ms;
-	pdev->sojourn_stats.num_msdus[tid]++;
+	sojourn_stats->sum_sojourn_msdu[tid] = delta_ms;
+	sojourn_stats->num_msdus[tid] = 1;
+	sojourn_stats->avg_sojourn_msdu[tid].internal =
+		peer->avg_sojourn_msdu[tid].internal;
+	dp_wdi_event_handler(WDI_EVENT_TX_SOJOURN_STAT, pdev->soc,
+			     pdev->sojourn_buf, HTT_INVALID_PEER,
+			     WDI_NO_VAL, pdev->pdev_id);
+	sojourn_stats->sum_sojourn_msdu[tid] = 0;
+	sojourn_stats->num_msdus[tid] = 0;
+	sojourn_stats->avg_sojourn_msdu[tid].internal = 0;
 }
 #else
 static inline void dp_tx_sojourn_stats_process(struct dp_pdev *pdev,
@@ -3200,6 +3187,7 @@ dp_tx_comp_process_desc_list(struct dp_soc *soc,
 	struct dp_tx_desc_s *next;
 	struct hal_tx_completion_status ts = {0};
 	struct dp_peer *peer;
+	qdf_nbuf_t netbuf;
 
 	DP_HIST_INIT();
 	desc = comp_head;
@@ -3208,6 +3196,12 @@ dp_tx_comp_process_desc_list(struct dp_soc *soc,
 		hal_tx_comp_get_status(&desc->comp, &ts, soc->hal_soc);
 		peer = dp_peer_find_by_id(soc, ts.peer_id);
 		dp_tx_comp_process_tx_status(desc, &ts, peer);
+
+		netbuf = desc->nbuf;
+		/* check tx complete notification */
+		if (QDF_NBUF_CB_TX_EXTRA_FRAG_FLAGS_NOTIFY_COMP(netbuf))
+			dp_tx_notify_completion(soc, desc, netbuf);
+
 		dp_tx_comp_process_desc(soc, desc, &ts, peer);
 
 		if (peer)
@@ -3680,8 +3674,8 @@ static void dp_tx_desc_flush(struct dp_vdev *vdev)
 		}
 	}
 }
-#endif /* !QCA_LL_TX_FLOW_CONTROL_V2 */
 
+#endif /* !QCA_LL_TX_FLOW_CONTROL_V2 */
 /**
  * dp_tx_vdev_detach() - detach vdev from dp tx
  * @vdev: virtual device instance
@@ -4094,7 +4088,6 @@ dp_tx_me_send_convert_ucast(struct cdp_vdev *vdev_handle, qdf_nbuf_t nbuf,
 	struct dp_tx_seg_info_s *seg_info_head = NULL;
 	struct dp_tx_seg_info_s *seg_info_tail = NULL;
 	struct dp_tx_seg_info_s *seg_info_new;
-	struct dp_tx_frag_info_s data_frag;
 	qdf_dma_addr_t paddr_data;
 	qdf_dma_addr_t paddr_mcbuf = 0;
 	uint8_t empty_entry_mac[QDF_MAC_ADDR_SIZE] = {0};
@@ -4122,13 +4115,7 @@ dp_tx_me_send_convert_ucast(struct cdp_vdev *vdev_handle, qdf_nbuf_t nbuf,
 		return 1;
 	}
 
-	paddr_data = qdf_nbuf_get_frag_paddr(nbuf, 0) + QDF_MAC_ADDR_SIZE;
-
-	/*preparing data fragment*/
-	data_frag.vaddr = qdf_nbuf_data(nbuf) + QDF_MAC_ADDR_SIZE;
-	data_frag.paddr_lo = (uint32_t)paddr_data;
-	data_frag.paddr_hi = (((uint64_t) paddr_data)  >> 32);
-	data_frag.len = len - QDF_MAC_ADDR_SIZE;
+	paddr_data = qdf_nbuf_mapped_paddr_get(nbuf) + QDF_MAC_ADDR_SIZE;
 
 	for (new_mac_idx = 0; new_mac_idx < new_mac_cnt; new_mac_idx++) {
 		dstmac = newmac[new_mac_idx];
@@ -4195,10 +4182,17 @@ dp_tx_me_send_convert_ucast(struct cdp_vdev *vdev_handle, qdf_nbuf_t nbuf,
 		seg_info_new->frags[0].vaddr =  (uint8_t *)mc_uc_buf;
 		seg_info_new->frags[0].paddr_lo = (uint32_t) paddr_mcbuf;
 		seg_info_new->frags[0].paddr_hi =
-			((uint64_t) paddr_mcbuf >> 32);
+			(uint16_t)((uint64_t)paddr_mcbuf >> 32);
 		seg_info_new->frags[0].len = QDF_MAC_ADDR_SIZE;
 
-		seg_info_new->frags[1] = data_frag;
+		/*preparing data fragment*/
+		seg_info_new->frags[1].vaddr =
+			qdf_nbuf_data(nbuf) + QDF_MAC_ADDR_SIZE;
+		seg_info_new->frags[1].paddr_lo = (uint32_t)paddr_data;
+		seg_info_new->frags[1].paddr_hi =
+			(uint16_t)(((uint64_t)paddr_data) >> 32);
+		seg_info_new->frags[1].len = len - QDF_MAC_ADDR_SIZE;
+
 		seg_info_new->nbuf = nbuf_clone;
 		seg_info_new->frag_cnt = 2;
 		seg_info_new->total_len = len;

@@ -145,6 +145,23 @@ static inline QDF_STATUS utils_dfs_reset_etsi_precaclists(
 }
 #endif
 
+/** utils_dfs_add_to_etsi_precac_required_list() - Add channel to ETSI PreCAC
+ * Required list.
+ * @pdev: Pointer to DFS pdev object.
+ * @chan: Pointer to channel to be added to ETSI PreCAC Required List.
+ *
+ * Return: void
+ */
+#ifdef QCA_SUPPORT_ETSI_PRECAC_DFS
+void utils_dfs_add_to_etsi_precac_required_list(struct wlan_objmgr_pdev *pdev,
+						uint8_t *chan);
+#else
+static inline void
+utils_dfs_add_to_etsi_precac_required_list(struct wlan_objmgr_pdev *pdev,
+					   uint8_t *chan)
+{
+}
+#endif
 /**
  * utils_dfs_cancel_precac_timer() - Cancel the precac timer.
  * @pdev: Pointer to DFS pdev object.
@@ -510,6 +527,17 @@ static inline bool utils_is_dfs_ch(struct wlan_objmgr_pdev *pdev, uint32_t chan)
 {
 	return wlan_reg_is_dfs_ch(pdev, chan);
 }
+
+/**
+ * utils_is_dfs_cfreq2_ch() - is channel dfs cfreq2.
+ * @pdev: pdev handler.
+ *
+ * is channel dfs.
+ *
+ * Return: True if channel dfs cfreq2, else false.
+ */
+bool utils_is_dfs_cfreq2_ch(struct wlan_objmgr_pdev *pdev);
+
 /**
  * utils_dfs_reg_update_nol_ch() - set nol channel
  *

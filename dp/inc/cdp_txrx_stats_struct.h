@@ -114,10 +114,11 @@
 #define CDP_WDI_NUM_EVENTS 26
 #endif
 
-#define CDP_FC_RETRY_OFFSET 0x4
-#define CDP_FC_RETRY_MASK (CDP_FC_RETRY_OFFSET << 1)
+#define CDP_FCTL_RETRY 0x0800
 #define CDP_FC_IS_RETRY_SET(_fc) \
-	((_fc) && CDP_FC_RETRY_MASK)
+	((_fc) & qdf_cpu_to_le16(CDP_FCTL_RETRY))
+
+#define INVALID_RSSI 255
 
 /* Different Packet Types */
 enum cdp_packet_type {
@@ -418,8 +419,8 @@ struct cdp_tx_stats {
 	uint32_t mcast_last_tx_rate;
 	uint32_t mcast_last_tx_rate_mcs;
 	uint32_t last_per;
-	uint32_t rnd_avg_tx_rate;
-	uint32_t avg_tx_rate;
+	uint64_t rnd_avg_tx_rate;
+	uint64_t avg_tx_rate;
 	uint32_t last_ack_rssi;
 	uint32_t tx_bytes_success_last;
 	uint32_t tx_data_success_last;
@@ -1139,6 +1140,22 @@ struct cdp_htt_rx_pdev_stats {
     struct cdp_htt_rx_pdev_fw_stats_phy_err_tlv fw_stats_phy_err_tlv;
 };
 
+#ifdef WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG
+/* Since protocol type enumeration value is passed as CCE metadata
+ * to firmware, add a constant offset before passing it to firmware
+ */
+#define RX_PROTOCOL_TAG_START_OFFSET  128
+/* This should align with packet type enumerations in ieee80211_ioctl.h
+ * and wmi_unified_param.h files
+ */
+#define RX_PROTOCOL_TAG_MAX   24
+/* Macro that should be used to dump the statistics counter for all
+ * protocol types
+ */
+#define RX_PROTOCOL_TAG_ALL 0xff
+
+#endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
+
 /* struct cdp_pdev_stats - pdev stats
  * @msdu_not_done: packets dropped because msdu done bit not set
  * @mec:Multicast Echo check
@@ -1730,6 +1747,10 @@ enum _ol_ath_param_t {
 	OL_ATH_PARAM_PERIODIC_CFR_CAPTURE = 404,
 	OL_ATH_PARAM_FLUSH_PEER_RATE_STATS = 405,
 	OL_ATH_PARAM_DCS_RE_ENABLE_TIMER = 406,
+	/* Enable/disable Rx lite monitor mode */
+	OL_ATH_PARAM_RX_MON_LITE = 407,
+	/* wifi down indication used in MBSS feature */
+	OL_ATH_PARAM_WIFI_DOWN_IND = 408,
 };
 
 /* Enumeration of PDEV Configuration parameter */

@@ -45,7 +45,8 @@ ATH_DEBUG_INSTANTIATE_MODULE_VAR(htc,
 
 #endif
 
-#if (defined(CONFIG_MCL) || (QCA_WIFI_QCA8074))
+#if (defined(CONFIG_MCL) || defined(QCA_WIFI_QCA8074) || \
+	defined(QCA_WIFI_QCA6018))
 static const uint32_t svc_id[] = {WMI_CONTROL_SVC, WMI_CONTROL_SVC_WMAC1,
 						WMI_CONTROL_SVC_WMAC2};
 #else
@@ -742,6 +743,7 @@ QDF_STATUS htc_start(HTC_HANDLE HTCHandle)
 				HTC_SETUP_COMPLETE_FLAGS_ENABLE_BUNDLE_RECV;
 			hif_set_bundle_mode(target->hif_dev, true,
 				HTC_MAX_MSG_PER_BUNDLE_RX);
+			pSetupComp->MaxMsgsPerBundledRecv = HTC_MAX_MSG_PER_BUNDLE_RX;
 		}
 
 		SET_HTC_PACKET_INFO_TX(pSendPacket,

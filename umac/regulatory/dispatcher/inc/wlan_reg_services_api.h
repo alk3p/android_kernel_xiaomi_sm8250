@@ -177,6 +177,16 @@ QDF_STATUS wlan_reg_get_channel_list_with_power(struct wlan_objmgr_pdev *pdev,
 QDF_STATUS wlan_reg_read_default_country(struct wlan_objmgr_psoc *psoc,
 				   uint8_t *country);
 
+/**
+ * wlan_reg_get_fcc_constraint() - Check FCC constraint on given frequency
+ * @pdev: physical dev to get
+ * @freq: frequency to be checked
+ *
+ * Return: If FCC constraint is on applied given frequency return true
+ *	   else return false.
+ */
+bool wlan_reg_get_fcc_constraint(struct wlan_objmgr_pdev *pdev, uint32_t freq);
+
 #ifdef CONFIG_REG_CLIENT
 /**
  * wlan_reg_read_current_country() - Read the current country for the regdomain
@@ -381,6 +391,16 @@ QDF_STATUS wlan_reg_get_domain_from_country_code(v_REGDOMAIN_t *reg_domain_ptr,
 uint16_t wlan_reg_dmn_get_opclass_from_channel(uint8_t *country,
 					       uint8_t channel,
 					       uint8_t offset);
+/**
+ * wlan_reg_dmn_print_channels_in_opclass() - Print channels in op-class
+ * @country: country alpha2
+ * @opclass: oplcass
+ *
+ * Return: void
+ */
+void wlan_reg_dmn_print_channels_in_opclass(uint8_t *country,
+					    uint8_t opclass);
+
 
 /**
  * wlan_reg_dmn_get_chanwidth_from_opclass() - get channel width from

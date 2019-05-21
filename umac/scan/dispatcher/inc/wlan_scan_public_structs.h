@@ -158,6 +158,7 @@ struct element_info {
  * @fils_indication: pointer to FILS indication ie
  * @esp: pointer to ESP indication ie
  * @mbo_oce: pointer to mbo/oce indication ie
+ * @adaptive_11r: pointer to adaptive 11r IE
  */
 struct ie_list {
 	uint8_t *tim;
@@ -206,6 +207,7 @@ struct ie_list {
 	uint8_t *mbo_oce;
 	uint8_t *muedca;
 	uint8_t *extender;
+	uint8_t *adaptive_11r;
 };
 
 enum scan_entry_connection_state {
@@ -299,6 +301,7 @@ struct scan_mbssid_info {
  * @qbss_chan_load: Qbss channel load
  * @nss: supported NSS information
  * @is_p2p_ssid: is P2P entry
+ * @adaptive_11r_ap: flag to check if AP supports adaptive 11r
  * @scan_entry_time: boottime in microsec when last beacon/probe is received
  * @rssi_timestamp: boottime in microsec when RSSI was updated
  * @hidden_ssid_timestamp: boottime in microsec when hidden
@@ -340,6 +343,7 @@ struct scan_cache_entry {
 	uint8_t qbss_chan_load;
 	uint8_t nss;
 	bool is_p2p;
+	bool adaptive_11r_ap;
 	qdf_time_t scan_entry_time;
 	qdf_time_t rssi_timestamp;
 	qdf_time_t hidden_ssid_timestamp;
@@ -523,6 +527,7 @@ struct fils_filter_info {
 
 /**
  * @bss_scoring_required :- flag to bypass scoring filtered results
+ * @enable_adaptive_11r:    flag to check if adaptive 11r ini is enabled
  * @age_threshold: If set return entry which are newer than the age_threshold
  * @p2p_results: If only p2p entries is required
  * @rrm_measurement_filter: For measurement reports.if set, only SSID, BSSID
@@ -560,6 +565,7 @@ struct fils_filter_info {
  */
 struct scan_filter {
 	bool bss_scoring_required;
+	bool enable_adaptive_11r;
 	uint32_t age_threshold;
 	uint32_t p2p_results;
 	uint32_t rrm_measurement_filter;
@@ -783,15 +789,17 @@ struct chan_list {
 };
 
 /**
- * enum scan_type: scan type
- * @SCAN_NON_P2P_DEFAULT: Def scan
- * @SCAN_P2P_SEARCH: P2P Search
- * @SCAN_P2P_LISTEN: P2P listed
+ * enum scan_request_type: scan type
+ * @SCAN_TYPE_DEFAULT: Def scan
+ * @SCAN_TYPE_P2P_SEARCH: P2P Search
+ * @SCAN_TYPE_P2P_LISTEN: P2P listed
+ * @SCAN_TYPE_RRM: RRM scan request
  */
-enum p2p_scan_type {
-	SCAN_NON_P2P_DEFAULT = 0,
-	SCAN_P2P_SEARCH = 1,
-	SCAN_P2P_LISTEN = 2,
+enum scan_request_type {
+	SCAN_TYPE_DEFAULT = 0,
+	SCAN_TYPE_P2P_SEARCH = 1,
+	SCAN_TYPE_P2P_LISTEN = 2,
+	SCAN_TYPE_RRM = 3
 };
 
 /**
@@ -876,7 +884,7 @@ struct scan_req_params {
 	uint32_t vdev_id;
 	uint32_t pdev_id;
 	enum scan_priority scan_priority;
-	enum p2p_scan_type p2p_scan_type;
+	enum scan_request_type scan_type;
 	union {
 		struct {
 			uint32_t scan_ev_started:1,

@@ -115,6 +115,20 @@ QDF_STATUS utils_dfs_reset_etsi_precaclists(struct wlan_objmgr_pdev *pdev)
 }
 
 qdf_export_symbol(utils_dfs_reset_etsi_precaclists);
+
+void utils_dfs_add_to_etsi_precac_required_list(struct wlan_objmgr_pdev *pdev,
+						uint8_t *chan)
+{
+	struct wlan_dfs *dfs;
+
+	dfs = wlan_pdev_get_dfs_obj(pdev);
+	if (!dfs)
+		return;
+
+	dfs_add_to_etsi_precac_required_list(dfs, chan);
+}
+
+qdf_export_symbol(utils_dfs_add_to_etsi_precac_required_list);
 #endif
 
 QDF_STATUS utils_dfs_cancel_precac_timer(struct wlan_objmgr_pdev *pdev)
@@ -1183,4 +1197,17 @@ QDF_STATUS utils_dfs_get_disable_radar_marking(struct wlan_objmgr_pdev *pdev,
 }
 
 qdf_export_symbol(utils_dfs_get_disable_radar_marking);
+
+bool utils_is_dfs_cfreq2_ch(struct wlan_objmgr_pdev *pdev)
+{
+	struct wlan_dfs *dfs;
+
+	dfs = wlan_pdev_get_dfs_obj(pdev);
+	if (!dfs)
+		return false;
+
+	return WLAN_IS_CHAN_DFS_CFREQ2(dfs->dfs_curchan);
+}
+
+qdf_export_symbol(utils_is_dfs_cfreq2_ch);
 #endif

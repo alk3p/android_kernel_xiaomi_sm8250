@@ -24,6 +24,7 @@
 #include "wmi_unified_priv.h"
 #include "wmi_unified_api.h"
 #include "qdf_module.h"
+#include "qdf_platform.h"
 #ifdef WMI_EXT_DBG
 #include "qdf_list.h"
 #endif
@@ -1671,12 +1672,8 @@ QDF_STATUS wmi_unified_cmd_send_fl(wmi_unified_t wmi_handle, wmi_buf_t buf,
 							      cmd_id);
 	} else if (qdf_atomic_read(&wmi_handle->is_target_suspended) &&
 		   !wmi_is_pm_resume_cmd(cmd_id)) {
-		if (!wmi_handle->wmi_stopinprogress)
-			QDF_DEBUG_PANIC("Target is suspended (via %s:%u)",
-					func, line);
-		else
 			wmi_nofl_err("Target is suspended (via %s:%u)",
-				     func, line);
+					func, line);
 		return QDF_STATUS_E_BUSY;
 	}
 
@@ -1718,7 +1715,7 @@ QDF_STATUS wmi_unified_cmd_send_fl(wmi_unified_t wmi_handle, wmi_buf_t buf,
 		wmi_nofl_err("%s:%d, MAX %d WMI Pending cmds reached",
 			     func, line, wmi_handle->wmi_max_cmds);
 		wmi_unified_debug_dump(wmi_handle);
-		QDF_BUG(0);
+		qdf_trigger_self_recovery(QDF_WMI_EXCEED_MAX_PENDING_CMDS);
 		return QDF_STATUS_E_BUSY;
 	}
 
@@ -2896,6 +2893,19 @@ int wmi_get_pending_cmds(wmi_unified_t wmi_handle)
 void wmi_set_target_suspend(wmi_unified_t wmi_handle, A_BOOL val)
 {
 	qdf_atomic_set(&wmi_handle->is_target_suspended, val);
+}
+
+/**
+ * wmi_is_target_suspended() - WMI API to check target suspend state
+ * @wmi_handle: handle to WMI.
+ *
+ * WMI API to check target suspend state
+ *
+ * Return: true if target is suspended, else false.
+ */
+bool wmi_is_target_suspended(struct wmi_unified *wmi_handle)
+{
+	return qdf_atomic_read(&wmi_handle->is_target_suspended);
 }
 
 /**

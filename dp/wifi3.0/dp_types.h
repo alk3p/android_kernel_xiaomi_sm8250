@@ -82,6 +82,7 @@
 #define MAX_TXDESC_POOLS 4
 #define MAX_RXDESC_POOLS 4
 #define MAX_REO_DEST_RINGS 4
+#define EXCEPTION_DEST_RING_ID 0
 #define MAX_TCL_DATA_RINGS 4
 #define MAX_IDLE_SCATTER_BUFS 16
 #define DP_MAX_IRQ_PER_CONTEXT 12
@@ -92,6 +93,7 @@
 #define DP_MAX_DELBA_RETRY 3
 
 #define PCP_TID_MAP_MAX 8
+#define MAX_MU_USERS 37
 
 #ifndef REMOVE_PKT_LOG
 enum rx_pktlog_mode {
@@ -100,6 +102,12 @@ enum rx_pktlog_mode {
 	DP_RX_PKTLOG_LITE,
 };
 #endif
+
+struct msdu_list {
+	qdf_nbuf_t head;
+	qdf_nbuf_t tail;
+	uint32 sum_len;
+};
 
 struct dp_soc_cmn;
 struct dp_pdev;
@@ -618,6 +626,8 @@ struct dp_soc_stats {
 			struct cdp_pkt_info rx_invalid_peer;
 			/* Invalid PEER ID count */
 			struct cdp_pkt_info rx_invalid_peer_id;
+			/* Invalid packet length */
+			struct cdp_pkt_info rx_invalid_pkt_len;
 			/* HAL ring access Fail error count */
 			uint32_t hal_ring_access_fail;
 			/* RX DMA error count */
@@ -1125,6 +1135,20 @@ struct ppdu_info {
 	TAILQ_ENTRY(ppdu_info) ppdu_info_list_elem;
 };
 
+#ifdef WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG
+struct rx_protocol_tag_map {
+	/* This is the user configured tag for the said protocol type */
+	uint16_t tag;
+};
+
+#ifdef WLAN_SUPPORT_RX_TAG_STATISTICS
+struct rx_protocol_tag_stats {
+	uint32_t tag_ctr;
+};
+#endif /* WLAN_SUPPORT_RX_TAG_STATISTICS */
+
+#endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
+
 /* PDEV level structure for data path */
 struct dp_pdev {
 	/**
@@ -1289,7 +1313,18 @@ struct dp_pdev {
 	uint64_t mon_last_linkdesc_paddr;
 	/* to track duplicate buffer indications by HW for a WAR */
 	uint32_t mon_last_buf_cookie;
-
+	/* 128 bytes mpdu header queue per user for ppdu */
+	qdf_nbuf_queue_t mpdu_q[MAX_MU_USERS];
+	/* is this a mpdu header TLV and not msdu header TLV */
+	bool is_mpdu_hdr[MAX_MU_USERS];
+	/* per user 128 bytes msdu header list for MPDU */
+	struct msdu_list msdu_list[MAX_MU_USERS];
+	/* RX enhanced capture mode */
+	uint32_t rx_enh_capture_mode;
+#ifdef WLAN_RX_PKT_CAPTURE_ENH
+	/* RX per MPDU/PPDU information */
+	struct cdp_rx_indication_mpdu mpdu_ind[MAX_MU_USERS];
+#endif
 	/* pool addr for mcast enhance buff */
 	struct {
 		int size;
@@ -1410,6 +1445,31 @@ struct dp_pdev {
 
 	/* unique cookie required for peer session */
 	uint32_t next_peer_cookie;
+#ifdef WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG
+	/*
+	 * Run time enabled when the first protocol tag is added,
+	 * run time disabled when the last protocol tag is deleted
+	 */
+	bool  is_rx_protocol_tagging_enabled;
+
+	/*
+	 * The protocol type is used as array index to save
+	 * user provided tag info
+	 */
+	struct rx_protocol_tag_map rx_proto_tag_map[RX_PROTOCOL_TAG_MAX];
+
+#ifdef WLAN_SUPPORT_RX_TAG_STATISTICS
+	/*
+	 * Track msdus received from each reo ring separately to avoid
+	 * simultaneous writes from different core
+	 */
+	struct rx_protocol_tag_stats
+		reo_proto_tag_stats[MAX_REO_DEST_RINGS][RX_PROTOCOL_TAG_MAX];
+	/* Track msdus received from expection ring separately */
+	struct rx_protocol_tag_stats
+		rx_err_proto_tag_stats[RX_PROTOCOL_TAG_MAX];
+#endif /* WLAN_SUPPORT_RX_TAG_STATISTICS */
+#endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
 };
 
 struct dp_peer;
@@ -1601,6 +1661,22 @@ typedef struct {
 } dp_ecm_policy;
 #endif
 
+/*
+ * struct dp_peer_cached_bufq - cached_bufq to enqueue rx packets
+ * @cached_bufq: nbuff list to enqueue rx packets
+ * @bufq_lock: spinlock for nbuff list access
+ * @thres: maximum threshold for number of rx buff to enqueue
+ * @entries: number of entries
+ * @dropped: number of packets dropped
+ */
+struct dp_peer_cached_bufq {
+	qdf_list_t cached_bufq;
+	qdf_spinlock_t bufq_lock;
+	uint32_t thresh;
+	uint32_t entries;
+	uint32_t dropped;
+};
+
 /* Peer structure for data path state */
 struct dp_peer {
 	/* VDEV to which this peer is associated */
@@ -1652,9 +1728,10 @@ struct dp_peer {
 
 	/* NAWDS Flag and Bss Peer bit */
 	uint8_t nawds_enabled:1,
-				bss_peer:1,
-				wapi:1,
-				wds_enabled:1;
+		bss_peer:1,
+		wapi:1,
+		wds_enabled:1,
+		valid:1;
 
 	/* MCL specific peer local id */
 	uint16_t local_id;
@@ -1694,6 +1771,13 @@ struct dp_peer {
 
 	/* rdk statistics context */
 	struct cdp_peer_rate_stats_ctx *wlanstats_ctx;
+	/* average sojourn time */
+	qdf_ewma_tx_lag avg_sojourn_msdu[CDP_DATA_TID_MAX];
+
+#ifdef PEER_CACHE_RX_PKTS
+	qdf_atomic_t flush_in_progress;
+	struct dp_peer_cached_bufq bufq_info;
+#endif
 };
 
 #ifdef CONFIG_WIN

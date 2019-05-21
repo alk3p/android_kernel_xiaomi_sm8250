@@ -394,8 +394,11 @@ QDF_STATUS wlan_crypto_set_del_pmksa(struct wlan_objmgr_vdev *vdev,
 	QDF_STATUS status = QDF_STATUS_E_INVAL;
 	struct wlan_crypto_comp_priv *crypto_priv;
 	struct wlan_crypto_params *crypto_params;
+	enum QDF_OPMODE op_mode;
 
-	if (wlan_vdev_mlme_get_opmode(vdev) != QDF_STA_MODE)
+	op_mode = wlan_vdev_mlme_get_opmode(vdev);
+
+	if (op_mode != QDF_STA_MODE && op_mode != QDF_SAP_MODE)
 		return QDF_STATUS_E_NOSUPPORT;
 
 	if (!pmksa && set) {
@@ -854,9 +857,15 @@ struct wlan_crypto_key *wlan_crypto_vdev_getkey(struct wlan_objmgr_vdev *vdev,
 		crypto_err("crypto_priv NULL");
 		return NULL;
 	}
-
-	if (keyix == WLAN_CRYPTO_KEYIX_NONE || keyix >= WLAN_CRYPTO_MAXKEYIDX)
+	/* for keyix 4,5 we return the igtk keys for keyix more than 5
+	 * we return the default key, for all other keyix we return the
+	 * key accordingly.
+	 */
+	if (keyix == WLAN_CRYPTO_KEYIX_NONE ||
+	    keyix >= (WLAN_CRYPTO_MAXKEYIDX + WLAN_CRYPTO_MAXIGTKKEYIDX))
 		key = crypto_priv->key[crypto_priv->def_tx_keyid];
+	else if (keyix >= WLAN_CRYPTO_MAXKEYIDX)
+		key = crypto_priv->igtk_key[keyix - WLAN_CRYPTO_MAXKEYIDX];
 	else
 		key = crypto_priv->key[keyix];
 
@@ -889,8 +898,15 @@ struct wlan_crypto_key *wlan_crypto_peer_getkey(struct wlan_objmgr_peer *peer,
 		return NULL;
 	}
 
-	if (keyix == WLAN_CRYPTO_KEYIX_NONE || keyix >= WLAN_CRYPTO_MAXKEYIDX)
+	/* for keyix 4,5 we return the igtk keys for keyix more than 5
+	 * we return the default key, for all other keyix we return the
+	 * key accordingly.
+	 */
+	if (keyix == WLAN_CRYPTO_KEYIX_NONE ||
+	    keyix >= (WLAN_CRYPTO_MAXKEYIDX + WLAN_CRYPTO_MAXIGTKKEYIDX))
 		key = crypto_priv->key[crypto_priv->def_tx_keyid];
+	else if (keyix >= WLAN_CRYPTO_MAXKEYIDX)
+		key = crypto_priv->igtk_key[keyix - WLAN_CRYPTO_MAXKEYIDX];
 	else
 		key = crypto_priv->key[keyix];
 
@@ -920,12 +936,6 @@ QDF_STATUS wlan_crypto_getkey(struct wlan_objmgr_vdev *vdev,
 	struct wlan_objmgr_psoc *psoc;
 	uint8_t macaddr[QDF_MAC_ADDR_SIZE] =
 			{0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-
-	if ((req_key->keyix != WLAN_CRYPTO_KEYIX_NONE) &&
-		(req_key->keyix >= WLAN_CRYPTO_MAXKEYIDX)) {
-		crypto_err("invalid keyix %d", req_key->keyix);
-		return QDF_STATUS_E_INVAL;
-	}
 
 	wlan_vdev_obj_lock(vdev);
 	qdf_mem_copy(macaddr, wlan_vdev_mlme_get_macaddr(vdev),
@@ -1642,6 +1652,36 @@ bool wlan_crypto_vdev_is_pmf_enabled(struct wlan_objmgr_vdev *vdev)
 
 	return false;
 }
+
+/**
+ * wlan_crypto_vdev_is_pmf_required - called to check is pmf required in vdev
+ * @vdev: vdev
+ *
+ * This function gets called to check is pmf required or not in vdev.
+ *
+ * Return: true or false
+ */
+bool wlan_crypto_vdev_is_pmf_required(struct wlan_objmgr_vdev *vdev)
+{
+	struct wlan_crypto_comp_priv *crypto_priv;
+	struct wlan_crypto_params *vdev_crypto_params;
+
+	if (!vdev)
+		return false;
+
+	vdev_crypto_params = wlan_crypto_vdev_get_comp_params(vdev,
+							      &crypto_priv);
+	if (!crypto_priv) {
+		crypto_err("crypto_priv NULL");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	if (vdev_crypto_params->rsn_caps & WLAN_CRYPTO_RSN_CAP_MFP_REQUIRED)
+		return true;
+
+	return false;
+}
+
 /**
  * wlan_crypto_is_pmf_enabled - called by mgmt txrx to check is pmf enabled
  * @vdev: vdev
@@ -2805,7 +2845,7 @@ bool wlan_crypto_rsn_info(struct wlan_objmgr_vdev *vdev,
 		crypto_debug("Key mgmt match failed");
 		return false;
 	}
-	if (wlan_crypto_vdev_is_pmf_enabled(vdev) &&
+	if (wlan_crypto_vdev_is_pmf_required(vdev) &&
 	    !(crypto_params->rsn_caps & WLAN_CRYPTO_RSN_CAP_MFP_ENABLED)) {
 		crypto_debug("Peer is not PMF capable");
 		return false;
@@ -3308,6 +3348,42 @@ bool wlan_crypto_peer_has_mcastcipher(struct wlan_objmgr_peer *peer,
 			& mcastcipher;
 }
 qdf_export_symbol(wlan_crypto_peer_has_mcastcipher);
+
+/**
+ * wlan_crypto_vdev_has_mgmtcipher - check mgmtcipher for vdev
+ * @vdev: vdev
+ * @mgmtcipher: mgmtcipher to be checked
+ *
+ * This function checks any one of mgmtciphers are supported by vdev or not.
+ *
+ * Return: true or false
+ */
+bool wlan_crypto_vdev_has_mgmtcipher(struct wlan_objmgr_vdev *vdev,
+				     uint32_t mgmtcipher)
+{
+	return (wlan_crypto_get_param(vdev, WLAN_CRYPTO_PARAM_MGMT_CIPHER)
+			& mgmtcipher) != 0;
+}
+
+qdf_export_symbol(wlan_crypto_vdev_has_mgmtcipher);
+
+/**
+ * wlan_crypto_peer_has_mgmtcipher - check mgmtcipher for peer
+ * @peer: peer
+ * @mgmtcipher: mgmtcipher to be checked
+ *
+ * This function checks any one of mgmtciphers are supported by peer or not
+ *
+ * Return: true or false
+ */
+bool wlan_crypto_peer_has_mgmtcipher(struct wlan_objmgr_peer *peer,
+				     uint32_t mgmtcipher)
+{
+	return (wlan_crypto_get_peer_param(peer, WLAN_CRYPTO_PARAM_MGMT_CIPHER)
+			& mgmtcipher) != 0;
+}
+
+qdf_export_symbol(wlan_crypto_peer_has_mgmtcipher);
 
 uint8_t wlan_crypto_get_peer_fils_aead(struct wlan_objmgr_peer *peer)
 {
