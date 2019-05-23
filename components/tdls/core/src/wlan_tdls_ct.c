@@ -32,15 +32,14 @@ bool tdls_is_vdev_authenticated(struct wlan_objmgr_vdev *vdev)
 	struct wlan_objmgr_peer *peer;
 	bool is_authenticated = false;
 
-	peer = wlan_vdev_get_bsspeer(vdev);
-
+	peer = wlan_objmgr_vdev_try_get_bsspeer(vdev, WLAN_TDLS_NB_ID);
 	if (!peer) {
 		tdls_err("peer is null");
 		return false;
 	}
 
 	is_authenticated = wlan_peer_mlme_get_auth_state(peer);
-
+	wlan_objmgr_peer_release_ref(peer, WLAN_TDLS_NB_ID);
 	return is_authenticated;
 }
 
@@ -686,17 +685,7 @@ static void tdls_ct_process_connected_link(
 				struct tdls_vdev_priv_obj *tdls_vdev,
 				struct tdls_soc_priv_obj *tdls_soc)
 {
-
-	if ((int32_t)curr_peer->rssi <
-	    (int32_t)tdls_vdev->threshold_config.rssi_teardown_threshold) {
-		tdls_warn("Tear down - low RSSI: " QDF_MAC_ADDR_STR "!",
-			 QDF_MAC_ADDR_ARRAY(curr_peer->peer_mac.bytes));
-		tdls_indicate_teardown(tdls_vdev,
-					curr_peer,
-					TDLS_TEARDOWN_PEER_UNSPEC_REASON);
-		return;
-	}
-
+	/* Don't trigger low rssi tear down here since FW will do it */
 	/* Only teardown based on non zero idle packet threshold, to address
 	 * a use case where this threshold does not get consider for TEAR DOWN
 	 */
@@ -1129,13 +1118,11 @@ QDF_STATUS tdls_delete_all_tdls_peers(struct wlan_objmgr_vdev *vdev,
 	struct scheduler_msg msg = {0};
 	QDF_STATUS status;
 
-	peer = wlan_vdev_get_bsspeer(vdev);
-	if (!peer)
+	peer = wlan_objmgr_vdev_try_get_bsspeer(vdev, WLAN_TDLS_SB_ID);
+	if (!peer) {
+		tdls_err("bss peer is null");
 		return QDF_STATUS_E_FAILURE;
-
-	if (QDF_STATUS_SUCCESS !=
-	    wlan_objmgr_peer_try_get_ref(peer, WLAN_TDLS_SB_ID))
-		return QDF_STATUS_E_FAILURE;
+	}
 
 	del_msg = qdf_mem_malloc(sizeof(*del_msg));
 	if (!del_msg) {
@@ -1146,6 +1133,8 @@ QDF_STATUS tdls_delete_all_tdls_peers(struct wlan_objmgr_vdev *vdev,
 
 	qdf_mem_copy(del_msg->bssid.bytes,
 		     wlan_peer_get_macaddr(peer), QDF_MAC_ADDR_SIZE);
+
+	wlan_objmgr_peer_release_ref(peer, WLAN_TDLS_SB_ID);
 
 	del_msg->msg_type = tdls_soc->tdls_del_all_peers;
 	del_msg->msg_len = (uint16_t) sizeof(*del_msg);
@@ -1167,7 +1156,6 @@ QDF_STATUS tdls_delete_all_tdls_peers(struct wlan_objmgr_vdev *vdev,
 		qdf_mem_free(del_msg);
 	}
 
-	wlan_objmgr_peer_release_ref(peer, WLAN_TDLS_SB_ID);
 	return status;
 }
 

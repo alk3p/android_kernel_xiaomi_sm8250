@@ -71,6 +71,7 @@
 #endif
 #include "wlan_mlme_ucfg_api.h"
 #include "cfg_ucfg_api.h"
+#include "wlan_cp_stats_mc_ucfg_api.h"
 
 /* Preprocessor Definitions and Constants */
 
@@ -280,7 +281,7 @@ cds_cfg_update_ac_specs_params(struct txrx_pdev_cfg_param_t *olcfg,
 	if (!cds_cfg)
 		return;
 
-	for (i = 0; i < OL_TX_NUM_WMM_AC; i++) {
+	for (i = 0; i < QCA_WLAN_AC_ALL; i++) {
 		olcfg->ac_specs[i].wrr_skip_weight =
 			cds_cfg->ac_specs[i].wrr_skip_weight;
 		olcfg->ac_specs[i].credit_threshold =
@@ -294,7 +295,6 @@ cds_cfg_update_ac_specs_params(struct txrx_pdev_cfg_param_t *olcfg,
 	}
 }
 
-#ifdef QCA_LL_TX_FLOW_CONTROL_V2
 static inline void
 cds_cdp_set_flow_control_params(struct wlan_objmgr_psoc *psoc,
 				struct txrx_pdev_cfg_param_t *cdp_cfg)
@@ -304,12 +304,6 @@ cds_cdp_set_flow_control_params(struct wlan_objmgr_psoc *psoc,
 	cdp_cfg->tx_flow_start_queue_offset =
 		cfg_get(psoc, CFG_DP_TX_FLOW_START_QUEUE_OFFSET);
 }
-#else
-static inline void
-cds_cdp_set_flow_control_params(struct wlan_objmgr_psoc *psoc,
-				struct txrx_pdev_cfg_param_t *cdp_cfg)
-{}
-#endif
 
 /**
  * cds_cdp_cfg_attach() - attach data path config module
@@ -415,6 +409,7 @@ static QDF_STATUS cds_deregister_all_modules(void)
 
 	scheduler_deregister_wma_legacy_handler();
 	scheduler_deregister_sys_legacy_handler();
+	status = scheduler_deregister_module(QDF_MODULE_ID_SCAN);
 	status = scheduler_deregister_module(QDF_MODULE_ID_SYS);
 	status = scheduler_deregister_module(QDF_MODULE_ID_TARGET_IF);
 	status = scheduler_deregister_module(QDF_MODULE_ID_PE);
@@ -447,7 +442,7 @@ cds_set_ac_specs_params(struct cds_config_info *cds_cfg)
 		return;
 	}
 
-	for (i = 0; i < OL_TX_NUM_WMM_AC; i++) {
+	for (i = 0; i < QCA_WLAN_AC_ALL; i++) {
 		cds_cfg->ac_specs[i] = cds_ctx->ac_specs[i];
 	}
 }
@@ -672,6 +667,8 @@ QDF_STATUS cds_open(struct wlan_objmgr_psoc *psoc)
 		goto deregister_modules;
 	}
 
+	ucfg_mc_cp_stats_register_pmo_handler();
+
 	return QDF_STATUS_SUCCESS;
 
 deregister_modules:
@@ -826,7 +823,6 @@ QDF_STATUS cds_pre_enable(void)
 	status = wma_wait_for_ready_event(gp_cds_context->wma_context);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		cds_err("Failed to wait for ready event; status: %u", status);
-		cds_trigger_recovery(QDF_REASON_UNSPECIFIED);
 		goto stop_wmi;
 	}
 

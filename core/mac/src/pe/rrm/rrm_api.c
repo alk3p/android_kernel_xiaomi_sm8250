@@ -228,6 +228,7 @@ rrm_process_link_measurement_request(struct mac_context *mac,
 	tSirMacLinkReport LinkReport;
 	tpSirMacMgmtHdr pHdr;
 	int8_t currentRSSI = 0;
+	struct lim_max_tx_pwr_attr tx_pwr_attr = {0};
 
 	pe_debug("Received Link measurement request");
 
@@ -237,10 +238,11 @@ rrm_process_link_measurement_request(struct mac_context *mac,
 	}
 	pHdr = WMA_GET_RX_MAC_HEADER(pRxPacketInfo);
 
-	LinkReport.txPower = lim_get_max_tx_power(
-					pe_session->def_max_tx_pwr,
-					pLinkReq->MaxTxPower.maxTxPower,
-					mac->mlme_cfg->power.max_tx_power);
+	tx_pwr_attr.reg_max = pe_session->def_max_tx_pwr;
+	tx_pwr_attr.ap_tx_power = pLinkReq->MaxTxPower.maxTxPower;
+	tx_pwr_attr.ini_tx_power = mac->mlme_cfg->power.max_tx_power;
+
+	LinkReport.txPower = lim_get_max_tx_power(mac, &tx_pwr_attr);
 
 	if ((LinkReport.txPower != (uint8_t) (pe_session->maxTxPower)) &&
 	    (QDF_STATUS_SUCCESS == rrm_send_set_max_tx_power_req(mac,
@@ -578,7 +580,7 @@ rrm_process_beacon_report_req(struct mac_context *mac,
 	if (!pSmeBcnReportReq)
 		return eRRM_FAILURE;
 
-	/* Allocated memory for pSmeBcnReportReq....will be freed by other modulea */
+	/* Alloc memory for pSmeBcnReportReq, will be freed by other modules */
 	qdf_mem_copy(pSmeBcnReportReq->bssId, pe_session->bssId,
 		     sizeof(tSirMacAddr));
 	pSmeBcnReportReq->messageType = eWNI_SME_BEACON_REPORT_REQ_IND;
@@ -591,7 +593,7 @@ rrm_process_beacon_report_req(struct mac_context *mac,
 		pBeaconReq->measurement_request.Beacon.regClass;
 	pSmeBcnReportReq->channelInfo.channelNum =
 		pBeaconReq->measurement_request.Beacon.channel;
-	pSmeBcnReportReq->measurementDuration[0] = SYS_TU_TO_MS(measDuration);
+	pSmeBcnReportReq->measurementDuration[0] = measDuration;
 	pSmeBcnReportReq->fMeasurementtype[0] =
 		pBeaconReq->measurement_request.Beacon.meas_mode;
 	qdf_mem_copy(pSmeBcnReportReq->macaddrBssid,
@@ -859,7 +861,7 @@ rrm_process_beacon_report_xmit(struct mac_context *mac_ctx,
 					bss_desc->startTSF,
 					sizeof(bss_desc->startTSF));
 				beacon_report->measDuration =
-					SYS_MS_TO_TU(beacon_xmit_ind->duration);
+					beacon_xmit_ind->duration;
 				beacon_report->phyType = bss_desc->nwType;
 				beacon_report->bcnProbeRsp = 1;
 				beacon_report->rsni = bss_desc->sinr;

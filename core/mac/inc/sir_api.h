@@ -47,6 +47,7 @@ struct mac_context;
 #include <dot11f.h>
 #include "wlan_policy_mgr_api.h"
 #include "wlan_tdls_public_structs.h"
+#include "qca_vendor.h"
 
 #define OFFSET_OF(structType, fldName)   (&((structType *)0)->fldName)
 
@@ -55,7 +56,6 @@ struct mac_context;
 #define CFG_VALID_CHANNEL_LIST_LEN              100
 #define CFG_COUNTRY_CODE_LEN 3
 
-#define SIR_MDIE_ELEMENT_ID         54
 #define SIR_MDIE_SIZE               3   /* MD ID(2 bytes), Capability(1 byte) */
 
 #define SIR_MAX_ELEMENT_ID         255
@@ -65,9 +65,7 @@ struct mac_context;
 #define SIR_NUM_11B_RATES 4     /* 1,2,5.5,11 */
 #define SIR_NUM_11A_RATES 8     /* 6,9,12,18,24,36,48,54 */
 
-#define SIR_IPV4_ADDR_LEN       4
-
-typedef uint8_t tSirIpv4Addr[SIR_IPV4_ADDR_LEN];
+typedef uint8_t tSirIpv4Addr[QDF_IPV4_ADDR_SIZE];
 
 #define SIR_VERSION_STRING_LEN 64
 typedef uint8_t tSirVersionString[SIR_VERSION_STRING_LEN];
@@ -114,8 +112,13 @@ typedef uint8_t tSirVersionString[SIR_VERSION_STRING_LEN];
 #define SIR_KRK_KEY_LEN 16
 #define SIR_BTK_KEY_LEN 32
 #define SIR_KCK_KEY_LEN 16
+#define KCK_192BIT_KEY_LEN 24
+#define KCK_256BIT_KEY_LEN 32
+
 #define SIR_KEK_KEY_LEN 16
 #define SIR_KEK_KEY_LEN_FILS 64
+#define KEK_256BIT_KEY_LEN 32
+
 #define SIR_REPLAY_CTR_LEN 8
 #define SIR_PMK_LEN  48
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
@@ -355,6 +358,8 @@ struct sme_ready_req {
 	void *stop_roaming_cb;
 	QDF_STATUS (*sme_msg_cb)(struct mac_context *mac,
 				 struct scheduler_msg *msg);
+	QDF_STATUS (*pe_disconnect_cb) (struct mac_context *mac,
+					uint8_t vdev_id);
 };
 
 /**
@@ -665,6 +670,8 @@ struct bss_description {
 #ifdef WLAN_FEATURE_FILS_SK
 	struct fils_ind_elements fils_info_element;
 #endif
+	uint32_t assoc_disallowed;
+	uint32_t adaptive_11r_ap;
 	/* Please keep the structure 4 bytes aligned above the ieFields */
 	uint32_t ieFields[1];
 };
@@ -899,12 +906,14 @@ struct join_req {
 	tAniEdType UCEncryptionType;
 
 	tAniEdType MCEncryptionType;
+	enum ani_akm_type akm;
 
 #ifdef WLAN_FEATURE_11W
 	tAniEdType MgmtEncryptionType;
 #endif
 
 	bool is11Rconnection;
+	bool is_adaptive_11r_connection;
 #ifdef FEATURE_WLAN_ESE
 	bool isESEFeatureIniEnabled;
 	bool isESEconnection;
@@ -1599,11 +1608,9 @@ typedef struct sSirDeltsRsp {
 	struct delts_req_info rsp;
 } tSirDeltsRsp, *tpSirDeltsRsp;
 
-#define SIR_QOS_NUM_AC_MAX 4
-
 typedef struct sSirAggrQosReqInfo {
 	uint16_t tspecIdx;
-	tSirAddtsReqInfo aggrAddTsInfo[SIR_QOS_NUM_AC_MAX];
+	tSirAddtsReqInfo aggrAddTsInfo[QCA_WLAN_AC_ALL];
 } tSirAggrQosReqInfo, *tpSirAggrQosReqInfo;
 
 typedef struct sSirAggrQosReq {
@@ -1618,7 +1625,7 @@ typedef struct sSirAggrQosReq {
 
 typedef struct sSirAggrQosRspInfo {
 	uint16_t tspecIdx;
-	tSirAddtsRspInfo aggrRsp[SIR_QOS_NUM_AC_MAX];
+	tSirAddtsRspInfo aggrRsp[QCA_WLAN_AC_ALL];
 } tSirAggrQosRspInfo, *tpSirAggrQosRspInfo;
 
 typedef struct sSirAggrQosRsp {
@@ -1935,8 +1942,8 @@ struct sir_host_offload_req {
 	uint8_t enableOrDisable;
 	uint32_t num_ns_offload_count;
 	union {
-		uint8_t hostIpv4Addr[SIR_IPV4_ADDR_LEN];
-		uint8_t hostIpv6Addr[SIR_MAC_IPV6_ADDR_LEN];
+		uint8_t hostIpv4Addr[QDF_IPV4_ADDR_SIZE];
+		uint8_t hostIpv6Addr[QDF_IPV6_ADDR_SIZE];
 	} params;
 	struct qdf_mac_addr bssid;
 };
@@ -2244,6 +2251,11 @@ struct roam_offload_scan_req {
 	uint32_t R0KH_ID_Length;
 	uint8_t RoamKeyMgmtOffloadEnabled;
 	struct pmkid_mode_bits pmkid_modes;
+	bool is_adaptive_11r_connection;
+
+	/* Idle/Disconnect roam parameters */
+	struct wmi_idle_roam_params idle_roam_params;
+	struct wmi_disconnect_roam_params disconnect_roam_params;
 #endif
 	struct roam_ext_params roam_params;
 	uint8_t  middle_of_roaming;
@@ -2268,6 +2280,7 @@ struct roam_offload_scan_req {
 	uint32_t btm_sticky_time;
 	uint32_t rct_validity_timer;
 	uint32_t disassoc_timer_threshold;
+	uint32_t btm_trig_min_candidate_score;
 	struct wmi_11k_offload_params offload_11k_params;
 	uint32_t ho_delay_for_rx;
 	uint32_t roam_preauth_retry_count;
@@ -2279,7 +2292,12 @@ struct roam_offload_scan_req {
 	bool bss_load_trig_enabled;
 	struct wmi_bss_load_config bss_load_config;
 	bool roaming_scan_policy;
+	uint32_t roam_scan_inactivity_time;
+	uint32_t roam_inactive_data_packet_count;
+	uint32_t roam_scan_period_after_inactivity;
 	uint32_t btm_query_bitmask;
+	struct roam_trigger_min_rssi min_rssi_params[NUM_OF_ROAM_TRIGGERS];
+	struct roam_trigger_score_delta score_delta_param[NUM_OF_ROAM_TRIGGERS];
 };
 
 struct roam_offload_scan_rsp {
@@ -2992,7 +3010,8 @@ struct roam_offload_synch_ind {
 	uint8_t rssi;
 	uint8_t roamReason;
 	uint32_t chan_freq;
-	uint8_t kck[SIR_KCK_KEY_LEN];
+	uint8_t kck[KCK_256BIT_KEY_LEN];
+	uint8_t kck_len;
 	uint32_t kek_len;
 	uint8_t kek[SIR_KEK_KEY_LEN_FILS];
 	uint32_t   pmk_len;
@@ -3696,27 +3715,32 @@ struct wifi_peer_info {
 	struct wifi_rate_stat rate_stats[0];
 };
 
-/* Interface statistics - corresponding to 2nd most
- * LSB in wifi statistics bitmap  for getting statistics
+/**
+ * struct wifi_interface_stats - Interface statistics
+ * @info: struct containing the current state of the interface
+ * @rts_succ_cnt: number of RTS/CTS sequence success
+ * @rts_fail_cnt: number of RTS/CTS sequence failures
+ * @ppdu_succ_cnt: number of PPDUs transmitted
+ * @ppdu_fail_cnt: number of PPDUs that failed to transmit
+ * @link_stats: link-level statistics
+ * @ac_stats: per-Access Category statistics
+ * @num_offload_stats: @offload_stats record count
+ * @offload_stats: per-offload statistics
+ *
+ * Statistics corresponding to 2nd most LSB in wifi statistics bitmap
+ * for getting statistics
  */
-typedef struct {
-	/* current state of the interface */
+struct wifi_interface_stats {
 	struct wifi_interface_info info;
-
 	uint32_t rts_succ_cnt;
 	uint32_t rts_fail_cnt;
 	uint32_t ppdu_succ_cnt;
 	uint32_t ppdu_fail_cnt;
-
-	/* link statistics */
 	wmi_iface_link_stats link_stats;
-
-	/* per ac data packet statistics */
 	wmi_wmm_ac_stats ac_stats[WIFI_AC_MAX];
-
 	uint32_t num_offload_stats;
 	wmi_iface_offload_stats offload_stats[WMI_OFFLOAD_STATS_TYPE_MAX];
-} tSirWifiIfaceStat, *tpSirWifiIfaceStat;
+};
 
 /**
  * struct wifi_peer_stat - peer statistics
@@ -3916,7 +3940,7 @@ struct sir_wifi_ll_ext_wmm_ac_stats {
  * struct sir_wifi_ll_ext_peer_stats - per peer stats
  * @peer_id: peer ID
  * @vdev_id: VDEV ID
- * mac_address: MAC address
+ * @mac_address: MAC address
  * @sta_ps_inds: how many times STAs go to sleep
  * @sta_ps_durs: total sleep time of STAs (units in ms)
  * @rx_probe_reqs: number of probe requests received
@@ -5219,10 +5243,12 @@ struct sir_set_tx_rx_aggregation_size {
  * @tx_aggr_sw_retry_threshold_bk: aggr sw retry threshold for BK
  * @tx_aggr_sw_retry_threshold_vi: aggr sw retry threshold for VI
  * @tx_aggr_sw_retry_threshold_vo: aggr sw retry threshold for VO
+ * @tx_aggr_sw_retry_threshold: aggr sw retry threshold
  * @tx_non_aggr_sw_retry_threshold_be: non aggr sw retry threshold for BE
  * @tx_non_aggr_sw_retry_threshold_bk: non aggr sw retry threshold for BK
  * @tx_non_aggr_sw_retry_threshold_vi: non aggr sw retry threshold for VI
  * @tx_non_aggr_sw_retry_threshold_vo: non aggr sw retry threshold for VO
+ * @tx_non_aggr_sw_retry_threshold: non aggr sw retry threshold
  */
 struct sir_set_tx_sw_retry_threshold {
 	uint8_t vdev_id;
@@ -5230,10 +5256,12 @@ struct sir_set_tx_sw_retry_threshold {
 	uint32_t tx_aggr_sw_retry_threshold_bk;
 	uint32_t tx_aggr_sw_retry_threshold_vi;
 	uint32_t tx_aggr_sw_retry_threshold_vo;
+	uint32_t tx_aggr_sw_retry_threshold;
 	uint32_t tx_non_aggr_sw_retry_threshold_be;
 	uint32_t tx_non_aggr_sw_retry_threshold_bk;
 	uint32_t tx_non_aggr_sw_retry_threshold_vi;
 	uint32_t tx_non_aggr_sw_retry_threshold_vo;
+	uint32_t tx_non_aggr_sw_retry_threshold;
 };
 
 /**

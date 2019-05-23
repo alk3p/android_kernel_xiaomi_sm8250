@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -388,6 +388,14 @@ void target_if_pmo_update_target_suspend_flag(struct wlan_objmgr_psoc *psoc,
 		uint8_t value);
 
 /**
+ * target_if_pmo_is_target_suspended() - get wmi target suspend flag
+ * @psoc: objmgr psoc
+ *
+ * Return: true if target suspended, false otherwise
+ */
+bool target_if_pmo_is_target_suspended(struct wlan_objmgr_psoc *psoc);
+
+/**
  * target_if_pmo_psoc_send_wow_enable_req() -send wow enable request
  * @psoc: objmgr psoc
  * @param: wow command params
@@ -460,6 +468,17 @@ QDF_STATUS target_if_pmo_psoc_send_d0wow_enable_req(
  */
 QDF_STATUS target_if_pmo_psoc_send_d0wow_disable_req(
 		struct wlan_objmgr_psoc *psoc);
+
+/**
+ * target_if_pmo_psoc_send_idle_monitor_cmd() - send screen status to firmware
+ * @psoc: objmgr psoc
+ * @val: Idle monitor value
+ *
+ * Return: QDF_STATUS_SUCCESS on success else error code
+ */
+QDF_STATUS
+target_if_pmo_psoc_send_idle_monitor_cmd(struct wlan_objmgr_psoc *psoc,
+					 uint8_t val);
 
 /**
  * target_if_pmo_register_tx_ops() - Register PMO component TX OPS

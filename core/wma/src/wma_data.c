@@ -78,6 +78,7 @@
 #include "wlan_lmac_if_api.h"
 #include <wlan_cp_stats_mc_ucfg_api.h>
 #include <wlan_crypto_global_api.h>
+#include <wlan_mlme_main.h>
 
 struct wma_search_rate {
 	int32_t rate;
@@ -2201,8 +2202,8 @@ int wma_ibss_peer_info_event_handler(void *handle, uint8_t *data,
 
 		pSmeRsp->txRate = peer_info->data_rate;
 
-		WMA_LOGE("peer " MAC_ADDRESS_STR "rssi %d txRate %d",
-			MAC_ADDR_ARRAY(peer_mac),
+		wma_err("peer " QDF_MAC_ADDR_STR "rssi %d txRate %d",
+			QDF_MAC_ADDR_ARRAY(peer_mac),
 			pSmeRsp->rssi, pSmeRsp->txRate);
 
 		peer_info++;
@@ -2545,19 +2546,23 @@ QDF_STATUS wma_tx_packet(void *wma_context, void *tx_frame, uint16_t frmLen,
 		if (!QDF_IS_ADDR_BROADCAST(wh->i_addr1) &&
 		    !IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 			if (pFc->wep) {
-				uint8_t mic_len, hdr_len;
+				uint8_t mic_len, hdr_len, pdev_id;
 
 				/* Allocate extra bytes for privacy header and
 				 * trailer
 				 */
-				if (iface->ucast_key_cipher ==
-				    WMI_CIPHER_AES_GCM) {
-					hdr_len = WLAN_IEEE80211_GCMP_HEADERLEN;
-					mic_len = WLAN_IEEE80211_GCMP_MICLEN;
-				} else {
-					hdr_len = IEEE80211_CCMP_HEADERLEN;
-					mic_len = IEEE80211_CCMP_MICLEN;
-				}
+				pdev_id = wlan_objmgr_pdev_get_pdev_id(
+							wma_handle->pdev);
+				qdf_status =
+					mlme_get_peer_mic_len(wma_handle->psoc,
+							      pdev_id,
+							      wh->i_addr1,
+							      &mic_len,
+							      &hdr_len);
+
+				if (QDF_IS_STATUS_ERROR(qdf_status))
+					return qdf_status;
+
 				newFrmLen = frmLen + hdr_len + mic_len;
 				qdf_status =
 					cds_packet_alloc((uint16_t) newFrmLen,
@@ -3216,13 +3221,8 @@ wma_indicate_err(
 		vdev_id = err_info->u.mic_err.vdev_id;
 		qdf_copy_macaddr(&mic_err_ind->bssId,
 		     (struct qdf_mac_addr *) &wma->interfaces[vdev_id].bssid);
-		WMA_LOGE("MIC error: BSSID:%02x:%02x:%02x:%02x:%02x:%02x\n",
-			mic_err_ind->bssId.bytes[0],
-			mic_err_ind->bssId.bytes[1],
-			mic_err_ind->bssId.bytes[2],
-			mic_err_ind->bssId.bytes[3],
-			mic_err_ind->bssId.bytes[4],
-			mic_err_ind->bssId.bytes[5]);
+		wma_err("MIC error: BSSID:"QDF_MAC_ADDR_STR,
+			QDF_MAC_ADDR_ARRAY(mic_err_ind->bssId.bytes));
 		qdf_mem_copy(mic_err_ind->info.taMacAddr,
 			 (struct qdf_mac_addr *) err_info->u.mic_err.ta,
 			 sizeof(tSirMacAddr));
@@ -3271,20 +3271,10 @@ void wma_rx_mic_error_ind(void *scn_handle, uint16_t vdev_id, void *wh)
 	qdf_mem_copy(err_info.u.mic_err.ta, w->i_addr2, QDF_MAC_ADDR_SIZE);
 
 	WMA_LOGD("MIC vdev_id %d\n", vdev_id);
-	WMA_LOGD("MIC DA: %02x:%02x:%02x:%02x:%02x:%02x\n",
-						err_info.u.mic_err.da[0],
-						err_info.u.mic_err.da[1],
-						err_info.u.mic_err.da[2],
-						err_info.u.mic_err.da[3],
-						err_info.u.mic_err.da[4],
-						err_info.u.mic_err.da[5]);
-	WMA_LOGD("MIC TA: %02x:%02x:%02x:%02x:%02x:%02x\n",
-						err_info.u.mic_err.ta[0],
-						err_info.u.mic_err.ta[1],
-						err_info.u.mic_err.ta[2],
-						err_info.u.mic_err.ta[3],
-						err_info.u.mic_err.ta[4],
-						err_info.u.mic_err.ta[5]);
+	wma_debug("MIC DA: "QDF_MAC_ADDR_STR,
+		  QDF_MAC_ADDR_ARRAY(err_info.u.mic_err.da));
+	wma_debug("MIC TA: "QDF_MAC_ADDR_STR,
+		  QDF_MAC_ADDR_ARRAY(err_info.u.mic_err.ta));
 
 	wma_indicate_err(OL_RX_ERR_TKIP_MIC, &err_info);
 }
@@ -3304,12 +3294,10 @@ uint8_t wma_rx_invalid_peer_ind(uint8_t vdev_id, void *wh)
 	qdf_mem_copy(rx_inv_msg->ta, wh_l->i_addr2, QDF_MAC_ADDR_SIZE);
 
 	WMA_LOGD("%s: vdev_id %d", __func__, vdev_id);
-	WMA_LOGD("%s: RA:" MAC_ADDRESS_STR,
-		 __func__,
-		 MAC_ADDR_ARRAY(rx_inv_msg->ra));
-	WMA_LOGD("%s: TA:" MAC_ADDRESS_STR,
-		 __func__,
-		 MAC_ADDR_ARRAY(rx_inv_msg->ta));
+	wma_debug("RA:"QDF_MAC_ADDR_STR,
+		  QDF_MAC_ADDR_ARRAY(rx_inv_msg->ra));
+	wma_debug("TA:"QDF_MAC_ADDR_STR,
+		  QDF_MAC_ADDR_ARRAY(rx_inv_msg->ta));
 
 	wma_send_msg(wma, SIR_LIM_RX_INVALID_PEER, (void *)rx_inv_msg, 0);
 

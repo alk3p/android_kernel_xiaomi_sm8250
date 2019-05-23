@@ -1469,6 +1469,9 @@ QDF_STATUS sme_set_plm_request(mac_handle_t mac_handle,
 	struct csr_roam_session *session;
 	struct plm_req_params *body;
 
+	if (!req)
+		return QDF_STATUS_E_FAILURE;
+
 	status = sme_acquire_global_lock(&mac->sme);
 	if (!QDF_IS_STATUS_SUCCESS(status))
 		return status;
@@ -1489,8 +1492,12 @@ QDF_STATUS sme_set_plm_request(mac_handle_t mac_handle,
 
 	/* per contract must make a copy of the params when messaging */
 	body = qdf_mem_malloc(sizeof(*body));
-	if (!req)
+
+	if (!body) {
+		sme_release_global_lock(&mac->sme);
 		return QDF_STATUS_E_NOMEM;
+	}
+
 	*body = *req;
 
 	if (!body->enable)
@@ -4442,7 +4449,12 @@ sme_modify_nss_chains_tgt_cfg(mac_handle_t mac_handle,
 	}
 
 	max_supported_rx_nss = QDF_MIN(ini_rx_nss, max_supported_rx_nss);
+	if (!max_supported_rx_nss)
+		return;
+
 	max_supported_tx_nss = QDF_MIN(ini_tx_nss, max_supported_tx_nss);
+	if (!max_supported_tx_nss)
+		return;
 
 	ini_rx_chains = GET_VDEV_NSS_CHAIN(nss_chains_ini_cfg->
 						num_rx_chains[band],
@@ -4461,8 +4473,13 @@ sme_modify_nss_chains_tgt_cfg(mac_handle_t mac_handle,
 
 	max_supported_rx_chains = QDF_MIN(ini_rx_chains,
 					  max_supported_rx_chains);
+	if (!max_supported_rx_chains)
+		return;
+
 	max_supported_tx_chains = QDF_MIN(ini_tx_chains,
 					  max_supported_tx_chains);
+	if (!max_supported_tx_chains)
+		return;
 
 	sme_modify_chains_in_mlme_cfg(mac_handle, max_supported_rx_chains,
 				      max_supported_tx_chains, vdev_op_mode,
@@ -5985,17 +6002,47 @@ QDF_STATUS sme_update_roam_rssi_diff(mac_handle_t mac_handle, uint8_t sessionId,
 	return status;
 }
 
-#ifdef WLAN_FEATURE_FILS_SK
-QDF_STATUS sme_update_fils_config(mac_handle_t mac_handle, uint8_t session_id,
-				  struct csr_roam_profile *src_profile)
+void sme_update_session_assoc_ie(mac_handle_t mac_handle,
+				 uint8_t vdev_id,
+				 struct csr_roam_profile *src_profile)
+{
+	struct mac_context *mac = MAC_CONTEXT(mac_handle);
+	struct csr_roam_session *session = CSR_GET_SESSION(mac, vdev_id);
+
+	if (!session) {
+		sme_err("Session: %d not found", vdev_id);
+		return;
+	}
+
+	qdf_mem_free(session->pAddIEAssoc);
+	session->pAddIEAssoc = NULL;
+	session->nAddIEAssocLength = 0;
+
+	if (!src_profile->nAddIEAssocLength) {
+		sme_debug("Assoc IE len 0");
+		return;
+	}
+
+	session->pAddIEAssoc = qdf_mem_malloc(src_profile->nAddIEAssocLength);
+	if (!session->pAddIEAssoc)
+		return;
+
+	session->nAddIEAssocLength = src_profile->nAddIEAssocLength;
+	qdf_mem_copy(session->pAddIEAssoc, src_profile->pAddIEAssoc,
+		     src_profile->nAddIEAssocLength);
+}
+
+QDF_STATUS sme_send_rso_connect_params(mac_handle_t mac_handle,
+				       uint8_t vdev_id,
+				       struct csr_roam_profile *src_profile)
 {
 	struct mac_context *mac = MAC_CONTEXT(mac_handle);
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	tpCsrNeighborRoamControlInfo neighbor_roam_info =
-			&mac->roam.neighborRoamInfo[session_id];
+			&mac->roam.neighborRoamInfo[vdev_id];
 
-	if (session_id >= WLAN_MAX_VDEVS) {
-		sme_err("Invalid sme session id: %d", session_id);
+	if (vdev_id >= WLAN_MAX_VDEVS) {
+		sme_err("Invalid sme vdev id: %d", vdev_id);
 		return QDF_STATUS_E_INVAL;
 	}
 
@@ -6008,16 +6055,15 @@ QDF_STATUS sme_update_fils_config(mac_handle_t mac_handle, uint8_t session_id,
 	    (neighbor_roam_info->neighborRoamState !=
 	     eCSR_NEIGHBOR_ROAM_STATE_CONNECTED)) {
 		sme_info("Fast roam is disabled or not connected(%d)",
-				neighbor_roam_info->neighborRoamState);
+			 neighbor_roam_info->neighborRoamState);
 		return QDF_STATUS_E_PERM;
 	}
 
-	csr_update_fils_config(mac, session_id, src_profile);
 	if (csr_is_roam_offload_enabled(mac)) {
 		status = sme_acquire_global_lock(&mac->sme);
 		if (QDF_IS_STATUS_SUCCESS(status)) {
 			sme_debug("Updating fils config to fw");
-			csr_roam_offload_scan(mac, session_id,
+			csr_roam_offload_scan(mac, vdev_id,
 					      ROAM_SCAN_OFFLOAD_UPDATE_CFG,
 					      REASON_FILS_PARAMS_CHANGED);
 			sme_release_global_lock(&mac->sme);
@@ -6032,7 +6078,19 @@ QDF_STATUS sme_update_fils_config(mac_handle_t mac_handle, uint8_t session_id,
 	return status;
 }
 
-void sme_send_hlp_ie_info(mac_handle_t mac_handle, uint8_t session_id,
+#ifdef WLAN_FEATURE_FILS_SK
+QDF_STATUS sme_update_fils_config(mac_handle_t mac_handle, uint8_t vdev_id,
+				  struct csr_roam_profile *src_profile)
+{
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	struct mac_context *mac = MAC_CONTEXT(mac_handle);
+
+	csr_update_fils_config(mac, vdev_id, src_profile);
+
+	return status;
+}
+
+void sme_send_hlp_ie_info(mac_handle_t mac_handle, uint8_t vdev_id,
 			  struct csr_roam_profile *profile, uint32_t if_addr)
 {
 	int i;
@@ -6040,9 +6098,9 @@ void sme_send_hlp_ie_info(mac_handle_t mac_handle, uint8_t session_id,
 	QDF_STATUS status;
 	struct hlp_params *params;
 	struct mac_context *mac = MAC_CONTEXT(mac_handle);
-	struct csr_roam_session *session = CSR_GET_SESSION(mac, session_id);
+	struct csr_roam_session *session = CSR_GET_SESSION(mac, vdev_id);
 	tpCsrNeighborRoamControlInfo neighbor_roam_info =
-				&mac->roam.neighborRoamInfo[session_id];
+				&mac->roam.neighborRoamInfo[vdev_id];
 
 	if (!session) {
 		sme_err("session NULL");
@@ -6062,20 +6120,20 @@ void sme_send_hlp_ie_info(mac_handle_t mac_handle, uint8_t session_id,
 		return;
 
 	if ((profile->hlp_ie_len +
-	     SIR_IPV4_ADDR_LEN) > FILS_MAX_HLP_DATA_LEN) {
+	     QDF_IPV4_ADDR_SIZE) > FILS_MAX_HLP_DATA_LEN) {
 		sme_err("HLP IE len exceeds %d",
 				profile->hlp_ie_len);
 		qdf_mem_free(params);
 		return;
 	}
 
-	params->vdev_id = session_id;
-	params->hlp_ie_len = profile->hlp_ie_len + SIR_IPV4_ADDR_LEN;
+	params->vdev_id = vdev_id;
+	params->hlp_ie_len = profile->hlp_ie_len + QDF_IPV4_ADDR_SIZE;
 
-	for (i = 0; i < SIR_IPV4_ADDR_LEN; i++)
+	for (i = 0; i < QDF_IPV4_ADDR_SIZE; i++)
 		params->hlp_ie[i] = (if_addr >> (i * 8)) & 0xFF;
 
-	qdf_mem_copy(params->hlp_ie + SIR_IPV4_ADDR_LEN,
+	qdf_mem_copy(params->hlp_ie + QDF_IPV4_ADDR_SIZE,
 		     profile->hlp_ie, profile->hlp_ie_len);
 
 	msg.type = SIR_HAL_HLP_IE_INFO;
@@ -6125,7 +6183,7 @@ void sme_free_join_rsp_fils_params(struct csr_roam_info *roam_info)
 }
 
 #else
-inline void sme_send_hlp_ie_info(mac_handle_t mac_handle, uint8_t session_id,
+inline void sme_send_hlp_ie_info(mac_handle_t mac_handle, uint8_t vdev_id,
 			  struct csr_roam_profile *profile, uint32_t if_addr)
 {}
 #endif
@@ -7441,39 +7499,6 @@ QDF_STATUS sme_get_link_speed(mac_handle_t mac_handle,
 	status = wma_get_link_speed(wma_handle, req);
 	sme_release_global_lock(&mac->sme);
 	return status;
-}
-
-QDF_STATUS sme_get_peer_stats(struct mac_context *mac,
-			      struct sir_peer_info_req req)
-{
-	QDF_STATUS qdf_status;
-	struct scheduler_msg message = {0};
-
-	qdf_status = sme_acquire_global_lock(&mac->sme);
-	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
-		sme_debug("Failed to get Lock");
-		return qdf_status;
-	}
-	/* serialize the req through MC thread */
-	message.bodyptr = qdf_mem_malloc(sizeof(req));
-	if (!message.bodyptr) {
-		sme_release_global_lock(&mac->sme);
-		return QDF_STATUS_E_NOMEM;
-	}
-	qdf_mem_copy(message.bodyptr, &req, sizeof(req));
-	message.type = WMA_GET_PEER_INFO;
-	message.reserved = 0;
-	qdf_status = scheduler_post_message(QDF_MODULE_ID_SME,
-					    QDF_MODULE_ID_WMA,
-					    QDF_MODULE_ID_WMA, &message);
-	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  "%s: Post get peer info msg fail", __func__);
-		qdf_mem_free(message.bodyptr);
-		qdf_status = QDF_STATUS_E_FAILURE;
-	}
-	sme_release_global_lock(&mac->sme);
-	return qdf_status;
 }
 
 QDF_STATUS
@@ -11582,8 +11607,8 @@ int sme_send_he_om_ctrl_update(mac_handle_t mac_handle, uint8_t session_id)
 		 omi_data.ch_bw, omi_data.tx_nsts, omi_data.rx_nss,
 		 omi_data.ul_mu_dis, omi_data.omi_in_vht, omi_data.omi_in_he);
 	qdf_mem_copy(&param_val, &omi_data, sizeof(omi_data));
-	sme_debug("param val %08X, bssid:"MAC_ADDRESS_STR, param_val,
-		  MAC_ADDR_ARRAY(session->connectedProfile.bssid.bytes));
+	sme_debug("param val %08X, bssid:"QDF_MAC_ADDR_STR, param_val,
+		  QDF_MAC_ADDR_ARRAY(session->connectedProfile.bssid.bytes));
 	status = wma_set_peer_param(wma_handle,
 				    session->connectedProfile.bssid.bytes,
 				    WMI_PEER_PARAM_XMIT_OMI,
@@ -14410,8 +14435,8 @@ static bool sme_get_status_for_candidate(mac_handle_t mac_handle,
 	 */
 	if ((bss_desc->rssi < mbo_cfg->mbo_candidate_rssi_thres) &&
 	    (conn_bss_desc->rssi > mbo_cfg->mbo_current_rssi_thres)) {
-		sme_err("Candidate BSS "MAC_ADDRESS_STR" has LOW RSSI(%d), hence reject",
-			MAC_ADDR_ARRAY(bss_desc->bssId), bss_desc->rssi);
+		sme_err("Candidate BSS "QDF_MAC_ADDR_STR" has LOW RSSI(%d), hence reject",
+			QDF_MAC_ADDR_ARRAY(bss_desc->bssId), bss_desc->rssi);
 		info->status = QCA_STATUS_REJECT_LOW_RSSI;
 		return true;
 	}
@@ -14428,8 +14453,8 @@ static bool sme_get_status_for_candidate(mac_handle_t mac_handle,
 		current_rssi_mcc_thres = mbo_cfg->mbo_current_rssi_mcc_thres;
 		if ((conn_bss_desc->rssi > current_rssi_mcc_thres) &&
 		    csr_is_mcc_channel(mac_ctx, bss_desc->channelId)) {
-			sme_err("Candidate BSS "MAC_ADDRESS_STR" causes MCC, hence reject",
-				MAC_ADDR_ARRAY(bss_desc->bssId));
+			sme_err("Candidate BSS "QDF_MAC_ADDR_STR" causes MCC, hence reject",
+				QDF_MAC_ADDR_ARRAY(bss_desc->bssId));
 			info->status =
 				QCA_STATUS_REJECT_INSUFFICIENT_QOS_CAPACITY;
 			return true;
@@ -14446,8 +14471,8 @@ static bool sme_get_status_for_candidate(mac_handle_t mac_handle,
 		    WLAN_REG_IS_24GHZ_CH(bss_desc->channelId) &&
 		    is_bt_in_progress &&
 		    (bss_desc->rssi < mbo_cfg->mbo_candidate_rssi_btc_thres)) {
-			sme_err("Candidate BSS "MAC_ADDRESS_STR" causes BT coex, hence reject",
-				MAC_ADDR_ARRAY(bss_desc->bssId));
+			sme_err("Candidate BSS "QDF_MAC_ADDR_STR" causes BT coex, hence reject",
+				QDF_MAC_ADDR_ARRAY(bss_desc->bssId));
 			info->status =
 				QCA_STATUS_REJECT_EXCESSIVE_DELAY_EXPECTED;
 			return true;
@@ -14463,8 +14488,8 @@ static bool sme_get_status_for_candidate(mac_handle_t mac_handle,
 		    !(policy_mgr_is_safe_channel(mac_ctx->psoc,
 		    bss_desc->channelId))) {
 			sme_err("High interference expected if transitioned to BSS "
-				MAC_ADDRESS_STR" hence reject",
-				MAC_ADDR_ARRAY(bss_desc->bssId));
+				QDF_MAC_ADDR_STR" hence reject",
+				QDF_MAC_ADDR_ARRAY(bss_desc->bssId));
 			info->status =
 				QCA_STATUS_REJECT_HIGH_INTERFERENCE;
 			return true;
@@ -14515,8 +14540,8 @@ QDF_STATUS sme_get_bss_transition_status(mac_handle_t mac_handle,
 						       &info[i].bssid,
 						       res);
 		if (!QDF_IS_STATUS_SUCCESS(status)) {
-			sme_err("BSS "MAC_ADDRESS_STR" not present in scan list",
-				MAC_ADDR_ARRAY(info[i].bssid.bytes));
+			sme_err("BSS "QDF_MAC_ADDR_STR" not present in scan list",
+				QDF_MAC_ADDR_ARRAY(info[i].bssid.bytes));
 			info[i].status = QCA_STATUS_REJECT_UNKNOWN;
 			continue;
 		}
@@ -14683,9 +14708,9 @@ QDF_STATUS sme_handle_sae_msg(mac_handle_t mac_handle,
 				     peer_mac_addr.bytes,
 				     QDF_MAC_ADDR_SIZE);
 			sme_debug("SAE: sae_status %d session_id %d Peer: "
-				  MAC_ADDRESS_STR, sae_msg->sae_status,
+				  QDF_MAC_ADDR_STR, sae_msg->sae_status,
 				  sae_msg->session_id,
-				  MAC_ADDR_ARRAY(sae_msg->peer_mac_addr));
+				  QDF_MAC_ADDR_ARRAY(sae_msg->peer_mac_addr));
 
 			sch_msg.type = eWNI_SME_SEND_SAE_MSG;
 			sch_msg.bodyptr = sae_msg;
@@ -14781,6 +14806,39 @@ void sme_set_he_testbed_def(mac_handle_t mac_handle, uint8_t vdev_id)
 	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.max_nc = 0;
 	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.trigger_frm_mac_pad =
 					QCA_WLAN_HE_16US_OF_PROCESS_TIME;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.flex_twt_sched = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.ofdma_ra = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.he_4x_ltf_3200_gi_ndp = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.qtp = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.bsrp_ampdu_aggr = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.a_bqr = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.he_sub_ch_sel_tx_supp = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.ndp_feedback_supp = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.ops_supp = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.srp = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.power_boost = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.num_sounding_lt_80 = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.num_sounding_gt_80 = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.dl_mu_mimo_part_bw = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.non_trig_cqi_feedback = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.tx_1024_qam_lt_242_tone_ru = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.rx_1024_qam_lt_242_tone_ru = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.rx_full_bw_su_he_mu_compress_sigb = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.rx_full_bw_su_he_mu_non_cmpr_sigb = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.su_beamformer = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.multi_tid_aggr_rx_supp = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.multi_tid_aggr_tx_supp = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.he_dynamic_smps = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.punctured_sounding_supp = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.ht_vht_trg_frm_rx_supp = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.su_feedback_tone16 = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.mu_feedback_tone16 = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.codebook_su = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.codebook_mu = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.ul_2x996_tone_ru_supp = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.beamforming_feedback = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.he_er_su_ppdu = 0;
+	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.dl_mu_mimo_part_bw = 0;
 	csr_update_session_he_cap(mac_ctx, session);
 }
 

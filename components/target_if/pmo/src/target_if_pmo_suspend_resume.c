@@ -187,6 +187,19 @@ void target_if_pmo_update_target_suspend_flag(struct wlan_objmgr_psoc *psoc,
 	wmi_set_target_suspend(wmi_handle, value);
 }
 
+bool target_if_pmo_is_target_suspended(struct wlan_objmgr_psoc *psoc)
+{
+	wmi_unified_t wmi_handle;
+
+	wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+	if (!wmi_handle) {
+		target_if_err("Invalid wmi handle");
+		return false;
+	}
+
+	return wmi_is_target_suspended(wmi_handle);
+}
+
 QDF_STATUS target_if_pmo_psoc_send_wow_enable_req(
 		struct wlan_objmgr_psoc *psoc,
 		struct pmo_wow_cmd_params *param)
@@ -276,6 +289,21 @@ QDF_STATUS target_if_pmo_psoc_send_target_resume_req(
 	}
 
 	return wmi_unified_resume_send(wmi_handle, TGT_WILDCARD_PDEV_ID);
+}
+
+QDF_STATUS
+target_if_pmo_psoc_send_idle_monitor_cmd(struct wlan_objmgr_psoc *psoc,
+					 uint8_t val)
+{
+	wmi_unified_t wmi_handle;
+
+	wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+	if (!wmi_handle) {
+		target_if_err("Invalid wmi handle");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	return wmi_unified_send_idle_trigger_monitor(wmi_handle, val);
 }
 
 #ifdef FEATURE_WLAN_D0WOW

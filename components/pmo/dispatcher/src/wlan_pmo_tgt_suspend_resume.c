@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -131,6 +131,18 @@ void pmo_tgt_update_target_suspend_flag(struct wlan_objmgr_psoc *psoc,
 	pmo_tx_ops.update_target_suspend_flag(psoc, val);
 }
 
+bool pmo_tgt_is_target_suspended(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_pmo_tx_ops pmo_tx_ops;
+
+	pmo_tx_ops = GET_PMO_TX_OPS_FROM_PSOC(psoc);
+	if (!pmo_tx_ops.is_target_suspended) {
+		pmo_err("is_target_suspended is null");
+		return false;
+	}
+	return pmo_tx_ops.is_target_suspended(psoc);
+}
+
 QDF_STATUS pmo_tgt_psoc_send_wow_enable_req(struct wlan_objmgr_psoc *psoc,
 	struct pmo_wow_cmd_params *param)
 {
@@ -237,3 +249,15 @@ QDF_STATUS pmo_tgt_psoc_send_target_resume_req(struct wlan_objmgr_psoc *psoc)
 	return pmo_tx_ops.psoc_send_target_resume_req(psoc);
 }
 
+QDF_STATUS pmo_tgt_psoc_send_idle_roam_monitor(struct wlan_objmgr_psoc *psoc,
+					       uint8_t val)
+{
+	struct wlan_pmo_tx_ops pmo_tx_ops;
+
+	pmo_tx_ops = GET_PMO_TX_OPS_FROM_PSOC(psoc);
+	if (!pmo_tx_ops.psoc_send_idle_roam_suspend_mode) {
+		pmo_err("NULL fp");
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+	return pmo_tx_ops.psoc_send_idle_roam_suspend_mode(psoc, val);
+}

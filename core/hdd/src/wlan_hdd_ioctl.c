@@ -55,6 +55,7 @@
  */
 #define SIZE_OF_SETROAMMODE             11      /* size of SETROAMMODE */
 #define SIZE_OF_GETROAMMODE             11      /* size of GETROAMMODE */
+#define SIZE_OF_SETSUSPENDMODE          14
 
 /*
  * Size of GETCOUNTRYREV output = (sizeof("GETCOUNTRYREV") = 14) + one (space) +
@@ -1722,8 +1723,8 @@ static QDF_STATUS hdd_parse_plm_cmd(uint8_t *command,
 			req->mac_addr.bytes[count] = content;
 		}
 
-		hdd_debug("MAC addr " MAC_ADDRESS_STR,
-			  MAC_ADDR_ARRAY(req->mac_addr.bytes));
+		hdd_debug("MAC addr " QDF_MAC_ADDR_STR,
+			  QDF_MAC_ADDR_ARRAY(req->mac_addr.bytes));
 
 		in_ptr = strpbrk(in_ptr, " ");
 
@@ -2023,7 +2024,7 @@ static int hdd_set_app_type2_parser(struct hdd_adapter *adapter,
 		return -EINVAL;
 	}
 
-	if (6 != sscanf(mac_addr, "%02x:%02x:%02x:%02x:%02x:%02x",
+	if (6 != sscanf(mac_addr, QDF_MAC_ADDR_STR,
 			&gateway_mac[0], &gateway_mac[1], &gateway_mac[2],
 			&gateway_mac[3], &gateway_mac[4], &gateway_mac[5])) {
 		hdd_err("Invalid MacAddress Input %s", mac_addr);
@@ -3268,6 +3269,46 @@ exit:
 	return ret;
 }
 
+static int drv_cmd_set_suspend_mode(struct hdd_adapter *adapter,
+				    struct hdd_context *hdd_ctx,
+				    uint8_t *command,
+				    uint8_t command_len,
+				    struct hdd_priv_data *priv_data)
+{
+	int errno;
+	uint8_t *value = command;
+	QDF_STATUS status;
+	uint8_t idle_monitor;
+
+	if (QDF_STA_MODE != adapter->device_mode) {
+		hdd_debug("Non-STA interface");
+		return 0;
+	}
+
+	/* Move pointer to ahead of SETSUSPENDMODE<delimiter> */
+	value = value + SIZE_OF_SETSUSPENDMODE + 1;
+
+	/* Convert the value from ascii to integer */
+	errno = kstrtou8(value, 10, &idle_monitor);
+	if (errno < 0) {
+		/*
+		 * If the input value is greater than max value of datatype,
+		 * then also kstrtou8 fails
+		 */
+		hdd_err("Range validation failed");
+		return -EINVAL;
+	}
+
+	hdd_debug("idle_monitor:%d", idle_monitor);
+	status = ucfg_pmo_tgt_psoc_send_idle_roam_suspend_mode(hdd_ctx->psoc,
+							       idle_monitor);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		hdd_debug("Send suspend mode to fw failed");
+		return -EINVAL;
+	}
+	return 0;
+}
+
 static int drv_cmd_get_roam_mode(struct hdd_adapter *adapter,
 				 struct hdd_context *hdd_ctx,
 				 uint8_t *command,
@@ -3846,6 +3887,9 @@ static int drv_cmd_set_roam_intra_band(struct hdd_adapter *adapter,
 		  val);
 
 	ucfg_mlme_set_roam_intra_band(hdd_ctx->psoc, (bool)val);
+	policy_mgr_set_pcl_for_existing_combo(
+					hdd_ctx->psoc,
+					PM_STA_MODE);
 
 exit:
 	return ret;
@@ -5173,9 +5217,8 @@ static int drv_cmd_get_ibss_peer_info_all(struct hdd_adapter *adapter,
 
 			length += scnprintf(extra + length,
 				user_size - length,
-				"%02x:%02x:%02x:%02x:%02x:%02x %d %d ",
-				mac_addr[0], mac_addr[1], mac_addr[2],
-				mac_addr[3], mac_addr[4], mac_addr[5],
+				QDF_MAC_ADDR_STR" %d %d ",
+				QDF_MAC_ADDR_ARRAY(mac_addr),
 				tx_rate, rssi);
 			/*
 			 * cdf_trace_msg has limitation of 512 bytes for the
@@ -5767,10 +5810,10 @@ static int drv_cmd_max_tx_power(struct hdd_adapter *adapter,
 				 &adapter->mac_addr);
 
 		hdd_debug("Device mode %d max tx power %d selfMac: "
-			  MAC_ADDRESS_STR " bssId: " MAC_ADDRESS_STR,
+			  QDF_MAC_ADDR_STR " bssId: " QDF_MAC_ADDR_STR,
 			  adapter->device_mode, tx_power,
-			  MAC_ADDR_ARRAY(selfmac.bytes),
-			  MAC_ADDR_ARRAY(bssid.bytes));
+			  QDF_MAC_ADDR_ARRAY(selfmac.bytes),
+			  QDF_MAC_ADDR_ARRAY(bssid.bytes));
 
 		status = sme_set_max_tx_power(hdd_ctx->mac_handle,
 					      bssid, selfmac, tx_power);
@@ -6219,9 +6262,9 @@ static int hdd_set_rx_filter(struct hdd_adapter *adapter, bool action,
 					sizeof(adapter->mc_addr_list.addr[i]));
 
 				hdd_debug("%s RX filter : addr ="
-				    MAC_ADDRESS_STR,
+				    QDF_MAC_ADDR_STR,
 				    action ? "setting" : "clearing",
-				    MAC_ADDR_ARRAY(filter->multicastAddr[j].bytes));
+				    QDF_MAC_ADDR_ARRAY(filter->multicastAddr[j].bytes));
 				j++;
 			}
 			if (j == SIR_MAX_NUM_MULTICAST_ADDRESS)
@@ -6816,10 +6859,10 @@ static int drv_cmd_invalid(struct hdd_adapter *adapter,
 }
 
 /**
- * drv_cmd_set_fcc_channel() - handle fcc constraint request
+ * drv_cmd_set_fcc_channel() - Handle fcc constraint request
  * @adapter: HDD adapter
  * @hdd_ctx: HDD context
- * @command: command ptr, SET_FCC_CHANNEL 0/1 is the command
+ * @command: command ptr, SET_FCC_CHANNEL 0/-1 is the command
  * @command_len: command len
  * @priv_data: private data
  *
@@ -6832,30 +6875,34 @@ static int drv_cmd_set_fcc_channel(struct hdd_adapter *adapter,
 				   struct hdd_priv_data *priv_data)
 {
 	QDF_STATUS status;
-	uint8_t fcc_constraint;
+	int8_t input_value;
+	bool fcc_constraint;
 	int err;
 
 	/*
-	 * this command would be called by user-space when it detects WLAN
+	 * This command would be called by user-space when it detects WLAN
 	 * ON after airplane mode is set. When APM is set, WLAN turns off.
 	 * But it can be turned back on. Otherwise; when APM is turned back
 	 * off, WLAN would turn back on. So at that point the command is
-	 * expected to come down. 0 means disable, 1 means enable. The
-	 * constraint is removed when parameter 1 is set or different
-	 * country code is set
+	 * expected to come down. 0 means reduce power as per fcc constraint
+	 * and -1 means remove constraint.
 	 */
 
-	err = kstrtou8(command + command_len + 1, 10, &fcc_constraint);
+	err = kstrtos8(command + command_len + 1, 10, &input_value);
 	if (err) {
 		hdd_err("error %d parsing userspace fcc parameter", err);
 		return err;
 	}
 
+	fcc_constraint = input_value ? false : true;
+	hdd_debug("input_value = %d && fcc_constraint = %u",
+		  input_value, fcc_constraint);
+
 	status = ucfg_reg_set_fcc_constraint(hdd_ctx->pdev, fcc_constraint);
 
 	if (QDF_IS_STATUS_ERROR(status))
 		hdd_err("Failed to %s tx power for channels 12/13",
-			fcc_constraint ? "reduce" : "restore");
+			fcc_constraint ? "restore" : "reduce");
 
 	return qdf_status_to_os_return(status);
 }
@@ -7027,6 +7074,67 @@ static int hdd_alloc_chan_cache(struct hdd_context *hdd_ctx, int num_chan)
 		return -ENOMEM;
 	}
 	return 0;
+}
+
+/**
+ * check_disable_channels() - Check for disable channel
+ * @hdd_ctx: Pointer to hdd context
+ * @operating_channel: Current operating channel of adapter
+ *
+ * This function checks original_channels array for a specific channel
+ *
+ * Return: 0 if channel not found, 1 if channel found
+ */
+static bool check_disable_channels(struct hdd_context *hdd_ctx,
+				   uint8_t operating_channel)
+{
+	uint32_t num_channels;
+	uint8_t i;
+
+	if (!hdd_ctx || !hdd_ctx->original_channels ||
+	    !hdd_ctx->original_channels->channel_info)
+		return false;
+
+	num_channels = hdd_ctx->original_channels->num_channels;
+	for (i = 0; i < num_channels; i++)
+		if (hdd_ctx->original_channels->channel_info[i].channel_num ==
+				operating_channel)
+			return true;
+	return false;
+}
+
+/**
+ * disconnect_sta_and_stop_sap() - Disconnect STA and stop SAP
+ *
+ * @hdd_ctx: Pointer to hdd context
+ *
+ * Disable channels provided by user and disconnect STA if it is
+ * connected to any AP, stop SAP and send deauthentication request
+ * to STAs connected to SAP.
+ *
+ * Return: None
+ */
+static void disconnect_sta_and_stop_sap(struct hdd_context *hdd_ctx)
+{
+	struct hdd_adapter *adapter, *next = NULL;
+	QDF_STATUS status;
+
+	if (!hdd_ctx)
+		return;
+
+	hdd_check_and_disconnect_sta_on_invalid_channel(hdd_ctx);
+
+	status = hdd_get_front_adapter(hdd_ctx, &adapter);
+	while (adapter && (status == QDF_STATUS_SUCCESS)) {
+		if (!hdd_validate_adapter(adapter) &&
+		    (adapter->device_mode == QDF_SAP_MODE) &&
+		    (check_disable_channels(hdd_ctx,
+		     adapter->session.ap.operating_channel)))
+			wlan_hdd_stop_sap(adapter);
+
+		status = hdd_get_next_adapter(hdd_ctx, adapter, &next);
+		adapter = next;
+	}
 }
 
 /**
@@ -7207,8 +7315,10 @@ mem_alloc_failed:
 	qdf_mutex_release(&hdd_ctx->cache_channel_lock);
 	/* Disable the channels received in command SET_DISABLE_CHANNEL_LIST */
 	if (!is_command_repeated && hdd_ctx->original_channels) {
-		wlan_hdd_disable_channels(hdd_ctx);
-		hdd_check_and_disconnect_sta_on_invalid_channel(hdd_ctx);
+		ret = wlan_hdd_disable_channels(hdd_ctx);
+		if (ret)
+			return ret;
+		disconnect_sta_and_stop_sap(hdd_ctx);
 	}
 
 	hdd_exit();
@@ -7331,7 +7441,7 @@ static const struct hdd_drv_cmd hdd_drv_cmds[] = {
 	{"COUNTRY",                   drv_cmd_country, true},
 	{"SETCOUNTRYREV",             drv_cmd_country, true},
 	{"GETCOUNTRYREV",             drv_cmd_get_country, false},
-	{"SETSUSPENDMODE",            drv_cmd_dummy, false},
+	{"SETSUSPENDMODE",            drv_cmd_set_suspend_mode, true},
 	{"SET_AP_WPS_P2P_IE",         drv_cmd_dummy, false},
 	{"SETROAMTRIGGER",            drv_cmd_set_roam_trigger, true},
 	{"GETROAMTRIGGER",            drv_cmd_get_roam_trigger, false},

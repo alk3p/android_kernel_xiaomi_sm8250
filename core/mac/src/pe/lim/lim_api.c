@@ -1104,7 +1104,7 @@ static bool pe_filter_bcn_probe_frame(struct mac_context *mac_ctx,
 		if (!bcn_caps->ibss)
 			return false;
 
-		ssid_ie = wlan_get_ie_ptr_from_eid(SIR_MAC_SSID_EID,
+		ssid_ie = wlan_get_ie_ptr_from_eid(WLAN_ELEMID_SSID,
 				body + SIR_MAC_B_PR_SSID_OFFSET,
 				frame_len);
 
@@ -1316,7 +1316,8 @@ void pe_register_callbacks_with_wma(struct mac_context *mac,
 
 	status = wma_register_roaming_callbacks(
 			ready_req->csr_roam_synch_cb,
-			ready_req->pe_roam_synch_cb);
+			ready_req->pe_roam_synch_cb,
+			ready_req->pe_disconnect_cb);
 	if (status != QDF_STATUS_SUCCESS)
 		pe_err("Registering roaming callbacks with WMA failed");
 }
@@ -2053,30 +2054,51 @@ lim_roam_fill_bss_descr(struct mac_context *mac,
  *
  * Return: None
  */
-static void lim_copy_and_free_hlp_data_from_session(struct pe_session *session_ptr,
-				    struct roam_offload_synch_ind *roam_sync_ind_ptr)
+static void
+lim_copy_and_free_hlp_data_from_session(struct pe_session *session_ptr,
+					struct roam_offload_synch_ind
+					*roam_sync_ind_ptr)
 {
-	if (session_ptr->hlp_data && session_ptr->hlp_data_len) {
-		cds_copy_hlp_info(&session_ptr->dst_mac,
-				&session_ptr->src_mac,
-				session_ptr->hlp_data_len,
-				session_ptr->hlp_data,
-				&roam_sync_ind_ptr->dst_mac,
-				&roam_sync_ind_ptr->src_mac,
-				&roam_sync_ind_ptr->hlp_data_len,
-				roam_sync_ind_ptr->hlp_data);
-		qdf_mem_free(session_ptr->hlp_data);
-		session_ptr->hlp_data = NULL;
-		session_ptr->hlp_data_len = 0;
+	if (session_ptr->fils_info->hlp_data &&
+	    session_ptr->fils_info->hlp_data_len) {
+		cds_copy_hlp_info(&session_ptr->fils_info->dst_mac,
+				  &session_ptr->fils_info->src_mac,
+				  session_ptr->fils_info->hlp_data_len,
+				  session_ptr->fils_info->hlp_data,
+				  &roam_sync_ind_ptr->dst_mac,
+				  &roam_sync_ind_ptr->src_mac,
+				  &roam_sync_ind_ptr->hlp_data_len,
+				  roam_sync_ind_ptr->hlp_data);
+
+		qdf_mem_free(session_ptr->fils_info->hlp_data);
+		session_ptr->fils_info->hlp_data = NULL;
+		session_ptr->fils_info->hlp_data_len = 0;
 	}
 }
 #else
-static inline void lim_copy_and_free_hlp_data_from_session(
-					struct pe_session *session_ptr,
+static inline void
+lim_copy_and_free_hlp_data_from_session(struct pe_session *session_ptr,
 					struct roam_offload_synch_ind
 					*roam_sync_ind_ptr)
 {}
 #endif
+
+QDF_STATUS
+pe_disconnect_callback(struct mac_context *mac, uint8_t vdev_id)
+{
+	struct pe_session *session;
+
+	session = pe_find_session_by_sme_session_id(mac, vdev_id);
+	if (!session) {
+		pe_err("LFR3: Vdev %d doesn't exist", vdev_id);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	lim_tear_down_link_with_ap(mac, vdev_id,
+				   eSIR_MAC_UNSPEC_FAILURE_REASON);
+
+	return QDF_STATUS_SUCCESS;
+}
 
 QDF_STATUS
 pe_roam_synch_callback(struct mac_context *mac_ctx,
@@ -2195,6 +2217,18 @@ pe_roam_synch_callback(struct mac_context *mac_ctx,
 
 	/* Next routine may update nss based on dot11Mode */
 	lim_ft_prepare_add_bss_req(mac_ctx, false, ft_session_ptr, bss_desc);
+	if (session_ptr->is11Rconnection) {
+		ft_session_ptr->is11Rconnection = session_ptr->is11Rconnection;
+		if (session_ptr->fils_info &&
+		    session_ptr->fils_info->fils_ft_len) {
+			ft_session_ptr->fils_info->fils_ft_len =
+			       session_ptr->fils_info->fils_ft_len;
+			qdf_mem_copy(ft_session_ptr->fils_info->fils_ft,
+				     session_ptr->fils_info->fils_ft,
+				     session_ptr->fils_info->fils_ft_len);
+		}
+	}
+
 	roam_sync_ind_ptr->add_bss_params =
 		(tpAddBssParams) ft_session_ptr->ftPEContext.pAddBssReq;
 	add_bss_params = ft_session_ptr->ftPEContext.pAddBssReq;

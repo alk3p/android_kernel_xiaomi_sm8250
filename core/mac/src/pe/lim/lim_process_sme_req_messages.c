@@ -51,8 +51,10 @@
 #include "sap_api.h"
 #include <lim_ft.h>
 #include "cds_regdomain.h"
+#include <wlan_reg_services_api.h>
 #include "lim_process_fils.h"
 #include "wlan_utility.h"
+#include <wlan_crypto_global_api.h>
 
 /* SME REQ processing function templates */
 static bool __lim_process_sme_sys_ready_ind(struct mac_context *, uint32_t *);
@@ -371,6 +373,7 @@ static bool __lim_process_sme_sys_ready_ind(struct mac_context *mac,
 
 	if (ANI_DRIVER_TYPE(mac) != QDF_DRIVER_TYPE_MFG) {
 		ready_req->pe_roam_synch_cb = pe_roam_synch_callback;
+		ready_req->pe_disconnect_cb = pe_disconnect_callback;
 		pe_register_mgmt_rx_frm_callback(mac);
 		pe_register_callbacks_with_wma(mac, ready_req);
 		mac->lim.sme_msg_callback = ready_req->sme_msg_cb;
@@ -1024,9 +1027,9 @@ static void lim_update_sae_config(struct pe_session *session,
 {
 	session->sae_pmk_cached = sme_join_req->sae_pmk_cached;
 
-	pe_debug("pmk_cached %d for BSSID=" MAC_ADDRESS_STR,
+	pe_debug("pmk_cached %d for BSSID=" QDF_MAC_ADDR_STR,
 		session->sae_pmk_cached,
-		MAC_ADDR_ARRAY(sme_join_req->bssDescription.bssId));
+		QDF_MAC_ADDR_ARRAY(sme_join_req->bssDescription.bssId));
 }
 #else
 static inline void lim_update_sae_config(struct pe_session *session,
@@ -1133,6 +1136,88 @@ static QDF_STATUS lim_send_ft_reassoc_req(struct pe_session *session,
 }
 #endif
 
+#ifdef WLAN_FEATURE_11W
+#ifdef WLAN_CONV_CRYPTO_IE_SUPPORT
+/**
+ * lim_set_rmf_enabled() - set rmf enabled
+ * @mac: mac context
+ * @session: pe session
+ * @csr_join_req: csr join req
+ *
+ * Return: void
+ */
+static void lim_set_rmf_enabled(struct mac_context *mac,
+				struct pe_session *session,
+				struct join_req *csr_join_req)
+{
+	struct wlan_objmgr_vdev *vdev;
+	uint16_t rsn_caps;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(mac->psoc,
+						    csr_join_req->sessionId,
+						    WLAN_LEGACY_SME_ID);
+	if (!vdev) {
+		pe_err("Invalid vdev");
+		return;
+	}
+	rsn_caps = (uint16_t)wlan_crypto_get_param(vdev,
+						   WLAN_CRYPTO_PARAM_RSN_CAP);
+	if (wlan_crypto_vdev_has_mgmtcipher(
+				vdev,
+				(1 << WLAN_CRYPTO_CIPHER_AES_GMAC) |
+				(1 << WLAN_CRYPTO_CIPHER_AES_GMAC_256) |
+				(1 << WLAN_CRYPTO_CIPHER_AES_CMAC)) &&
+	    (rsn_caps & WLAN_CRYPTO_RSN_CAP_MFP_ENABLED) &&
+	    (rsn_caps & WLAN_CRYPTO_RSN_CAP_MFP_REQUIRED))
+		session->limRmfEnabled = 1;
+
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
+
+	pe_debug("vdev %d limRmfEnabled %d rsn_caps 0x%x",
+		 csr_join_req->sessionId, session->limRmfEnabled,
+		 rsn_caps);
+}
+#else
+/**
+ * lim_set_rmf_enabled() - set rmf enabled
+ * @mac: mac context
+ * @session: pe session
+ * @csr_join_req: csr join req
+ *
+ * Return: void
+ */
+static void lim_set_rmf_enabled(struct mac_context *mac,
+				struct pe_session *session,
+				struct join_req *csr_join_req)
+{
+	if ((eSIR_ED_AES_128_CMAC == csr_join_req->MgmtEncryptionType) ||
+	    (eSIR_ED_AES_GMAC_128 == csr_join_req->MgmtEncryptionType) ||
+	    (eSIR_ED_AES_GMAC_256 == csr_join_req->MgmtEncryptionType))
+		session->limRmfEnabled = 1;
+	else
+		session->limRmfEnabled = 0;
+
+	pe_debug("mgmt encryption type %d limRmfEnabled %d",
+		 csr_join_req->MgmtEncryptionType, session->limRmfEnabled);
+}
+#endif
+#else
+/**
+ * lim_set_rmf_enabled() - set rmf enabled
+ * @mac: mac context
+ * @session: pe session
+ * @csr_join_req: csr join req
+ *
+ * Return: void
+ */
+static inline void lim_set_rmf_enabled(struct mac_context *mac,
+				       struct pe_session *session,
+				       struct join_req *csr_join_req)
+
+{
+}
+#endif
+
 /**
  * __lim_process_sme_join_req() - process SME_JOIN_REQ message
  * @mac_ctx: Pointer to Global MAC structure
@@ -1159,6 +1244,7 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 	const uint8_t *vendor_ie;
 	tSirBssDescription *bss_desc;
 	QDF_STATUS status;
+	struct lim_max_tx_pwr_attr tx_pwr_attr = {0};
 
 	if (!mac_ctx || !msg_buf) {
 		QDF_TRACE(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_ERROR,
@@ -1213,9 +1299,9 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 
 		if (session) {
 			pe_err("Session(%d) Already exists for BSSID: "
-				   MAC_ADDRESS_STR " in limSmeState = %X",
+				   QDF_MAC_ADDR_STR " in limSmeState = %X",
 				session_id,
-				MAC_ADDR_ARRAY(bss_desc->bssId),
+				QDF_MAC_ADDR_ARRAY(bss_desc->bssId),
 				session->limSmeState);
 
 			if (session->limSmeState == eLIM_SME_LINK_EST_STATE &&
@@ -1402,15 +1488,7 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 
 
 		/* Record if management frames need to be protected */
-#ifdef WLAN_FEATURE_11W
-		if ((eSIR_ED_AES_128_CMAC ==
-					    sme_join_req->MgmtEncryptionType) ||
-		   (eSIR_ED_AES_GMAC_128 == sme_join_req->MgmtEncryptionType) ||
-		   (eSIR_ED_AES_GMAC_256 == sme_join_req->MgmtEncryptionType))
-			session->limRmfEnabled = 1;
-		else
-			session->limRmfEnabled = 0;
-#endif
+		lim_set_rmf_enabled(mac_ctx, session, sme_join_req);
 
 #ifdef FEATURE_WLAN_DIAG_SUPPORT_LIM
 		session->rssi = bss_desc->rssi;
@@ -1427,6 +1505,9 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 		 * to connect to, So input is coming from supplicant
 		 */
 		session->is11Rconnection = sme_join_req->is11Rconnection;
+		session->connected_akm = sme_join_req->akm;
+		session->is_adaptive_11r_connection =
+				sme_join_req->is_adaptive_11r_connection;
 #ifdef FEATURE_WLAN_ESE
 		session->isESEconnection = sme_join_req->isESEconnection;
 #endif
@@ -1438,7 +1519,7 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 		session->txLdpcIniFeatureEnabled =
 			sme_join_req->txLdpcIniFeatureEnabled;
 
-		lim_update_fils_config(session, sme_join_req);
+		lim_update_fils_config(mac_ctx, session, sme_join_req);
 		lim_update_sae_config(session, sme_join_req);
 		if (session->bssType == eSIR_INFRASTRUCTURE_MODE) {
 			session->limSystemRole = eLIM_STA_ROLE;
@@ -1523,9 +1604,16 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 			&session->gLimCurrentBssUapsd,
 			&local_power_constraint, session);
 
-		session->maxTxPower = lim_get_max_tx_power(reg_max,
-					local_power_constraint,
-					mac_ctx->mlme_cfg->power.max_tx_power);
+		tx_pwr_attr.reg_max = reg_max;
+		tx_pwr_attr.ap_tx_power = local_power_constraint;
+		tx_pwr_attr.ini_tx_power =
+				mac_ctx->mlme_cfg->power.max_tx_power;
+		tx_pwr_attr.frequency =
+			wlan_reg_get_channel_freq(mac_ctx->pdev,
+						  session->currentOperChannel);
+
+		session->maxTxPower = lim_get_max_tx_power(mac_ctx,
+							   &tx_pwr_attr);
 		session->def_max_tx_pwr = session->maxTxPower;
 
 		pe_debug("Reg max %d local power con %d max tx pwr %d",
@@ -1623,21 +1711,29 @@ end:
 		eSIR_MAC_UNSPEC_FAILURE_STATUS, session, sme_session_id);
 }
 
-uint8_t lim_get_max_tx_power(int8_t regMax, int8_t apTxPower,
-			     uint8_t iniTxPower)
+uint8_t lim_get_max_tx_power(struct mac_context *mac,
+			     struct lim_max_tx_pwr_attr *attr)
 {
-	uint8_t maxTxPower = 0;
-	uint8_t txPower = QDF_MIN(regMax, (apTxPower));
+	uint8_t max_tx_power = 0;
+	uint8_t tx_power;
 
-	txPower = QDF_MIN(txPower, iniTxPower);
-	if ((txPower >= MIN_TX_PWR_CAP) && (txPower <= MAX_TX_PWR_CAP))
-		maxTxPower = txPower;
-	else if (txPower < MIN_TX_PWR_CAP)
-		maxTxPower = MIN_TX_PWR_CAP;
+	if (!attr)
+		return 0;
+
+	if (wlan_reg_get_fcc_constraint(mac->pdev, attr->frequency))
+		return attr->reg_max;
+
+	tx_power = QDF_MIN(attr->reg_max, attr->ap_tx_power);
+	tx_power = QDF_MIN(tx_power, attr->ini_tx_power);
+
+	if (tx_power >= MIN_TX_PWR_CAP && tx_power <= MAX_TX_PWR_CAP)
+		max_tx_power = tx_power;
+	else if (tx_power < MIN_TX_PWR_CAP)
+		max_tx_power = MIN_TX_PWR_CAP;
 	else
-		maxTxPower = MAX_TX_PWR_CAP;
+		max_tx_power = MAX_TX_PWR_CAP;
 
-	return maxTxPower;
+	return max_tx_power;
 }
 
 /**
@@ -1990,17 +2086,17 @@ static void __lim_process_sme_disassoc_req(struct mac_context *mac,
 				&sessionId);
 	if (!pe_session) {
 		pe_err("session does not exist for given bssId "
-			   MAC_ADDRESS_STR,
-			MAC_ADDR_ARRAY(smeDisassocReq.bssid.bytes));
+			   QDF_MAC_ADDR_STR,
+			QDF_MAC_ADDR_ARRAY(smeDisassocReq.bssid.bytes));
 		retCode = eSIR_SME_INVALID_PARAMETERS;
 		disassocTrigger = eLIM_HOST_DISASSOC;
 		goto sendDisassoc;
 	}
 	pe_debug("received DISASSOC_REQ message on sessionid %d Systemrole %d Reason: %u SmeState: %d from: "
-			MAC_ADDRESS_STR, smesessionId,
+			QDF_MAC_ADDR_STR, smesessionId,
 		GET_LIM_SYSTEM_ROLE(pe_session), smeDisassocReq.reasonCode,
 		mac->lim.gLimSmeState,
-		MAC_ADDR_ARRAY(smeDisassocReq.peer_macaddr.bytes));
+		QDF_MAC_ADDR_ARRAY(smeDisassocReq.peer_macaddr.bytes));
 
 #ifdef FEATURE_WLAN_DIAG_SUPPORT_LIM    /* FEATURE_WLAN_DIAG_SUPPORT */
 	lim_diag_event_report(mac, WLAN_PE_DIAG_DISASSOC_REQ_EVENT, pe_session,
@@ -2261,8 +2357,8 @@ void __lim_process_sme_disassoc_cnf(struct mac_context *mac, uint32_t *pMsgBuf)
 				&pe_session->dph.dphHashTable);
 		if (!sta) {
 			pe_err("DISASSOC_CNF for a STA with no context, addr= "
-				MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(smeDisassocCnf.peer_macaddr.bytes));
+				QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(smeDisassocCnf.peer_macaddr.bytes));
 			status = lim_prepare_disconnect_done_ind(mac, &msg,
 						pe_session->smeSessionId,
 						eSIR_SME_INVALID_PARAMETERS,
@@ -2278,8 +2374,8 @@ void __lim_process_sme_disassoc_cnf(struct mac_context *mac, uint32_t *pMsgBuf)
 				eLIM_MLM_WT_DEL_STA_RSP_STATE) ||
 			(sta->mlmStaContext.mlmState ==
 				eLIM_MLM_WT_DEL_BSS_RSP_STATE)) {
-			pe_err("No need of cleanup for addr:" MAC_ADDRESS_STR "as MLM state is %d",
-				MAC_ADDR_ARRAY(smeDisassocCnf.peer_macaddr.bytes),
+			pe_err("No need of cleanup for addr:" QDF_MAC_ADDR_STR "as MLM state is %d",
+				QDF_MAC_ADDR_ARRAY(smeDisassocCnf.peer_macaddr.bytes),
 				sta->mlmStaContext.mlmState);
 			status = lim_prepare_disconnect_done_ind(mac, &msg,
 						pe_session->smeSessionId,
@@ -2352,10 +2448,10 @@ static void __lim_process_sme_deauth_req(struct mac_context *mac_ctx,
 		goto send_deauth;
 	}
 	pe_debug("received DEAUTH_REQ sessionid %d Systemrole %d reasoncode %u limSmestate %d from "
-		MAC_ADDRESS_STR, sme_session_id,
+		QDF_MAC_ADDR_STR, sme_session_id,
 		GET_LIM_SYSTEM_ROLE(session_entry), sme_deauth_req.reasonCode,
 		session_entry->limSmeState,
-		MAC_ADDR_ARRAY(sme_deauth_req.peer_macaddr.bytes));
+		QDF_MAC_ADDR_ARRAY(sme_deauth_req.peer_macaddr.bytes));
 #ifdef FEATURE_WLAN_DIAG_SUPPORT_LIM    /* FEATURE_WLAN_DIAG_SUPPORT */
 	lim_diag_event_report(mac_ctx, WLAN_PE_DIAG_DEAUTH_REQ_EVENT,
 			session_entry, 0, sme_deauth_req.reasonCode);
@@ -3258,8 +3354,8 @@ static void __lim_process_sme_delts_req(struct mac_context *mac, uint32_t *pMsgB
 	}
 
 	pe_debug("Sent DELTS request to station with assocId = %d MacAddr = "
-		MAC_ADDRESS_STR,
-		pDeltsReq->aid, MAC_ADDR_ARRAY(peerMacAddr));
+		QDF_MAC_ADDR_STR,
+		pDeltsReq->aid, QDF_MAC_ADDR_ARRAY(peerMacAddr));
 
 	lim_send_delts_req_action_frame(mac, peerMacAddr,
 					pDeltsReq->req.wmeTspecPresent,
@@ -4192,14 +4288,14 @@ static void __lim_process_send_disassoc_frame(struct mac_context *mac_ctx,
 							  req->session_id);
 	if (!session_entry) {
 		pe_err("session does not exist for given bssId "
-		       MAC_ADDRESS_STR, MAC_ADDR_ARRAY(req->peer_mac));
+		       QDF_MAC_ADDR_STR, QDF_MAC_ADDR_ARRAY(req->peer_mac));
 		return;
 	}
 
 	pe_debug("msg_type->%d len->%d sess_id->%d mac->"
-		 MAC_ADDRESS_STR " reason->%d wait_for_ack->%d",
+		 QDF_MAC_ADDR_STR " reason->%d wait_for_ack->%d",
 		 req->msg_type, req->length,  req->session_id,
-		 MAC_ADDR_ARRAY(req->peer_mac), req->reason, req->wait_for_ack);
+		 QDF_MAC_ADDR_ARRAY(req->peer_mac), req->reason, req->wait_for_ack);
 
 	lim_send_disassoc_mgmt_frame(mac_ctx, req->reason, req->peer_mac,
 				     session_entry, req->wait_for_ack);
@@ -4240,7 +4336,7 @@ static void lim_set_pdev_ht_ie(struct mac_context *mac_ctx, uint8_t pdev_id,
 			qdf_mem_free(ie_params);
 			return;
 		}
-		*ie_params->ie_ptr = SIR_MAC_HT_CAPABILITIES_EID;
+		*ie_params->ie_ptr = WLAN_ELEMID_HTCAP_ANA;
 		*(ie_params->ie_ptr + 1) = ie_params->ie_len - 2;
 		lim_set_ht_caps(mac_ctx, NULL, ie_params->ie_ptr,
 				ie_params->ie_len);
@@ -4310,7 +4406,7 @@ static void lim_set_pdev_vht_ie(struct mac_context *mac_ctx, uint8_t pdev_id,
 			qdf_mem_free(ie_params);
 			return;
 		}
-		*ie_params->ie_ptr = SIR_MAC_VHT_CAPABILITIES_EID;
+		*ie_params->ie_ptr = WLAN_ELEMID_VHTCAP;
 		*(ie_params->ie_ptr + 1) = ie_params->ie_len - 2;
 		lim_set_vht_caps(mac_ctx, NULL, ie_params->ie_ptr,
 				ie_params->ie_len);
@@ -4512,12 +4608,29 @@ static void lim_process_sme_disassoc_cnf(struct mac_context *mac_ctx,
 	struct disassoc_cnf sme_disassoc_cnf;
 	struct pe_session *session;
 	uint8_t session_id;
+	uint32_t *err_msg = NULL;
+	QDF_STATUS status;
 
 	qdf_mem_copy(&sme_disassoc_cnf, msg->bodyptr, sizeof(sme_disassoc_cnf));
 
 	session = pe_find_session_by_bssid(mac_ctx,
 					   sme_disassoc_cnf.bssid.bytes,
 					   &session_id);
+	if (!session) {
+		pe_err("session not found for bssid:%pM",
+		       sme_disassoc_cnf.bssid.bytes);
+		status = lim_prepare_disconnect_done_ind
+						(mac_ctx, &err_msg,
+						sme_disassoc_cnf.sme_session_id,
+						eSIR_SME_INVALID_SESSION,
+						NULL);
+
+		if (QDF_IS_STATUS_SUCCESS(status))
+			lim_send_sme_disassoc_deauth_ntf(mac_ctx,
+							 QDF_STATUS_SUCCESS,
+							 err_msg);
+		return;
+	}
 
 	if (LIM_IS_STA_ROLE(session))
 		lim_process_disconnect_sta(session, msg);
@@ -4538,6 +4651,18 @@ static void lim_process_sme_disassoc_req(struct mac_context *mac_ctx,
 	session = pe_find_session_by_bssid(mac_ctx,
 					   disassoc_req.bssid.bytes,
 					   &session_id);
+	if (!session) {
+		pe_err("session not found for bssid:%pM",
+		       disassoc_req.bssid.bytes);
+		lim_send_sme_disassoc_ntf(mac_ctx,
+					  disassoc_req.peer_macaddr.bytes,
+					  eSIR_SME_INVALID_PARAMETERS,
+					  eLIM_HOST_DISASSOC, 1,
+					  disassoc_req.sessionId, NULL);
+
+		return;
+	}
+
 	if (LIM_IS_STA_ROLE(session))
 		lim_process_disconnect_sta(session, msg);
 	else
@@ -4557,6 +4682,18 @@ static void lim_process_sme_deauth_req(struct mac_context *mac_ctx,
 	session = pe_find_session_by_bssid(mac_ctx,
 					   sme_deauth_req.bssid.bytes,
 					   &session_id);
+	if (!session) {
+		pe_err("session not found for bssid:%pM",
+		       sme_deauth_req.bssid.bytes);
+		lim_send_sme_deauth_ntf(mac_ctx,
+					sme_deauth_req.peer_macaddr.bytes,
+					eSIR_SME_INVALID_PARAMETERS,
+					eLIM_HOST_DEAUTH, 1,
+					sme_deauth_req.sessionId);
+
+		return;
+	}
+
 	if (LIM_IS_STA_ROLE(session))
 		lim_process_disconnect_sta(session, msg);
 	else
@@ -5263,8 +5400,8 @@ static void lim_process_modify_add_ies(struct mac_context *mac_ctx,
 
 	if (!session_entry) {
 		pe_err("Session not found for given bssid"
-					MAC_ADDRESS_STR,
-		MAC_ADDR_ARRAY(modify_add_ies->modifyIE.bssid.bytes));
+					QDF_MAC_ADDR_STR,
+		QDF_MAC_ADDR_ARRAY(modify_add_ies->modifyIE.bssid.bytes));
 		goto end;
 	}
 	if ((0 == modify_add_ies->modifyIE.ieBufferlength) ||
@@ -5354,8 +5491,8 @@ static void lim_process_update_add_ies(struct mac_context *mac_ctx,
 
 	if (!session_entry) {
 		pe_debug("Session not found for given bssid"
-			 MAC_ADDRESS_STR,
-			 MAC_ADDR_ARRAY(update_ie->bssid.bytes));
+			 QDF_MAC_ADDR_STR,
+			 QDF_MAC_ADDR_ARRAY(update_ie->bssid.bytes));
 		goto end;
 	}
 	addn_ie = &session_entry->add_ie_params;
@@ -5584,8 +5721,8 @@ static void lim_process_sme_dfs_csa_ie_request(struct mac_context *mac_ctx,
 	session_entry = pe_find_session_by_bssid(mac_ctx,
 			dfs_csa_ie_req->bssid, &session_id);
 	if (!session_entry) {
-		pe_err("Session not found for given BSSID" MAC_ADDRESS_STR,
-			MAC_ADDR_ARRAY(dfs_csa_ie_req->bssid));
+		pe_err("Session not found for given BSSID" QDF_MAC_ADDR_STR,
+			QDF_MAC_ADDR_ARRAY(dfs_csa_ie_req->bssid));
 		return;
 	}
 

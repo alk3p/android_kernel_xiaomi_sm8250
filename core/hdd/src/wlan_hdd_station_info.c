@@ -97,10 +97,20 @@
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_CH_WIDTH
 #define REMOTE_SGI_ENABLE\
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_SGI_ENABLE
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
-	#define REMOTE_PAD\
+#define REMOTE_PAD\
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_PAD
-#endif
+#define REMOTE_RX_RETRY_COUNT \
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_RX_RETRY_COUNT
+#define REMOTE_RX_BC_MC_COUNT \
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_RX_BC_MC_COUNT
+
+/*
+ * MSB of rx_mc_bc_cnt indicates whether FW supports rx_mc_bc_cnt
+ * feature or not, if first bit is 1 it indictes that FW supports this
+ * feature, if it is 0 it indicates FW doesn't support this feature
+ */
+#define HDD_STATION_INFO_RX_MC_BC_COUNT (1 << 31)
+
 
 static const struct nla_policy
 hdd_get_station_policy[STATION_MAX + 1] = {
@@ -320,9 +330,12 @@ static int32_t hdd_add_tx_bitrate(struct sk_buff *skb,
 	}
 
 	/* cfg80211_calculate_bitrate will return 0 for mcs >= 32 */
-	bitrate = cfg80211_calculate_bitrate(&hdd_sta_ctx->
-						cache_conn_info.txrate);
-
+	if (hdd_conn_is_connected(hdd_sta_ctx))
+		bitrate = cfg80211_calculate_bitrate(
+				&hdd_sta_ctx->cache_conn_info.max_tx_bitrate);
+	else
+		bitrate = cfg80211_calculate_bitrate(
+					&hdd_sta_ctx->cache_conn_info.txrate);
 	/* report 16-bit bitrate only if we can */
 	bitrate_compat = bitrate < (1UL << 16) ? bitrate : 0;
 
@@ -357,6 +370,53 @@ fail:
 }
 
 /**
+ * hdd_get_max_tx_bitrate() - Get the max tx bitrate of the AP
+ * @hdd_ctx: hdd context
+ * @adapter: hostapd interface
+ *
+ * THis function gets the MAX supported rate by AP and cache
+ * it into connection info structure
+ *
+ * Return: None
+ */
+static void hdd_get_max_tx_bitrate(struct hdd_context *hdd_ctx,
+				   struct hdd_adapter *adapter)
+{
+	struct station_info sinfo;
+	uint8_t tx_rate_flags, tx_mcs_index, tx_nss = 1;
+	uint16_t my_tx_rate;
+	struct hdd_station_ctx *hdd_sta_ctx;
+
+	hdd_sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+
+	qdf_mem_zero(&sinfo, sizeof(struct station_info));
+
+	sinfo.signal = adapter->rssi;
+	tx_rate_flags = adapter->hdd_stats.class_a_stat.tx_rx_rate_flags;
+	tx_mcs_index = adapter->hdd_stats.class_a_stat.tx_mcs_index;
+	my_tx_rate = adapter->hdd_stats.class_a_stat.tx_rate;
+
+	if (!(tx_rate_flags & TX_RATE_LEGACY)) {
+		tx_nss = adapter->hdd_stats.class_a_stat.tx_nss;
+		if (tx_nss > 1 &&
+		    policy_mgr_is_current_hwmode_dbs(hdd_ctx->psoc) &&
+		    !policy_mgr_is_hw_dbs_2x2_capable(hdd_ctx->psoc)) {
+			hdd_debug("Hw mode is DBS, Reduce nss(%d) to 1",
+				  tx_nss);
+			tx_nss--;
+		}
+	}
+	if (hdd_report_max_rate(hdd_ctx->mac_handle, &sinfo.txrate,
+				sinfo.signal, tx_rate_flags, tx_mcs_index,
+				my_tx_rate, tx_nss)) {
+		hdd_sta_ctx->cache_conn_info.max_tx_bitrate = sinfo.txrate;
+		hdd_debug("Reporting max tx rate flags %d mcs %d nss %d bw %d",
+			  sinfo.txrate.flags, sinfo.txrate.mcs,
+			  sinfo.txrate.nss, sinfo.txrate.bw);
+	}
+}
+
+/**
  * hdd_add_sta_info() - add station info attribute
  * @skb: pointer to sk buff
  * @hdd_sta_ctx: pointer to hdd station context
@@ -365,10 +425,18 @@ fail:
  * Return: Success(0) or reason code for failure
  */
 static int32_t hdd_add_sta_info(struct sk_buff *skb,
-				struct hdd_station_ctx *hdd_sta_ctx,
+				struct hdd_context *hdd_ctx,
+				struct hdd_adapter *adapter,
 				int idx)
 {
 	struct nlattr *nla_attr;
+	struct hdd_station_ctx *hdd_sta_ctx;
+
+	hdd_sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+	if (!hdd_sta_ctx) {
+		hdd_err("Invalid sta ctx");
+		goto fail;
+	}
 
 	nla_attr = nla_nest_start(skb, idx);
 	if (!nla_attr) {
@@ -381,6 +449,9 @@ static int32_t hdd_add_sta_info(struct sk_buff *skb,
 		hdd_err("put fail");
 		goto fail;
 	}
+	if (hdd_conn_is_connected(hdd_sta_ctx))
+		hdd_get_max_tx_bitrate(hdd_ctx, adapter);
+
 	if (hdd_add_tx_bitrate(skb, hdd_sta_ctx, NL80211_STA_INFO_TX_BITRATE)) {
 		hdd_err("hdd_add_tx_bitrate failed");
 		goto fail;
@@ -432,9 +503,17 @@ fail:
  */
 static int32_t
 hdd_add_link_standard_info(struct sk_buff *skb,
-			   struct hdd_station_ctx *hdd_sta_ctx, int idx)
+			   struct hdd_context *hdd_ctx,
+			   struct hdd_adapter *adapter, int idx)
 {
 	struct nlattr *nla_attr;
+	struct hdd_station_ctx *hdd_sta_ctx;
+
+	hdd_sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+	if (!hdd_sta_ctx) {
+		hdd_err("Invalid sta ctx");
+		goto fail;
+	}
 
 	nla_attr = nla_nest_start(skb, idx);
 	if (!nla_attr) {
@@ -459,7 +538,7 @@ hdd_add_link_standard_info(struct sk_buff *skb,
 		goto fail;
 	}
 
-	if (hdd_add_sta_info(skb, hdd_sta_ctx, NL80211_ATTR_STA_INFO)) {
+	if (hdd_add_sta_info(skb, hdd_ctx, adapter, NL80211_ATTR_STA_INFO)) {
 		hdd_err("hdd_add_sta_info failed");
 		goto fail;
 	}
@@ -558,7 +637,7 @@ static int hdd_get_station_info(struct hdd_context *hdd_ctx,
 		return -ENOMEM;
 	}
 
-	if (hdd_add_link_standard_info(skb, hdd_sta_ctx,
+	if (hdd_add_link_standard_info(skb, hdd_ctx, adapter,
 				       LINK_INFO_STANDARD_NL80211_ATTR)) {
 		hdd_err("put fail");
 		goto fail;
@@ -936,8 +1015,8 @@ static int hdd_get_cached_station_remote(struct hdd_context *hdd_ctx,
 	uint8_t channel_width;
 
 	if (!stainfo) {
-		hdd_err("peer " MAC_ADDRESS_STR " not found",
-			MAC_ADDR_ARRAY(mac_addr.bytes));
+		hdd_err("peer " QDF_MAC_ADDR_STR " not found",
+			QDF_MAC_ADDR_ARRAY(mac_addr.bytes));
 		return -EINVAL;
 	}
 
@@ -947,8 +1026,12 @@ static int hdd_get_cached_station_remote(struct hdd_context *hdd_ctx,
 			(sizeof(stainfo->ch_width) + NLA_HDRLEN) +
 			(sizeof(stainfo->tx_rate) + NLA_HDRLEN) +
 			(sizeof(stainfo->rx_rate) + NLA_HDRLEN) +
-			(sizeof(stainfo->support_mode) + NLA_HDRLEN);
+			(sizeof(stainfo->support_mode) + NLA_HDRLEN) +
 
+			(sizeof(stainfo->rx_mc_bc_cnt) +
+			 NLA_HDRLEN) +
+			(sizeof(stainfo->rx_retry_cnt) +
+			 NLA_HDRLEN);
 	skb = cfg80211_vendor_cmd_alloc_reply_skb(hdd_ctx->wiphy, nl_buf_len);
 	if (!skb) {
 		hdd_err("cfg80211_vendor_cmd_alloc_reply_skb failed");
@@ -987,6 +1070,26 @@ static int hdd_get_cached_station_remote(struct hdd_context *hdd_ctx,
 	if (nla_put_u32(skb, WLAN802_11_MODE, stainfo->dot11_mode)) {
 		hdd_err("dot11 mode put fail");
 		goto fail;
+	}
+
+	if (!(stainfo->rx_mc_bc_cnt & HDD_STATION_INFO_RX_MC_BC_COUNT)) {
+		hdd_debug("rx mc bc count is not supported by FW");
+	}
+
+	else if (nla_put_u32(skb, REMOTE_RX_BC_MC_COUNT,
+			     (stainfo->rx_mc_bc_cnt &
+			      (~HDD_STATION_INFO_RX_MC_BC_COUNT)))) {
+		hdd_err("rx mc bc put fail");
+		goto fail;
+	}
+
+	/* Currently rx_retry count is not supported */
+	if (stainfo->rx_retry_cnt) {
+		if (nla_put_u32(skb, REMOTE_RX_RETRY_COUNT,
+				stainfo->rx_retry_cnt)) {
+			hdd_err("rx retry count put fail");
+			goto fail;
+		}
 	}
 
 	qdf_mem_zero(stainfo, sizeof(*stainfo));
@@ -1219,8 +1322,8 @@ __hdd_cfg80211_get_station_cmd(struct wiphy *wiphy,
 		nla_memcpy(mac_addr.bytes, tb[STATION_REMOTE],
 			   QDF_MAC_ADDR_SIZE);
 
-		hdd_debug("STATION_REMOTE " MAC_ADDRESS_STR,
-			  MAC_ADDR_ARRAY(mac_addr.bytes));
+		hdd_debug("STATION_REMOTE " QDF_MAC_ADDR_STR,
+			  QDF_MAC_ADDR_ARRAY(mac_addr.bytes));
 
 		status = hdd_get_station_remote(hdd_ctx, adapter, mac_addr);
 	} else {

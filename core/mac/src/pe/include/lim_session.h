@@ -76,6 +76,12 @@ typedef struct join_params {
 	tSirResultCodes result_code;
 } join_params;
 
+struct reassoc_params {
+	uint16_t prot_status_code;
+	tSirResultCodes result_code;
+	struct pe_session *session;
+};
+
 #ifdef WLAN_FEATURE_11AX_BSS_COLOR
 #define MAX_BSS_COLOR_VALUE 63
 #define TIME_BEACON_NOT_UPDATED 30000
@@ -110,12 +116,23 @@ struct obss_detection_cfg {
 	uint8_t obss_ht_20mhz_detect_mode;
 };
 
+#define ADAPTIVE_11R_STA_IE_LEN   0x0B
+#define ADAPTIVE_11R_STA_OUI      "\x00\x00\x0f\x22"
+#define ADAPTIVE_11R_OUI_LEN      0x04
+#define ADAPTIVE_11R_OUI_SUBTYPE  0x00
+#define ADAPTIVE_11R_OUI_VERSION  0x01
+#define ADAPTIVE_11R_DATA_LEN      0x04
+#define ADAPTIVE_11R_OUI_DATA     "\x00\x00\x00\x01"
+
 /**
  * struct pe_session - per-vdev PE context
  * @available: true if the entry is available, false if it is in use
  * @peSessionId: unique ID assigned to the entry
  * @vdev_id: ID of the vdev for which this entry is applicable
  * @vdev: the actual vdev for which this entry is applicable
+ * @connected_akm: AKM of current connection
+ * @is_adaptive_11R_connection: flag to check if we are connecting
+ * to Adaptive 11R network
  */
 struct pe_session {
 	/* To check session table is in use or free */
@@ -151,6 +168,8 @@ struct pe_session {
 	uint16_t channelChangeReasonCode;
 	uint8_t dot11mode;
 	uint8_t htCapability;
+	enum ani_akm_type connected_akm;
+
 	/* Supported Channel Width Set: 0-20MHz 1 - 40MHz */
 	uint8_t htSupportedChannelWidthSet;
 	/* Recommended Tx Width Set
@@ -303,6 +322,7 @@ struct pe_session {
 	enum QDF_OPMODE pePersona;
 	int8_t txMgmtPower;
 	bool is11Rconnection;
+	bool is_adaptive_11r_connection;
 
 #ifdef FEATURE_WLAN_ESE
 	bool isESEconnection;
@@ -533,10 +553,6 @@ struct pe_session {
 	bool he_with_wep_tkip;
 #ifdef WLAN_FEATURE_FILS_SK
 	struct pe_fils_session *fils_info;
-	struct qdf_mac_addr dst_mac;
-	struct qdf_mac_addr src_mac;
-	uint16_t hlp_data_len;
-	uint8_t *hlp_data;
 #endif
 	/* previous auth frame's sequence number */
 	uint16_t prev_auth_seq_num;

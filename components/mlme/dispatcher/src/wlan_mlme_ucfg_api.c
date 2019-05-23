@@ -125,7 +125,28 @@ QDF_STATUS ucfg_mlme_init(void)
 		mlme_err("unable to register psoc create handle");
 		return status;
 	}
+
 	status = ucfg_mlme_vdev_init();
+	if (QDF_IS_STATUS_ERROR(status))
+		return status;
+
+	status = wlan_objmgr_register_peer_create_handler(
+			WLAN_UMAC_COMP_MLME,
+			mlme_peer_object_created_notification,
+			NULL);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		mlme_err("peer create register notification failed");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	status = wlan_objmgr_register_peer_destroy_handler(
+			WLAN_UMAC_COMP_MLME,
+			mlme_peer_object_destroyed_notification,
+			NULL);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		mlme_err("peer destroy register notification failed");
+		return QDF_STATUS_E_FAILURE;
+	}
 
 	return status;
 }
@@ -133,6 +154,20 @@ QDF_STATUS ucfg_mlme_init(void)
 QDF_STATUS ucfg_mlme_deinit(void)
 {
 	QDF_STATUS status;
+
+	status = wlan_objmgr_unregister_peer_destroy_handler(
+			WLAN_UMAC_COMP_MLME,
+			mlme_peer_object_destroyed_notification,
+			NULL);
+	if (QDF_IS_STATUS_ERROR(status))
+		mlme_err("unable to unregister peer destroy handle");
+
+	status = wlan_objmgr_unregister_peer_create_handler(
+			WLAN_UMAC_COMP_MLME,
+			mlme_peer_object_created_notification,
+			NULL);
+	if (QDF_IS_STATUS_ERROR(status))
+		mlme_err("unable to unregister peer create handle");
 
 	status = ucfg_mlme_vdev_deinit();
 	if (QDF_IS_STATUS_ERROR(status))
@@ -740,6 +775,20 @@ ucfg_mlme_get_first_scan_bucket_threshold(struct wlan_objmgr_psoc *psoc,
 }
 
 QDF_STATUS
+ucfg_mlme_set_fw_supported_roaming_akm(struct wlan_objmgr_psoc *psoc,
+				       uint32_t val)
+{
+	struct wlan_mlme_psoc_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_obj(psoc);
+	if (!mlme_obj)
+		return QDF_STATUS_E_INVAL;
+
+	mlme_obj->cfg.lfr.fw_akm_bitmap = val;
+	return QDF_STATUS_SUCCESS;
+}
+
+QDF_STATUS
 ucfg_mlme_is_mawc_enabled(struct wlan_objmgr_psoc *psoc, bool *val)
 {
 	struct wlan_mlme_psoc_obj *mlme_obj;
@@ -799,6 +848,23 @@ ucfg_mlme_set_fast_transition_enabled(struct wlan_objmgr_psoc *psoc,
 
 	return QDF_STATUS_SUCCESS;
 }
+
+#ifdef WLAN_ADAPTIVE_11R
+QDF_STATUS
+ucfg_mlme_set_tgt_adaptive_11r_cap(struct wlan_objmgr_psoc *psoc,
+				   bool val)
+{
+	struct wlan_mlme_psoc_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_obj(psoc);
+	if (!mlme_obj)
+		return QDF_STATUS_E_INVAL;
+
+	mlme_obj->cfg.lfr.tgt_adaptive_11r_cap = val;
+
+	return QDF_STATUS_SUCCESS;
+}
+#endif
 
 QDF_STATUS
 ucfg_mlme_is_roam_scan_offload_enabled(struct wlan_objmgr_psoc *psoc,

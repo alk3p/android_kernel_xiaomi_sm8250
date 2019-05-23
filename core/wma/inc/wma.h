@@ -809,7 +809,6 @@ struct wma_txrx_node {
 	uint8_t rmfEnabled;
 #ifdef WLAN_FEATURE_11W
 	wma_igtk_key_t key;
-	uint32_t ucast_key_cipher;
 #endif /* WLAN_FEATURE_11W */
 	uint32_t uapsd_cached_val;
 	tAniGetPEStatsRsp *stats_rsp;
@@ -1160,6 +1159,8 @@ typedef struct {
 		struct roam_offload_synch_ind *roam_synch_data,
 		struct bss_description *bss_desc_ptr,
 		enum sir_roam_op_code reason);
+	QDF_STATUS (*pe_disconnect_cb) (struct mac_context *mac,
+					uint8_t vdev_id);
 	qdf_wake_lock_t wmi_cmd_rsp_wake_lock;
 	qdf_runtime_lock_t wmi_cmd_rsp_runtime_lock;
 	enum active_apf_mode active_uc_apf_mode;
@@ -2557,6 +2558,17 @@ uint8_t wma_rx_invalid_peer_ind(uint8_t vdev_id, void *wh);
 struct wlan_objmgr_psoc *wma_get_psoc_from_scn_handle(void *scn_handle);
 
 #ifdef CRYPTO_SET_KEY_CONVERGED
+
+/**
+ * wma_set_peer_ucast_cipher() - Update unicast cipher fof the peer
+ * @mac_addr: peer mac address
+ * @cipher: peer cipher type
+ *
+ * Return: None
+ */
+void wma_set_peer_ucast_cipher(uint8_t *mac_addr,
+			       enum wlan_crypto_cipher_type cipher);
+
 /**
  * wma_update_set_key() - Update WMA layer for set key
  * @session_id: vdev session identifier

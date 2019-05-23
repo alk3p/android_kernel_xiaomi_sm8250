@@ -52,6 +52,7 @@
 #include <wlan_reg_ucfg_api.h>
 #include <wlan_cfg80211_crypto.h>
 #include <wlan_crypto_global_api.h>
+#include "cfg_ucfg_api.h"
 #include "wlan_mlme_ucfg_api.h"
 
 #define SAP_DEBUG
@@ -519,6 +520,7 @@ wlansap_set_scan_acs_channel_params(struct sap_config *config,
 {
 	struct mac_context *mac;
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	uint32_t auto_channel_select_weight;
 
 	if (!config) {
 		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
@@ -532,14 +534,29 @@ wlansap_set_scan_acs_channel_params(struct sap_config *config,
 		return QDF_STATUS_E_FAULT;
 	}
 
+	mac = sap_get_mac_context();
+	if (!mac) {
+		sap_err("Invalid MAC context");
+		return QDF_STATUS_E_INVAL;
+	}
+
 	/* Channel selection is auto or configured */
 	psap_ctx->channel = config->channel;
 	psap_ctx->dfs_mode = config->acs_dfs_mode;
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
 	psap_ctx->cc_switch_mode = config->cc_switch_mode;
 #endif
-	psap_ctx->auto_channel_select_weight =
-		 config->auto_channel_select_weight;
+	status = ucfg_mlme_get_auto_channel_weight(
+					mac->psoc,
+					&auto_channel_select_weight);
+
+	if (!QDF_IS_STATUS_SUCCESS(status))
+		sap_err("get_auto_channel_weight failed");
+
+	psap_ctx->auto_channel_select_weight = auto_channel_select_weight;
+	sap_debug("auto_channel_select_weight %d",
+		  psap_ctx->auto_channel_select_weight);
+
 	psap_ctx->user_context = pusr_context;
 	psap_ctx->enableOverLapCh = config->enOverLapCh;
 	psap_ctx->acs_cfg = &config->acs_cfg;
@@ -558,12 +575,6 @@ wlansap_set_scan_acs_channel_params(struct sap_config *config,
 		config->self_macaddr.bytes, QDF_MAC_ADDR_SIZE);
 	qdf_mem_copy(psap_ctx->self_mac_addr,
 		config->self_macaddr.bytes, QDF_MAC_ADDR_SIZE);
-
-	mac = sap_get_mac_context();
-	if (!mac) {
-		QDF_TRACE_ERROR(QDF_MODULE_ID_SAP, "Invalid MAC context");
-		return QDF_STATUS_E_FAULT;
-	}
 
 	return status;
 }
@@ -668,6 +679,9 @@ QDF_STATUS wlansap_start_bss(struct sap_context *sap_ctx,
 {
 	struct sap_sm_event sap_event;        /* State machine event */
 	QDF_STATUS qdf_status = QDF_STATUS_SUCCESS;
+	uint32_t auto_channel_select_weight =
+			cfg_default(CFG_AUTO_CHANNEL_SELECT_WEIGHT);
+	int reduced_beacon_interval;
 	struct mac_context *pmac = NULL;
 	int sap_chanswitch_beacon_cnt;
 	bool sap_chanswitch_mode;
@@ -681,6 +695,14 @@ QDF_STATUS wlansap_start_bss(struct sap_context *sap_ctx,
 			  __func__);
 		return QDF_STATUS_E_FAULT;
 	}
+
+	pmac = sap_get_mac_context();
+	if (!pmac) {
+		sap_err("Invalid MAC context");
+		qdf_status = QDF_STATUS_E_INVAL;
+		goto fail;
+	}
+
 	sap_ctx->fsm_state = SAP_INIT;
 
 	/* Channel selection is auto or configured */
@@ -697,8 +719,17 @@ QDF_STATUS wlansap_start_bss(struct sap_context *sap_ctx,
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
 	sap_ctx->cc_switch_mode = config->cc_switch_mode;
 #endif
-	sap_ctx->auto_channel_select_weight =
-		 config->auto_channel_select_weight;
+
+	qdf_status = ucfg_mlme_get_auto_channel_weight(
+					pmac->psoc,
+					&auto_channel_select_weight);
+	if (!QDF_IS_STATUS_SUCCESS(qdf_status))
+		sap_err("get_auto_channel_weight failed");
+
+	sap_ctx->auto_channel_select_weight = auto_channel_select_weight;
+	sap_debug("auto_channel_select_weight %d",
+		  sap_ctx->auto_channel_select_weight);
+
 	sap_ctx->user_context = user_context;
 	sap_ctx->enableOverLapCh = config->enOverLapCh;
 	sap_ctx->acs_cfg = &config->acs_cfg;
@@ -722,12 +753,6 @@ QDF_STATUS wlansap_start_bss(struct sap_context *sap_ctx,
 	/* copy the configuration items to csrProfile */
 	sapconvert_to_csr_profile(config, eCSR_BSS_TYPE_INFRA_AP,
 			       &sap_ctx->csr_roamProfile);
-	pmac = sap_get_mac_context();
-	if (!pmac) {
-		sap_err("Invalid MAC context");
-		qdf_status = QDF_STATUS_E_FAULT;
-		goto fail;
-	}
 
 	/*
 	 * Set the DFS Test Mode setting
@@ -756,8 +781,16 @@ QDF_STATUS wlansap_start_bss(struct sap_context *sap_ctx,
 	pmac->sap.sapCtxList[sap_ctx->sessionId].sap_context = sap_ctx;
 	pmac->sap.sapCtxList[sap_ctx->sessionId].sapPersona =
 		sap_ctx->csr_roamProfile.csrPersona;
+
+	qdf_status = ucfg_mlme_get_sap_reduces_beacon_interval(
+						pmac->psoc,
+						&reduced_beacon_interval);
+	if (!QDF_IS_STATUS_SUCCESS(qdf_status))
+		sap_err("ucfg_mlme_get_sap_reduces_beacon_interval fail");
+
 	pmac->sap.SapDfsInfo.reduced_beacon_interval =
-				config->reduced_beacon_interval;
+					reduced_beacon_interval;
+	sap_debug("reduced_beacon_interval %d", reduced_beacon_interval);
 
 	/* Copy MAC filtering settings to sap context */
 	sap_ctx->eSapMacAddrAclMode = config->SapMacaddr_acl;
@@ -942,9 +975,9 @@ QDF_STATUS wlansap_modify_acl(struct sap_context *sap_ctx,
 	if (qdf_mem_cmp(sap_ctx->bssid.bytes, peer_sta_mac,
 			QDF_MAC_ADDR_SIZE) == 0) {
 		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
-			  "requested peer mac is" MAC_ADDRESS_STR
+			  "requested peer mac is" QDF_MAC_ADDR_STR
 			  "our own SAP BSSID. Do not blacklist or whitelist this BSSID",
-			  MAC_ADDR_ARRAY(peer_sta_mac));
+			  QDF_MAC_ADDR_ARRAY(peer_sta_mac));
 		return QDF_STATUS_E_FAULT;
 	}
 	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_LOW,
@@ -971,10 +1004,10 @@ QDF_STATUS wlansap_modify_acl(struct sap_context *sap_ctx,
 
 	if (sta_white_list && sta_black_list) {
 		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
-			  "Peer mac " MAC_ADDRESS_STR
+			  "Peer mac " QDF_MAC_ADDR_STR
 			  " found in white and black lists."
 			  "Initial lists passed incorrect. Cannot execute this command.",
-			  MAC_ADDR_ARRAY(peer_sta_mac));
+			  QDF_MAC_ADDR_ARRAY(peer_sta_mac));
 		return QDF_STATUS_E_FAILURE;
 
 	}
@@ -990,8 +1023,8 @@ QDF_STATUS wlansap_modify_acl(struct sap_context *sap_ctx,
 				QDF_TRACE(QDF_MODULE_ID_SAP,
 					  QDF_TRACE_LEVEL_ERROR,
 					  "White list is already maxed out. Cannot accept "
-					  MAC_ADDRESS_STR,
-					  MAC_ADDR_ARRAY(peer_sta_mac));
+					  QDF_MAC_ADDR_STR,
+					  QDF_MAC_ADDR_ARRAY(peer_sta_mac));
 				return QDF_STATUS_E_FAILURE;
 			}
 			if (sta_white_list) {
@@ -999,8 +1032,8 @@ QDF_STATUS wlansap_modify_acl(struct sap_context *sap_ctx,
 				QDF_TRACE(QDF_MODULE_ID_SAP,
 					  QDF_TRACE_LEVEL_WARN,
 					  "MAC address already present in white list "
-					  MAC_ADDRESS_STR,
-					  MAC_ADDR_ARRAY(peer_sta_mac));
+					  QDF_MAC_ADDR_STR,
+					  QDF_MAC_ADDR_ARRAY(peer_sta_mac));
 				return QDF_STATUS_SUCCESS;
 			}
 			if (sta_black_list) {
@@ -1049,8 +1082,8 @@ QDF_STATUS wlansap_modify_acl(struct sap_context *sap_ctx,
 				QDF_TRACE(QDF_MODULE_ID_SAP,
 					  QDF_TRACE_LEVEL_WARN,
 					  "MAC address to be deleted is not present in the white list "
-					  MAC_ADDRESS_STR,
-					  MAC_ADDR_ARRAY(peer_sta_mac));
+					  QDF_MAC_ADDR_STR,
+					  QDF_MAC_ADDR_ARRAY(peer_sta_mac));
 				return QDF_STATUS_E_FAILURE;
 			}
 		} else {
@@ -1070,8 +1103,8 @@ QDF_STATUS wlansap_modify_acl(struct sap_context *sap_ctx,
 				QDF_TRACE(QDF_MODULE_ID_SAP,
 					  QDF_TRACE_LEVEL_ERROR,
 					  "Black list is already maxed out. Cannot accept "
-					  MAC_ADDRESS_STR,
-					  MAC_ADDR_ARRAY(peer_sta_mac));
+					  QDF_MAC_ADDR_STR,
+					  QDF_MAC_ADDR_ARRAY(peer_sta_mac));
 				return QDF_STATUS_E_FAILURE;
 			}
 			if (sta_black_list) {
@@ -1079,8 +1112,8 @@ QDF_STATUS wlansap_modify_acl(struct sap_context *sap_ctx,
 				QDF_TRACE(QDF_MODULE_ID_SAP,
 					  QDF_TRACE_LEVEL_WARN,
 					  "MAC address already present in black list "
-					  MAC_ADDRESS_STR,
-					  MAC_ADDR_ARRAY(peer_sta_mac));
+					  QDF_MAC_ADDR_STR,
+					  QDF_MAC_ADDR_ARRAY(peer_sta_mac));
 				return QDF_STATUS_SUCCESS;
 			}
 			if (sta_white_list) {
@@ -1125,8 +1158,8 @@ QDF_STATUS wlansap_modify_acl(struct sap_context *sap_ctx,
 				QDF_TRACE(QDF_MODULE_ID_SAP,
 					  QDF_TRACE_LEVEL_WARN,
 					  "MAC address to be deleted is not present in the black list "
-					  MAC_ADDRESS_STR,
-					  MAC_ADDR_ARRAY(peer_sta_mac));
+					  QDF_MAC_ADDR_STR,
+					  QDF_MAC_ADDR_ARRAY(peer_sta_mac));
 				return QDF_STATUS_E_FAILURE;
 			}
 		} else {
@@ -1565,7 +1598,7 @@ QDF_STATUS wlan_sap_getstation_ie_information(struct sap_context *sap_ctx,
 				sap_ctx->pStaWpaRsnReqIE,
 				sap_ctx->nStaWPARSnReqIeLength);
 			QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO,
-				FL("WPAIE: %02x:%02x:%02x:%02x:%02x:%02x"),
+				FL("WPAIE: "QDF_MAC_ADDR_STR""),
 				buf[0], buf[1], buf[2], buf[3], buf[4],
 				buf[5]);
 			qdf_status = QDF_STATUS_SUCCESS;
@@ -1959,29 +1992,13 @@ wlan_sap_set_channel_avoidance(mac_handle_t mac_handle,
 }
 #endif /* FEATURE_AP_MCC_CH_AVOIDANCE */
 
-/**
- * wlansap_set_dfs_preferred_channel_location() - set dfs preferred channel
- * @mac_handle: Opaque handle to the global MAC context
- * @dfs_Preferred_Channels_location :
- *       0 - Indicates No preferred channel location restrictions
- *       1 - Indicates SAP Indoor Channels operation only.
- *       2 - Indicates SAP Outdoor Channels operation only.
- *
- * This API is used to set sap preferred channels location
- * to resetrict the DFS random channel selection algorithm
- * either Indoor/Outdoor channels only.
- *
- * Return: The QDF_STATUS code associated with performing the operation
- *         QDF_STATUS_SUCCESS:  Success and error code otherwise.
- */
 QDF_STATUS
-wlansap_set_dfs_preferred_channel_location(mac_handle_t mac_handle,
-					   uint8_t
-					   dfs_Preferred_Channels_location)
+wlansap_set_dfs_preferred_channel_location(mac_handle_t mac_handle)
 {
 	struct mac_context *mac = NULL;
 	QDF_STATUS status;
 	enum dfs_reg dfs_region;
+	uint8_t dfs_preferred_channels_location = 0;
 
 	if (mac_handle) {
 		mac = MAC_CONTEXT(mac_handle);
@@ -1998,9 +2015,14 @@ wlansap_set_dfs_preferred_channel_location(mac_handle_t mac_handle,
 	 * restriction is currently enforeced only for
 	 * JAPAN regulatory domain.
 	 */
+	ucfg_mlme_get_pref_chan_location(mac->psoc,
+					 &dfs_preferred_channels_location);
+	sap_debug("dfs_preferred_channels_location %d",
+		  dfs_preferred_channels_location);
+
 	if (DFS_MKK_REGION == dfs_region) {
 		mac->sap.SapDfsInfo.sap_operating_chan_preferred_location =
-			dfs_Preferred_Channels_location;
+			dfs_preferred_channels_location;
 		QDF_TRACE(QDF_MODULE_ID_SAP,
 			  QDF_TRACE_LEVEL_INFO_LOW,
 			  FL
@@ -2340,9 +2362,9 @@ void wlansap_populate_del_sta_params(const uint8_t *mac,
 
 	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
 		  FL("Delete STA with RC:%hu subtype:%hhu MAC::"
-		     MAC_ADDRESS_STR),
+		     QDF_MAC_ADDR_STR),
 		  params->reason_code, params->subtype,
-		  MAC_ADDR_ARRAY(params->peerMacAddr.bytes));
+		  QDF_MAC_ADDR_ARRAY(params->peerMacAddr.bytes));
 }
 
 QDF_STATUS wlansap_acs_chselect(struct sap_context *sap_context,
@@ -2667,4 +2689,168 @@ QDF_STATUS wlansap_update_owe_info(struct sap_context *sap_ctx,
 	}
 
 	return status;
+}
+
+QDF_STATUS wlansap_filter_ch_based_acs(struct sap_context *sap_ctx,
+				       uint8_t *ch_list,
+				       uint32_t *ch_cnt)
+{
+	size_t ch_index;
+	size_t target_ch_cnt = 0;
+
+	if (!sap_ctx || !ch_list || !ch_cnt) {
+		sap_err("NULL parameters");
+		return QDF_STATUS_E_FAULT;
+	}
+
+	for (ch_index = 0; ch_index < *ch_cnt; ch_index++) {
+		if (ch_list[ch_index] >= sap_ctx->acs_cfg->start_ch &&
+		    ch_list[ch_index] <= sap_ctx->acs_cfg->end_ch)
+			ch_list[target_ch_cnt++] = ch_list[ch_index];
+	}
+
+	*ch_cnt = target_ch_cnt;
+
+	return QDF_STATUS_SUCCESS;
+}
+
+#if defined(FEATURE_WLAN_CH_AVOID)
+/**
+ * wlansap_get_safe_channel() - Get safe channel from current regulatory
+ * @sap_ctx: Pointer to SAP context
+ *
+ * This function is used to get safe channel from current regulatory valid
+ * channels to restart SAP if failed to get safe channel from PCL.
+ *
+ * Return: Channel number to restart SAP in case of success. In case of any
+ * failure, the channel number returned is zero.
+ */
+static uint8_t
+wlansap_get_safe_channel(struct sap_context *sap_ctx)
+{
+	struct mac_context *mac;
+	struct sir_pcl_list pcl = {0};
+	QDF_STATUS status;
+	mac_handle_t mac_handle;
+
+	if (!sap_ctx) {
+		sap_err("NULL parameter");
+		return INVALID_CHANNEL_ID;
+	}
+
+	mac = sap_get_mac_context();
+	if (!mac) {
+		sap_err("Invalid MAC context");
+		return INVALID_CHANNEL_ID;
+	}
+	mac_handle = MAC_HANDLE(mac);
+
+	/* get the channel list for current domain */
+	status = policy_mgr_get_valid_chans(mac->psoc,
+					    pcl.pcl_list,
+					    &pcl.pcl_len);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		sap_err("Error in getting valid channels");
+		return INVALID_CHANNEL_ID;
+	}
+
+	status = wlansap_filter_ch_based_acs(sap_ctx,
+					     pcl.pcl_list,
+					     &pcl.pcl_len);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		sap_err("failed to filter ch from acs %d", status);
+		return INVALID_CHANNEL_ID;
+	}
+
+	if (pcl.pcl_len) {
+		status = policy_mgr_get_valid_chans_from_range(mac->psoc,
+							       pcl.pcl_list,
+							       &pcl.pcl_len,
+							       PM_SAP_MODE);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			sap_err("failed to get valid channel: %d", status);
+			return INVALID_CHANNEL_ID;
+		}
+
+		if (pcl.pcl_len) {
+			sap_debug("select %d from valid channel list",
+				  pcl.pcl_list[0]);
+			return pcl.pcl_list[0];
+		}
+	}
+
+	return INVALID_CHANNEL_ID;
+}
+#else
+/**
+ * wlansap_get_safe_channel() - Get safe channel from current regulatory
+ * @sap_ctx: Pointer to SAP context
+ *
+ * This function is used to get safe channel from current regulatory valid
+ * channels to restart SAP if failed to get safe channel from PCL.
+ *
+ * Return: Channel number to restart SAP in case of success. In case of any
+ * failure, the channel number returned is zero.
+ */
+static uint8_t
+wlansap_get_safe_channel(struct sap_context *sap_ctx)
+{
+	return 0;
+}
+#endif
+
+uint8_t
+wlansap_get_safe_channel_from_pcl_and_acs_range(struct sap_context *sap_ctx)
+{
+	struct mac_context *mac;
+	struct sir_pcl_list pcl = {0};
+	QDF_STATUS status;
+	mac_handle_t mac_handle;
+
+	if (!sap_ctx) {
+		sap_err("NULL parameter");
+		return INVALID_CHANNEL_ID;
+	}
+
+	mac = sap_get_mac_context();
+	if (!mac) {
+		sap_err("Invalid MAC context");
+		return INVALID_CHANNEL_ID;
+	}
+	mac_handle = MAC_HANDLE(mac);
+
+	status = policy_mgr_get_pcl_for_existing_conn(
+			mac->psoc, PM_SAP_MODE, pcl.pcl_list, &pcl.pcl_len,
+			pcl.weight_list, QDF_ARRAY_SIZE(pcl.weight_list),
+			false);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		sap_err("Get PCL failed");
+		return INVALID_CHANNEL_ID;
+	}
+
+	if (pcl.pcl_len) {
+		status = wlansap_filter_ch_based_acs(sap_ctx,
+						     pcl.pcl_list,
+						     &pcl.pcl_len);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			sap_err("failed to filter ch from acs %d", status);
+			return INVALID_CHANNEL_ID;
+		}
+
+		if (pcl.pcl_len) {
+			sap_debug("select %d from valid channel list",
+				  pcl.pcl_list[0]);
+			return pcl.pcl_list[0];
+		}
+		sap_debug("no safe channel from PCL found in ACS range");
+	} else {
+		sap_debug("pcl length is zero!");
+	}
+
+	/*
+	 * In some scenarios, like hw dbs disabled, sap+sap case, if operating
+	 * channel is unsafe channel, the pcl may be empty, instead of return,
+	 * try to choose a safe channel from acs range.
+	 */
+	return wlansap_get_safe_channel(sap_ctx);
 }

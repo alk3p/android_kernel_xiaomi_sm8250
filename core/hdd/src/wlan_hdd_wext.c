@@ -75,6 +75,7 @@
 #include "qdf_talloc_test.h"
 #include "qdf_str.h"
 #include "qdf_trace.h"
+#include "qdf_tracker_test.h"
 #include "qdf_types_test.h"
 #include "wlan_hdd_assoc.h"
 #include "wlan_hdd_ioctl.h"
@@ -5874,6 +5875,7 @@ struct hdd_ut_entry hdd_ut_entries[] = {
 	{ .name = "qdf_ptr_hash", .callback = qdf_ptr_hash_unit_test },
 	{ .name = "qdf_slist", .callback = qdf_slist_unit_test },
 	{ .name = "qdf_talloc", .callback = qdf_talloc_unit_test },
+	{ .name = "qdf_tracker", .callback = qdf_tracker_unit_test },
 	{ .name = "qdf_types", .callback = qdf_types_unit_test },
 };
 
@@ -7102,8 +7104,8 @@ static int __iw_get_char_setnone(struct net_device *dev,
 
 	case WE_GET_BA_AGEING_TIMEOUT:
 	{
-		uint8_t ac_cat = 4;
-		uint32_t duration[QCA_WLAN_AC_ALL], i;
+		uint32_t i;
+		enum qca_wlan_ac_type duration[QCA_WLAN_AC_ALL];
 		void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 
 		if (!soc) {
@@ -7111,7 +7113,7 @@ static int __iw_get_char_setnone(struct net_device *dev,
 			break;
 		}
 
-		for (i = 0; i < ac_cat; i++)
+		for (i = 0; i < QCA_WLAN_AC_ALL; i++)
 			cdp_get_ba_timeout(soc, i, &duration[i]);
 
 		snprintf(extra, WE_MAX_STR_LEN,
@@ -7120,10 +7122,11 @@ static int __iw_get_char_setnone(struct net_device *dev,
 			 "|--------------------------------|\n"
 			 "|VO |  %d        |\n"
 			 "|VI |  %d        |\n"
-			 "|BE |  %d        |\n"
 			 "|BK |  %d        |\n"
+			 "|BE |  %d        |\n"
 			 "|--------------------------------|\n",
-			duration[3], duration[2], duration[1], duration[0]);
+			duration[QCA_WLAN_AC_VO], duration[QCA_WLAN_AC_VI],
+			duration[QCA_WLAN_AC_BK], duration[QCA_WLAN_AC_BE]);
 
 		wrqu->data.length = strlen(extra) + 1;
 		break;
@@ -7228,7 +7231,7 @@ static int __iw_get_char_setnone(struct net_device *dev,
 				buf = snprintf
 					      ((extra + length),
 					      WE_MAX_STR_LEN - length,
-					      "\n%d .%02x:%02x:%02x:%02x:%02x:%02x\n",
+					      "\n%d ."QDF_MAC_ADDR_STR"\n",
 					      sta_ctx->conn_info.sta_id[idx],
 					      sta_ctx->conn_info.
 					      peer_macaddr[idx].bytes[0],
@@ -8875,8 +8878,8 @@ static int __iw_set_keepalive_params(struct net_device *dev,
 		       request->destIpv4Addr[0], request->destIpv4Addr[1],
 		       request->destIpv4Addr[2], request->destIpv4Addr[3]);
 
-		hdd_debug("Dest MAC address: "MAC_ADDRESS_STR,
-		       MAC_ADDR_ARRAY(request->dest_macaddr.bytes));
+		hdd_debug("Dest MAC address: "QDF_MAC_ADDR_STR,
+		       QDF_MAC_ADDR_ARRAY(request->dest_macaddr.bytes));
 		break;
 	}
 

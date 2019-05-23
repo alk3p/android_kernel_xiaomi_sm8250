@@ -636,7 +636,7 @@ void lim_cleanup_mlm(struct mac_context *mac_ctx)
 
 void lim_print_mac_addr(struct mac_context *mac, tSirMacAddr macAddr, uint8_t logLevel)
 {
-	pe_debug(MAC_ADDRESS_STR, MAC_ADDR_ARRAY(macAddr));
+	pe_debug(QDF_MAC_ADDR_STR, QDF_MAC_ADDR_ARRAY(macAddr));
 } /****** end lim_print_mac_addr() ******/
 
 /*
@@ -5049,7 +5049,7 @@ uint8_t lim_build_p2p_ie(struct mac_context *mac, uint8_t *ie, uint8_t *data,
 	int length = 0;
 	uint8_t *ptr = ie;
 
-	ptr[length++] = SIR_MAC_EID_VENDOR;
+	ptr[length++] = WLAN_ELEMID_VENDOR;
 	ptr[length++] = ie_len + SIR_MAC_P2P_OUI_SIZE;
 	qdf_mem_copy(&ptr[length], SIR_MAC_P2P_OUI, SIR_MAC_P2P_OUI_SIZE);
 	qdf_mem_copy(&ptr[length + SIR_MAC_P2P_OUI_SIZE], data, ie_len);
@@ -6612,8 +6612,8 @@ bool lim_is_valid_frame(last_processed_msg *last_processed_frm,
 
 	if (last_processed_frm->seq_num == seq_num &&
 		qdf_mem_cmp(last_processed_frm->sa, pHdr->sa, ETH_ALEN) == 0) {
-		pe_err("Duplicate frame from "MAC_ADDRESS_STR " Seq Number %d",
-		MAC_ADDR_ARRAY(pHdr->sa), seq_num);
+		pe_err("Duplicate frame from "QDF_MAC_ADDR_STR " Seq Number %d",
+		QDF_MAC_ADDR_ARRAY(pHdr->sa), seq_num);
 		return false;
 	}
 	return true;
@@ -7144,6 +7144,10 @@ void lim_update_sta_he_capable(struct mac_context *mac,
 {
 	if (LIM_IS_AP_ROLE(session_entry) || LIM_IS_IBSS_ROLE(session_entry))
 		add_sta_params->he_capable = sta_ds->mlmStaContext.he_capable;
+#ifdef FEATURE_WLAN_TDLS
+	else if (STA_ENTRY_TDLS_PEER == sta_ds->staType)
+		add_sta_params->he_capable = sta_ds->mlmStaContext.he_capable;
+#endif
 	else
 		add_sta_params->he_capable = session_entry->he_capable;
 
@@ -7586,8 +7590,8 @@ struct csr_roam_session *lim_get_session_by_macaddr(struct mac_context *mac_ctx,
 
 			QDF_TRACE(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_INFO,
 				  FL("session %d exists with mac address "
-				  MAC_ADDRESS_STR), session->sessionId,
-				  MAC_ADDR_ARRAY(self_mac));
+				  QDF_MAC_ADDR_STR), session->sessionId,
+				  QDF_MAC_ADDR_ARRAY(self_mac));
 
 			return session;
 		}
@@ -7923,8 +7927,9 @@ QDF_STATUS lim_sta_mlme_vdev_restart_send(struct vdev_mlme_obj *vdev_mlme,
 QDF_STATUS lim_sta_mlme_vdev_stop_send(struct vdev_mlme_obj *vdev_mlme,
 				       uint16_t data_len, void *data)
 {
-	QDF_STATUS status;
-	bool connection_fail;
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	bool connection_fail = false;
+	enum vdev_assoc_type assoc_type;
 
 	if (!vdev_mlme) {
 		pe_err("vdev_mlme is NULL");
@@ -7938,7 +7943,21 @@ QDF_STATUS lim_sta_mlme_vdev_stop_send(struct vdev_mlme_obj *vdev_mlme,
 	connection_fail = mlme_is_connection_fail(vdev_mlme->vdev);
 	pe_info("Send vdev stop, connection_fail %d", connection_fail);
 	if (connection_fail) {
-		status = lim_sta_send_down_link((join_params *)data);
+		assoc_type = mlme_get_assoc_type(vdev_mlme->vdev);
+		switch (assoc_type) {
+		case VDEV_ASSOC:
+			status = lim_sta_send_down_link((join_params *)data);
+			break;
+		case VDEV_REASSOC:
+		case VDEV_FT_REASSOC:
+			status = lim_sta_reassoc_error_handler(
+					(struct reassoc_params *)data);
+			break;
+		default:
+			pe_info("Invalid assoc_type %d", assoc_type);
+			status = QDF_STATUS_E_INVAL;
+			break;
+		}
 		mlme_set_connection_fail(vdev_mlme->vdev, false);
 	} else {
 		status = lim_sta_send_del_bss((struct pe_session *)data);
@@ -8221,10 +8240,14 @@ lim_get_dot11d_transmit_power(struct mac_context *mac, uint8_t channel)
 		goto error;
 
 	if (WLAN_REG_IS_5GHZ_CH(channel)) {
+		if (cfg_length > CFG_MAX_TX_POWER_5_LEN)
+			goto error;
 		qdf_mem_copy(country_info,
 			     mac->mlme_cfg->power.max_tx_power_5.data,
 			     cfg_length);
 	} else if (WLAN_REG_IS_24GHZ_CH(channel)) {
+		if (cfg_length > CFG_MAX_TX_POWER_2_4_LEN)
+			goto error;
 		qdf_mem_copy(country_info,
 			     mac->mlme_cfg->power.max_tx_power_24.data,
 			     cfg_length);
@@ -8382,4 +8405,17 @@ void lim_flush_bssid(struct mac_context *mac_ctx, uint8_t *bssid)
 
 	if (filter)
 		qdf_mem_free(filter);
+}
+
+bool lim_is_sha384_akm(enum ani_akm_type akm)
+{
+	switch (akm) {
+	case ANI_AKM_TYPE_FILS_SHA384:
+	case ANI_AKM_TYPE_FT_FILS_SHA384:
+	case ANI_AKM_TYPE_SUITEB_EAP_SHA384:
+	case ANI_AKM_TYPE_FT_SUITEB_EAP_SHA384:
+		return true;
+	default:
+		return false;
+	}
 }

@@ -464,7 +464,7 @@ static QDF_STATUS lim_get_addn_ie_for_probe_resp(struct mac_context *mac,
 				qdf_mem_free(tempbuf);
 				return QDF_STATUS_E_FAILURE;
 			}
-			if (!((SIR_MAC_EID_VENDOR == elem_id) &&
+			if (!((WLAN_ELEMID_VENDOR == elem_id) &&
 			      (memcmp
 				       (&ptr[2], SIR_MAC_P2P_OUI,
 				       SIR_MAC_P2P_OUI_SIZE) == 0))) {
@@ -1553,6 +1553,86 @@ static QDF_STATUS lim_assoc_tx_complete_cnf(void *context,
 	return QDF_STATUS_SUCCESS;
 }
 
+#ifdef WLAN_ADAPTIVE_11R
+/**
+ * lim_fill_adaptive_11r_ie() - Populate the Vendor secific adaptive 11r
+ * IE to association request frame
+ * @pe_session: pointer to PE session
+ * @ie_buf: buffer to which Adaptive 11r IE will be copied
+ * @ie_len: length of the Adaptive 11r Vendor specific IE
+ *
+ * Return QDF_STATUS
+ */
+static QDF_STATUS lim_fill_adaptive_11r_ie(struct pe_session *pe_session,
+					   uint8_t **ie_buf, uint8_t *ie_len)
+{
+	uint8_t *buf = NULL, *adaptive_11r_ie = NULL;
+
+	if (!pe_session->is_adaptive_11r_connection)
+		return QDF_STATUS_SUCCESS;
+
+	/*
+	 * Vendor specific Adaptive 11r IE to be advertised in Assoc
+	 * req:
+	 * Type     0xDD
+	 * Length   0x0B
+	 * OUI      0x00 0x00 0x0F
+	 * Type     0x22
+	 * subtype  0x00
+	 * Version  0x01
+	 * Length   0x04
+	 * Data     0x00 00 00 01(0th bit is 1 means adaptive 11r is
+	 * supported)
+	 */
+	adaptive_11r_ie = qdf_mem_malloc(ADAPTIVE_11R_STA_IE_LEN + 2);
+	if (!adaptive_11r_ie)
+		return QDF_STATUS_E_FAILURE;
+
+	/* Fill the Vendor IE Type (0xDD) */
+	buf = adaptive_11r_ie;
+	*buf = IE_EID_VENDOR;
+	buf++;
+
+	/* Fill the Vendor IE length (0x0B) */
+	*buf = ADAPTIVE_11R_STA_IE_LEN;
+	buf++;
+
+	/*
+	 * Fill the Adaptive 11r Vendor specific OUI(0x00 0x00 0x0F 0x22)
+	 */
+	qdf_mem_copy(buf, ADAPTIVE_11R_STA_OUI, ADAPTIVE_11R_OUI_LEN);
+	buf += ADAPTIVE_11R_OUI_LEN;
+
+	/* Fill Adaptive 11r Vendor specific Subtype (0x00) */
+	*buf = ADAPTIVE_11R_OUI_SUBTYPE;
+	buf++;
+
+	/* Fill Adaptive 11r Version (0x01) */
+	*buf = ADAPTIVE_11R_OUI_VERSION;
+	buf++;
+
+	/* Fill Adaptive 11r IE Data length (0x04) */
+	*buf = ADAPTIVE_11R_DATA_LEN;
+	buf++;
+
+	/* Fill Adaptive 11r IE Data (0x00 0x00 0x00 0x01) */
+	qdf_mem_copy(buf, ADAPTIVE_11R_OUI_DATA, ADAPTIVE_11R_DATA_LEN);
+
+	*ie_len = ADAPTIVE_11R_STA_IE_LEN + 2;
+	*ie_buf = adaptive_11r_ie;
+
+	return QDF_STATUS_SUCCESS;
+}
+
+#else
+static inline
+QDF_STATUS lim_fill_adaptive_11r_ie(struct pe_session *pe_session,
+				    uint8_t **ie_buf, uint8_t *ie_len)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
+
 /**
  * lim_send_assoc_req_mgmt_frame() - Send association request
  * @mac_ctx: Handle to MAC context
@@ -1596,8 +1676,8 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
 	uint32_t bcn_ie_len = 0;
 	uint32_t aes_block_size_len = 0;
 	enum rateid min_rid = RATEID_DEFAULT;
-	uint8_t *mbo_ie = NULL;
-	uint8_t mbo_ie_len = 0;
+	uint8_t *mbo_ie = NULL, *adaptive_11r_ie = NULL;
+	uint8_t mbo_ie_len = 0, adaptive_11r_ie_len = 0;
 
 	if (!pe_session) {
 		pe_err("pe_session is NULL");
@@ -1835,9 +1915,17 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
 			(unsigned int) bssdescr->mdie[2]);
 		populate_mdie(mac_ctx, &frm->MobilityDomain,
 			pe_session->pLimJoinReq->bssDescription.mdie);
-	} else {
-		/* No 11r IEs dont send any MDIE */
-		pe_debug("MDIE not present");
+
+		/*
+		 * IEEE80211-ai [13.2.4 FT initial mobility domain association
+		 * over FILS in an RSN]
+		 * Populate FT IE in association request. This FT IE should be
+		 * same as the FT IE received in auth response frame during the
+		 * FT-FILS authentication.
+		 */
+		if (lim_is_fils_connection(pe_session))
+			populate_fils_ft_info(mac_ctx, &frm->FTInfo,
+					      pe_session);
 	}
 
 #ifdef FEATURE_WLAN_ESE
@@ -1919,7 +2007,7 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
 			goto end;
 
 		qdf_status = lim_strip_ie(mac_ctx, add_ie, &add_ie_len,
-					  SIR_MAC_EID_VENDOR, ONE_BYTE,
+					  WLAN_ELEMID_VENDOR, ONE_BYTE,
 					  SIR_MAC_MBO_OUI,
 					  SIR_MAC_MBO_OUI_SIZE,
 					  mbo_ie, DOT11F_IE_MBO_IE_MAX_LEN);
@@ -1931,6 +2019,13 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
 		/* Include the EID and length fields */
 		mbo_ie_len = mbo_ie[1] + 2;
 		pe_debug("Stripped MBO IE of length %d", mbo_ie_len);
+	}
+
+	qdf_status = lim_fill_adaptive_11r_ie(pe_session, &adaptive_11r_ie,
+					      &adaptive_11r_ie_len);
+	if (QDF_IS_STATUS_ERROR(qdf_status)) {
+		pe_err("Failed to fill adaptive 11r IE");
+		goto free_mbo_ie;
 	}
 
 	/*
@@ -1959,7 +2054,7 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
 	}
 
 	bytes = payload + sizeof(tSirMacMgmtHdr) +
-			aes_block_size_len + mbo_ie_len;
+			aes_block_size_len + mbo_ie_len + adaptive_11r_ie_len;
 
 	qdf_status = cds_packet_alloc((uint16_t) bytes, (void **)&frame,
 				(void **)&packet);
@@ -2003,6 +2098,14 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
 	qdf_mem_copy(frame + sizeof(tSirMacMgmtHdr) + payload,
 		     mbo_ie, mbo_ie_len);
 	payload = payload + mbo_ie_len;
+
+	/*
+	 * Copy the Vendor specific Adaptive 11r IE to end of the
+	 * assoc request frame
+	 */
+	qdf_mem_copy(frame + sizeof(tSirMacMgmtHdr) + payload,
+		     adaptive_11r_ie, adaptive_11r_ie_len);
+	payload = payload + adaptive_11r_ie_len;
 
 	if (pe_session->assocReq) {
 		qdf_mem_free(pe_session->assocReq);
@@ -2074,6 +2177,7 @@ free_mbo_ie:
 
 end:
 	/* Free up buffer allocated for mlm_assoc_req */
+	qdf_mem_free(adaptive_11r_ie);
 	qdf_mem_free(mlm_assoc_req);
 	mlm_assoc_req = NULL;
 	qdf_mem_free(frm);
@@ -2244,8 +2348,8 @@ lim_send_auth_mgmt_frame(struct mac_context *mac_ctx,
 		 * status code, 128 bytes for challenge text and
 		 * 4 bytes each for IV & ICV.
 		 */
-		pe_debug("Sending encrypted auth frame to " MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(peer_addr));
+		pe_debug("Sending encrypted auth frame to " QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(peer_addr));
 
 		body_len = wep_challenge_len + LIM_ENCR_AUTH_INFO_LEN;
 		frame_len = sizeof(tSirMacMgmtHdr) + body_len;
@@ -2254,11 +2358,11 @@ lim_send_auth_mgmt_frame(struct mac_context *mac_ctx,
 	}
 
 	pe_debug("Sending Auth seq# %d status %d (%d) to "
-		MAC_ADDRESS_STR,
+		QDF_MAC_ADDR_STR,
 		auth_frame->authTransactionSeqNumber,
 		auth_frame->authStatusCode,
 		(auth_frame->authStatusCode == eSIR_MAC_SUCCESS_STATUS),
-		MAC_ADDR_ARRAY(peer_addr));
+		QDF_MAC_ADDR_ARRAY(peer_addr));
 
 	switch (auth_frame->authTransactionSeqNumber) {
 	case SIR_MAC_AUTH_FRAME_1:
@@ -2290,7 +2394,8 @@ lim_send_auth_mgmt_frame(struct mac_context *mac_ctx,
 		}
 
 		/* include MDIE in FILS authentication frame */
-		if (session->pLimJoinReq->is11Rconnection &&
+		if (session->pLimJoinReq &&
+		    session->pLimJoinReq->is11Rconnection &&
 		    auth_frame->authAlgoNumber == SIR_FILS_SK_WITHOUT_PFS &&
 		    session->pLimJoinReq->bssDescription.mdiePresent)
 			frame_len += (2 + SIR_MDIE_SIZE);
@@ -2393,8 +2498,8 @@ alloc_packet:
 	if (wep_challenge_len) {
 		qdf_mem_copy(body, (uint8_t *) auth_frame, body_len);
 
-		pe_debug("Sending Auth seq# 3 to " MAC_ADDRESS_STR,
-			MAC_ADDR_ARRAY(mac_hdr->da));
+		pe_debug("Sending Auth seq# 3 to " QDF_MAC_ADDR_STR,
+			QDF_MAC_ADDR_ARRAY(mac_hdr->da));
 
 	} else {
 		*((uint16_t *) (body)) =
@@ -2462,7 +2567,7 @@ alloc_packet:
 			} else if (session->ftPEContext.
 					pFTPreAuthReq->pbssDescription) {
 				/* MDID attr is 54 */
-				*body = SIR_MDIE_ELEMENT_ID;
+				*body = WLAN_ELEMID_MOBILITY_DOMAIN;
 				body++;
 				*body = SIR_MDIE_SIZE;
 				body++;
@@ -2480,12 +2585,12 @@ alloc_packet:
 		}
 
 		pe_debug("*** Sending Auth seq# %d status %d (%d) to "
-				MAC_ADDRESS_STR,
+				QDF_MAC_ADDR_STR,
 			auth_frame->authTransactionSeqNumber,
 			auth_frame->authStatusCode,
 			(auth_frame->authStatusCode ==
 				eSIR_MAC_SUCCESS_STATUS),
-			MAC_ADDR_ARRAY(mac_hdr->da));
+			QDF_MAC_ADDR_ARRAY(mac_hdr->da));
 	}
 	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_PE,
 			   QDF_TRACE_LEVEL_DEBUG,
@@ -2890,10 +2995,10 @@ lim_send_disassoc_mgmt_frame(struct mac_context *mac,
 	}
 
 	pe_debug("***Sessionid %d Sending Disassociation frame with "
-		   "reason %u and waitForAck %d to " MAC_ADDRESS_STR " ,From "
-		   MAC_ADDRESS_STR, pe_session->peSessionId, nReason,
-		waitForAck, MAC_ADDR_ARRAY(pMacHdr->da),
-		MAC_ADDR_ARRAY(pe_session->selfMacAddr));
+		   "reason %u and waitForAck %d to " QDF_MAC_ADDR_STR " ,From "
+		   QDF_MAC_ADDR_STR, pe_session->peSessionId, nReason,
+		waitForAck, QDF_MAC_ADDR_ARRAY(pMacHdr->da),
+		QDF_MAC_ADDR_ARRAY(pe_session->selfMacAddr));
 
 	if ((BAND_5G == lim_get_rf_band(pe_session->currentOperChannel))
 	    || (pe_session->pePersona == QDF_P2P_CLIENT_MODE) ||
@@ -3065,11 +3170,11 @@ lim_send_deauth_mgmt_frame(struct mac_context *mac,
 			nStatus);
 	}
 	pe_debug("***Sessionid %d Sending Deauth frame with "
-		       "reason %u and waitForAck %d to " MAC_ADDRESS_STR
-		       " ,From " MAC_ADDRESS_STR,
+		       "reason %u and waitForAck %d to " QDF_MAC_ADDR_STR
+		       " ,From " QDF_MAC_ADDR_STR,
 		pe_session->peSessionId, nReason, waitForAck,
-		MAC_ADDR_ARRAY(pMacHdr->da),
-		MAC_ADDR_ARRAY(pe_session->selfMacAddr));
+		QDF_MAC_ADDR_ARRAY(pMacHdr->da),
+		QDF_MAC_ADDR_ARRAY(pe_session->selfMacAddr));
 
 	if ((BAND_5G == lim_get_rf_band(pe_session->currentOperChannel))
 	    || (pe_session->pePersona == QDF_P2P_CLIENT_MODE) ||
@@ -3652,8 +3757,8 @@ lim_send_extended_chan_switch_action_frame(struct mac_context *mac_ctx,
 		txFlag |= HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME;
 	}
 
-	pe_debug("Send Ext channel Switch to :"MAC_ADDRESS_STR" with swcount %d, swmode %d , newchannel %d newops %d",
-		MAC_ADDR_ARRAY(mac_hdr->da),
+	pe_debug("Send Ext channel Switch to :"QDF_MAC_ADDR_STR" with swcount %d, swmode %d , newchannel %d newops %d",
+		QDF_MAC_ADDR_ARRAY(mac_hdr->da),
 		frm.ext_chan_switch_ann_action.switch_count,
 		frm.ext_chan_switch_ann_action.switch_mode,
 		frm.ext_chan_switch_ann_action.new_channel,
@@ -3806,8 +3911,8 @@ lim_p2p_oper_chan_change_confirm_action_frame(struct mac_context *mac_ctx,
 		tx_flag |= HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME;
 	}
 	pe_debug("Send frame on channel %d to mac "
-		MAC_ADDRESS_STR, session_entry->currentOperChannel,
-		MAC_ADDR_ARRAY(peer));
+		QDF_MAC_ADDR_STR, session_entry->currentOperChannel,
+		QDF_MAC_ADDR_ARRAY(peer));
 
 	MTRACE(qdf_trace(QDF_MODULE_ID_PE, TRACE_CODE_TX_MGMT,
 			session_entry->peSessionId, mac_hdr->fc.subType));
@@ -4015,7 +4120,7 @@ lim_send_link_report_action_frame(struct mac_context *mac,
 	/* in the middle of other fixed fields in the link report frame(IEEE Std. 802.11k section7.4.6.4 */
 	/* and frame parser always expects IEs to come after all fixed fields. It is easier to handle */
 	/* such case this way than changing the frame parser. */
-	frm.TPCEleID.TPCId = SIR_MAC_TPC_RPT_EID;
+	frm.TPCEleID.TPCId = WLAN_ELEMID_TPCREP;
 	frm.TPCEleLen.TPCLen = 2;
 	frm.TxPower.txPower = pLinkReport->txPower;
 	frm.LinkMargin.linkMargin = 0;

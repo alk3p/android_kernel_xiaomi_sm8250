@@ -201,9 +201,9 @@ void csr_neighbor_roam_process_scan_results(struct mac_context *mac_ctx,
 				break;
 			descr = &scan_result->BssDescriptor;
 			QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_DEBUG,
-				  FL("Scan result: BSSID " MAC_ADDRESS_STR
+				  FL("Scan result: BSSID " QDF_MAC_ADDR_STR
 				     " (Rssi %d, Ch:%d)"),
-				  MAC_ADDR_ARRAY(descr->bssId),
+				  QDF_MAC_ADDR_ARRAY(descr->bssId),
 				  (int)abs(descr->rssi), descr->channelId);
 
 			if (!qdf_mem_cmp(descr->bssId,
@@ -282,15 +282,15 @@ void csr_neighbor_roam_process_scan_results(struct mac_context *mac_ctx,
 			    (qavail < n_roam_info->MinQBssLoadRequired)) {
 				QDF_TRACE(QDF_MODULE_ID_SME,
 					QDF_TRACE_LEVEL_DEBUG,
-					"BSSID:" MAC_ADDRESS_STR "has no BW",
-					MAC_ADDR_ARRAY(descr->bssId));
+					"BSSID:" QDF_MAC_ADDR_STR "has no BW",
+					QDF_MAC_ADDR_ARRAY(descr->bssId));
 				continue;
 			}
 			if (voadmitted && !qpresent) {
 				QDF_TRACE(QDF_MODULE_ID_SME,
 					QDF_TRACE_LEVEL_DEBUG,
-					"BSSID:" MAC_ADDRESS_STR "no LOAD IE",
-					MAC_ADDR_ARRAY(descr->bssId));
+					"BSSID:" QDF_MAC_ADDR_STR "no LOAD IE",
+					QDF_MAC_ADDR_ARRAY(descr->bssId));
 				continue;
 			}
 #endif /* FEATURE_WLAN_ESE */
@@ -631,8 +631,8 @@ void csr_neighbor_roam_request_handoff(struct mac_context *mac_ctx,
 		return;
 	}
 	QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_DEBUG,
-		  FL("HANDOFF CANDIDATE BSSID "MAC_ADDRESS_STR),
-		  MAC_ADDR_ARRAY(handoff_node.pBssDescription->bssId));
+		  FL("HANDOFF CANDIDATE BSSID "QDF_MAC_ADDR_STR),
+		  QDF_MAC_ADDR_ARRAY(handoff_node.pBssDescription->bssId));
 
 	roam_info = qdf_mem_malloc(sizeof(*roam_info));
 	if (!roam_info)

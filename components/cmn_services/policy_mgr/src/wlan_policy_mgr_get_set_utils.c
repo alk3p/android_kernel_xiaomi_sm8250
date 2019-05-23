@@ -1609,7 +1609,7 @@ QDF_STATUS policy_mgr_incr_connection_count(
 {
 	QDF_STATUS status = QDF_STATUS_E_FAILURE;
 	uint32_t conn_index;
-	struct policy_mgr_vdev_entry_info conn_table_entry;
+	struct policy_mgr_vdev_entry_info conn_table_entry = {0};
 	enum policy_mgr_chain_mode chain_mask = POLICY_MGR_ONE_ONE;
 	uint8_t nss_2g = 0, nss_5g = 0;
 	enum policy_mgr_con_mode mode;
@@ -1981,14 +1981,22 @@ bool policy_mgr_is_concurrency_allowed(struct wlan_objmgr_psoc *psoc,
 		}
 	}
 
+	count = policy_mgr_mode_specific_connection_count(psoc, PM_STA_MODE,
+							  list);
+
+	/* Check for STA+STA concurrency */
+	if (mode == PM_STA_MODE && count &&
+	    !policy_mgr_allow_multiple_sta_connections(psoc)) {
+		policy_mgr_err("No 2nd STA connection, already one STA is connected");
+		goto done;
+	}
+
 	/*
 	 * Check all IBSS+STA concurrencies
 	 *
 	 * don't allow IBSS + STA MCC
 	 * don't allow IBSS + STA SCC if IBSS is on DFS channel
 	 */
-	count = policy_mgr_mode_specific_connection_count(psoc,
-				PM_STA_MODE, list);
 	if ((PM_IBSS_MODE == mode) &&
 		(policy_mgr_mode_specific_connection_count(psoc,
 		PM_IBSS_MODE, list)) && count) {
@@ -3324,6 +3332,12 @@ void policy_mgr_trim_acs_channel_list(uint8_t *pcl, uint8_t pcl_count,
 		return;
 	}
 
+	if (pcl_count >= QDF_MAX_NUM_CHAN) {
+		policy_mgr_err("pcl_count is too big %d",
+			       pcl_count);
+		return;
+	}
+
 	policy_mgr_debug("Update ACS channels with PCL");
 	for (j = 0; j < *org_ch_list_count; j++)
 		for (i = 0; i < pcl_count; i++)
@@ -3406,6 +3420,24 @@ bool policy_mgr_allow_sap_go_concurrency(struct wlan_objmgr_psoc *psoc,
 
 	/* Don't block the second interface */
 	return true;
+}
+
+bool policy_mgr_allow_multiple_sta_connections(struct wlan_objmgr_psoc *psoc)
+{
+	struct wmi_unified *wmi_handle;
+
+	wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+	if (!wmi_handle) {
+		policy_mgr_debug("Invalid WMI handle");
+		return false;
+	}
+
+	if (wmi_service_enabled(wmi_handle,
+				wmi_service_sta_plus_sta_support))
+		return true;
+
+	policy_mgr_debug("Concurrent STA connections are not supported");
+	return false;
 }
 
 bool policy_mgr_dual_beacon_on_single_mac_scc_capable(

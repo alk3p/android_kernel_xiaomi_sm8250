@@ -147,8 +147,8 @@ static void lim_delete_sta_util(struct mac_context *mac_ctx, tpDeleteStaContext 
 			pe_debug("Received SIR_LIM_DELETE_STA_CONTEXT_IND for "
 					"STA that either has no context or "
 					"in some transit state, Addr = "
-					MAC_ADDRESS_STR,
-					MAC_ADDR_ARRAY(msg->bssId));
+					QDF_MAC_ADDR_STR,
+					QDF_MAC_ADDR_ARRAY(msg->bssId));
 			return;
 		}
 
@@ -421,8 +421,8 @@ lim_tear_down_link_with_ap(struct mac_context *mac, uint8_t sessionId,
 			mac->lim.gLimHeartBeatApMacIndex = 1;
 
 		pe_debug("HB Failure on MAC "
-			MAC_ADDRESS_STR" Store it on Index %d",
-			MAC_ADDR_ARRAY(sta->staAddr), apCount);
+			QDF_MAC_ADDR_STR" Store it on Index %d",
+			QDF_MAC_ADDR_ARRAY(sta->staAddr), apCount);
 
 		sir_copy_mac_addr(mac->lim.gLimHeartBeatApMac[apCount],
 							sta->staAddr);

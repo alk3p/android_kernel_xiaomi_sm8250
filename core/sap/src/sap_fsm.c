@@ -1712,6 +1712,7 @@ QDF_STATUS sap_signal_hdd_event(struct sap_context *sap_ctx,
 		disassoc_comp->rssi = csr_roaminfo->rssi;
 		disassoc_comp->rx_rate = csr_roaminfo->rx_rate;
 		disassoc_comp->tx_rate = csr_roaminfo->tx_rate;
+		disassoc_comp->rx_mc_bc_cnt = csr_roaminfo->rx_mc_bc_cnt;
 		disassoc_comp->reason_code = csr_roaminfo->disassoc_reason;
 		break;
 
@@ -2195,11 +2196,6 @@ static QDF_STATUS sap_goto_starting(struct sap_context *sap_ctx,
 					    sap_ctx->secondary_ch,
 					    &sap_ctx->ch_params);
 	}
-	if (sap_ctx->channel > 14 &&
-	    (sap_ctx->csr_roamProfile.phyMode == eCSR_DOT11_MODE_11g ||
-	     sap_ctx->csr_roamProfile.phyMode ==
-					eCSR_DOT11_MODE_11g_ONLY))
-		sap_ctx->csr_roamProfile.phyMode = eCSR_DOT11_MODE_11a;
 
 	/*
 	 * when AP2 is started while AP1 is performing ACS, we may not
@@ -2212,13 +2208,24 @@ static QDF_STATUS sap_goto_starting(struct sap_context *sap_ctx,
 
 		con_ch = sme_get_beaconing_concurrent_operation_channel(
 				mac_handle, sap_ctx->sessionId);
-		if (con_ch && wlan_reg_is_dfs_ch(mac_ctx->pdev, con_ch)) {
+		/* Overwrite second AP's channel with first only when:
+		 * 1. If operating mode is single mac
+		 * 2. or if 2nd AP is coming up on 5G band channel
+		 */
+		if ((!policy_mgr_is_hw_dbs_capable(mac_ctx->psoc) ||
+		     WLAN_REG_IS_5GHZ_CH(sap_ctx->channel)) &&
+		     con_ch && wlan_reg_is_dfs_ch(mac_ctx->pdev, con_ch)) {
 			sap_ctx->channel = con_ch;
 			wlan_reg_set_channel_params(mac_ctx->pdev,
 						    sap_ctx->channel, 0,
 						    &sap_ctx->ch_params);
 		}
 	}
+	if (sap_ctx->channel > 14 &&
+	    (sap_ctx->csr_roamProfile.phyMode == eCSR_DOT11_MODE_11g ||
+	     sap_ctx->csr_roamProfile.phyMode ==
+					eCSR_DOT11_MODE_11g_ONLY))
+		sap_ctx->csr_roamProfile.phyMode = eCSR_DOT11_MODE_11a;
 
 	/*
 	 * Transition from SAP_INIT to SAP_STARTING
@@ -2270,6 +2277,30 @@ static QDF_STATUS sap_goto_starting(struct sap_context *sap_ctx,
 	return qdf_status;
 }
 
+#ifdef CONFIG_VDEV_SM
+/**
+ * sap_move_to_cac_wait_state() - move to cac wait state
+ * @sap_ctx: SAP context
+ *
+ * Return: QDF_STATUS
+ */
+static QDF_STATUS sap_move_to_cac_wait_state(struct sap_context *sap_ctx)
+{
+	QDF_STATUS status;
+
+	status =
+	     wlan_vdev_mlme_sm_deliver_evt(sap_ctx->vdev,
+					   WLAN_VDEV_SM_EV_DFS_CAC_WAIT,
+					   0, NULL);
+	return status;
+}
+#else
+static inline QDF_STATUS sap_move_to_cac_wait_state(struct sap_context *sap_ctx)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
+
 /**
  * sap_fsm_cac_start() - start cac wait timer
  * @sap_ctx: SAP context
@@ -2292,6 +2323,8 @@ static QDF_STATUS sap_fsm_cac_start(struct sap_context *sap_ctx,
 			  FL("sapdfs: starting dfs cac timer on sapctx[%pK]"),
 			  sap_ctx);
 		sap_start_dfs_cac_timer(sap_ctx);
+	} else {
+		sap_move_to_cac_wait_state(sap_ctx);
 	}
 
 	return sap_cac_start_notify(mac_handle);
@@ -3334,8 +3367,8 @@ void sap_print_acl(struct qdf_mac_addr *macList, uint8_t size)
 	for (i = 0; i < size; i++) {
 		macArray = (macList + i)->bytes;
 		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-			  "** ACL entry %i - " MAC_ADDRESS_STR, i,
-			  MAC_ADDR_ARRAY(macArray));
+			  "** ACL entry %i - " QDF_MAC_ADDR_STR, i,
+			  QDF_MAC_ADDR_ARRAY(macArray));
 	}
 	return;
 }
@@ -3353,8 +3386,8 @@ QDF_STATUS sap_is_peer_mac_allowed(struct sap_context *sap_ctx,
 	if (sap_search_mac_list
 		    (sap_ctx->denyMacList, sap_ctx->nDenyMac, peerMac, NULL)) {
 		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-			  "In %s, Peer " MAC_ADDRESS_STR " in deny list",
-			  __func__, MAC_ADDR_ARRAY(peerMac));
+			  "In %s, Peer " QDF_MAC_ADDR_STR " in deny list",
+			  __func__, QDF_MAC_ADDR_ARRAY(peerMac));
 		return QDF_STATUS_E_FAILURE;
 	}
 	/* A new station CAN associate, unless in deny list. Less stringent mode */
@@ -3364,9 +3397,9 @@ QDF_STATUS sap_is_peer_mac_allowed(struct sap_context *sap_ctx,
 	/* A new station CANNOT associate, unless in accept list. More stringent mode */
 	if (eSAP_DENY_UNLESS_ACCEPTED == sap_ctx->eSapMacAddrAclMode) {
 		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-			  "In %s, Peer " MAC_ADDRESS_STR
+			  "In %s, Peer " QDF_MAC_ADDR_STR
 			  " denied, Mac filter mode is eSAP_DENY_UNLESS_ACCEPTED",
-			  __func__, MAC_ADDR_ARRAY(peerMac));
+			  __func__, QDF_MAC_ADDR_ARRAY(peerMac));
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -3377,9 +3410,9 @@ QDF_STATUS sap_is_peer_mac_allowed(struct sap_context *sap_ctx,
 		sap_signal_hdd_event(sap_ctx, NULL, eSAP_UNKNOWN_STA_JOIN,
 				     (void *) peerMac);
 		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-			  "In %s, Peer " MAC_ADDRESS_STR
+			  "In %s, Peer " QDF_MAC_ADDR_STR
 			  " denied, Mac filter mode is eSAP_SUPPORT_ACCEPT_AND_DENY",
-			  __func__, MAC_ADDR_ARRAY(peerMac));
+			  __func__, QDF_MAC_ADDR_ARRAY(peerMac));
 		return QDF_STATUS_E_FAILURE;
 	}
 	return QDF_STATUS_SUCCESS;
@@ -3751,30 +3784,6 @@ static int sap_stop_dfs_cac_timer(struct sap_context *sap_ctx)
 
 	return 0;
 }
-
-#ifdef CONFIG_VDEV_SM
-/**
- * sap_move_to_cac_wait_state() - move to cac wait state
- * @sap_ctx: SAP context
- *
- * Return: QDF_STATUS
- */
-static QDF_STATUS sap_move_to_cac_wait_state(struct sap_context *sap_ctx)
-{
-	QDF_STATUS status;
-
-	status =
-	     wlan_vdev_mlme_sm_deliver_evt(sap_ctx->vdev,
-					   WLAN_VDEV_SM_EV_DFS_CAC_WAIT,
-					   0, NULL);
-	return status;
-}
-#else
-static inline QDF_STATUS sap_move_to_cac_wait_state(struct sap_context *sap_ctx)
-{
-	return QDF_STATUS_SUCCESS;
-}
-#endif
 
 /*
  * Function to start the DFS CAC Timer

@@ -789,10 +789,12 @@ struct wlan_mlme_vht_caps {
  * @tx_aggr_sw_retry_threshold_bk: aggr sw retry threshold for BK
  * @tx_aggr_sw_retry_threshold_vi: aggr sw retry threshold for VI
  * @tx_aggr_sw_retry_threshold_vo: aggr sw retry threshold for VO
+ * @tx_aggr_sw_retry_threshold: aggr sw retry threshold
  * @tx_non_aggr_sw_retry_threshold_be: non aggr sw retry threshold for BE
  * @tx_non_aggr_sw_retry_threshold_bk: non aggr sw retry threshold for BK
  * @tx_non_aggr_sw_retry_threshold_vi: non aggr sw retry threshold for VI
  * @tx_non_aggr_sw_retry_threshold_vo: non aggr sw retry threshold for VO
+ * @tx_non_aggr_sw_retry_threshold: non aggr sw retry threshold
  * @sap_max_inactivity_override: Override updating ap_sta_inactivity from
  * hostapd.conf
  * @sap_uapsd_enabled: Flag to enable/disable UAPSD for SAP
@@ -808,10 +810,12 @@ struct wlan_mlme_qos {
 	uint32_t tx_aggr_sw_retry_threshold_bk;
 	uint32_t tx_aggr_sw_retry_threshold_vi;
 	uint32_t tx_aggr_sw_retry_threshold_vo;
+	uint32_t tx_aggr_sw_retry_threshold;
 	uint32_t tx_non_aggr_sw_retry_threshold_be;
 	uint32_t tx_non_aggr_sw_retry_threshold_bk;
 	uint32_t tx_non_aggr_sw_retry_threshold_vi;
 	uint32_t tx_non_aggr_sw_retry_threshold_vo;
+	uint32_t tx_non_aggr_sw_retry_threshold;
 	bool sap_max_inactivity_override;
 	bool sap_uapsd_enabled;
 };
@@ -1248,17 +1252,43 @@ enum roaming_dfs_channel_type {
  * @threshold: Bss load threshold value above which roaming should start
  * @sample_time: Time duration in milliseconds for which the bss load value
  * should be monitored
+ * @rssi_threshold_5ghz: RSSI threshold of the current connected AP below which
+ * roam should be triggered if bss load threshold exceeds the configured value.
+ * This value is applicable only when we are connected in 5GHz band.
+ * @rssi_threshold_24ghz: RSSI threshold of the current connected AP below which
+ * roam should be triggered if bss load threshold exceeds the configured value.
+ * This value is applicable only when we are connected in 2.4 GHz band.
  */
 struct bss_load_trigger {
 	bool enabled;
 	uint32_t threshold;
 	uint32_t sample_time;
+	int32_t rssi_threshold_5ghz;
+	int32_t rssi_threshold_24ghz;
 };
+
+/*
+ * AKM suites supported by firmware for
+ * roaming
+ */
+#define AKM_FT_SAE           0
+#define AKM_FT_SUITEB_SHA384 1
+#define AKM_FT_FILS          2
 
 /*
  * @mawc_roam_enabled:              Enable/Disable MAWC during roaming
  * @enable_fast_roam_in_concurrency:Enable LFR roaming on STA during concurrency
  * @lfr3_roaming_offload:           Enable/disable roam offload feature
+ * @enable_disconnect_roam_offload: enable disassoc/deauth roam scan.
+ * @enable_idle_roam: flag to enable/disable idle roam in fw
+ * @idle_roam_rssi_delta: rssi delta of connected ap which is used to
+ * identify if the AP is idle or in motion
+ * @idle_roam_inactive_time: Timeout value in seconds, above which the
+ * connection is idle
+ * @idle_data_packet_count: data packet count measured during inactive time,
+ * below which the connection is idle.
+ * @idle_roam_min_rssi: Minimum rssi of connected AP to be considered for
+ * idle roam trigger.
  * @early_stop_scan_enable:         Set early stop scan
  * @enable_5g_band_pref:            Enable preference for 5G from INI
  * @ese_enabled:                    Enable ESE feature
@@ -1322,6 +1352,9 @@ struct bss_load_trigger {
  * @roam_scan_hi_rssi_ub:           Upper bound after which 5GHz scan
  * @roam_prefer_5ghz:               Prefer roaming to 5GHz Bss
  * @roam_intra_band:                Prefer roaming within Band
+ * @enable_adaptive_11r             Flag to check if adaptive 11r ini is enabled
+ * @tgt_adaptive_11r_cap:           Flag to check if target supports adaptive
+ * 11r
  * @roam_scan_home_away_time:       The home away time to firmware
  * @roam_scan_n_probes:    The number of probes to be sent for firmware roaming
  * @delay_before_vdev_stop:Wait time for tx complete before vdev stop
@@ -1334,12 +1367,26 @@ struct bss_load_trigger {
  * @enable_ftopen:                  Enable/disable FT open feature
  * @roam_force_rssi_trigger:        Force RSSI trigger or not
  * @roaming_scan_policy:            Config roaming scan policy in fw
+ * @roam_scan_inactivity_time:         Device inactivity monitoring time in
+ * milliseconds for which the device is considered to be inactive.
+ * @roam_inactive_data_packet_count:   Maximum allowed data packets count
+ * during roam_scan_inactivity_time.
+ * @roam_scan_period_after_inactivity: Roam scan period after device was in
+ * inactive state
+ * @fw_akm_bitmap:                  Supported Akm suites of firmware
  */
 struct wlan_mlme_lfr_cfg {
 	bool mawc_roam_enabled;
 	bool enable_fast_roam_in_concurrency;
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 	bool lfr3_roaming_offload;
+	bool enable_disconnect_roam_offload;
+	bool enable_idle_roam;
+	uint32_t idle_roam_rssi_delta;
+	uint32_t idle_roam_inactive_time;
+	uint32_t idle_data_packet_count;
+	uint32_t idle_roam_band;
+	int32_t idle_roam_min_rssi;
 #endif
 	bool early_stop_scan_enable;
 	bool enable_5g_band_pref;
@@ -1406,6 +1453,10 @@ struct wlan_mlme_lfr_cfg {
 	uint32_t roam_scan_hi_rssi_ub;
 	bool roam_prefer_5ghz;
 	bool roam_intra_band;
+#ifdef WLAN_ADAPTIVE_11R
+	bool enable_adaptive_11r;
+	bool tgt_adaptive_11r_cap;
+#endif
 	uint16_t roam_scan_home_away_time;
 	uint32_t roam_scan_n_probes;
 	uint8_t delay_before_vdev_stop;
@@ -1421,6 +1472,10 @@ struct wlan_mlme_lfr_cfg {
 	bool roam_force_rssi_trigger;
 	struct bss_load_trigger bss_load_trig;
 	bool roaming_scan_policy;
+	uint32_t roam_scan_inactivity_time;
+	uint32_t roam_inactive_data_packet_count;
+	uint32_t roam_scan_period_after_inactivity;
+	uint32_t fw_akm_bitmap;
 };
 
 /**
@@ -1866,6 +1921,8 @@ struct wlan_mlme_wifi_pos_cfg {
  * not be triggered
  * @btm_query_bitmask: Bitmask to send BTM query with candidate list on
  * various roam
+ * @btm_trig_min_candidate_score: Minimum score to consider the AP as candidate
+ * when the roam trigger is BTM.
  */
 struct wlan_mlme_btm {
 	bool prefer_btm_query;
@@ -1877,6 +1934,7 @@ struct wlan_mlme_btm {
 	uint32_t rct_validity_timer;
 	uint32_t disassoc_timer_threshold;
 	uint32_t btm_query_bitmask;
+	uint32_t btm_trig_min_candidate_score;
 };
 
 /**
@@ -2018,6 +2076,9 @@ struct wlan_mlme_ibss_cfg {
  * @mwc: MWC related CFG items
  * @dot11_mode: dot11 mode supported
  * @reg: REG related CFG itmes
+ * @trig_score_delta: Roam score delta value for various roam triggers
+ * @trig_min_rssi: Expected minimum RSSI value of candidate AP for
+ * various roam triggers
  */
 struct wlan_mlme_cfg {
 	struct wlan_mlme_chainmask chainmask_cfg;
@@ -2060,6 +2121,8 @@ struct wlan_mlme_cfg {
 	struct wlan_mlme_mwc mwc;
 	struct wlan_mlme_dot11_mode dot11_mode;
 	struct wlan_mlme_reg reg;
+	struct roam_trigger_score_delta trig_score_delta[NUM_OF_ROAM_TRIGGERS];
+	struct roam_trigger_min_rssi trig_min_rssi[NUM_OF_ROAM_TRIGGERS];
 };
 
 #endif

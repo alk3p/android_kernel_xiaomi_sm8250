@@ -464,4 +464,26 @@ int wlan_hdd_get_temperature(struct hdd_adapter *adapter, int *temperature);
  * Return: none
  */
 void wlan_hdd_display_txrx_stats(struct hdd_context *hdd_ctx);
+
+/**
+ * hdd_report_max_rate() - Fill the max rate stats in the station info structure
+ * to be sent to the userspace.
+ *
+ * @mac_handle: The mac handle
+ * @rate: The station_info tx/rx rate to be filled
+ * @signal: signal from station_info
+ * @rate_flags: TX/RX rate flags computed from tx/rx rate
+ * @mcs_index; The TX/RX mcs index computed from tx/rx rate
+ * @fw_rate: The tx/rx rate from fw stats
+ * @nss: The TX/RX NSS from fw stats
+ *
+ * Return: True if fill is successful
+ */
+bool hdd_report_max_rate(mac_handle_t mac_handle,
+			 struct rate_info *rate,
+			 int8_t signal,
+			 uint8_t rate_flags,
+			 uint8_t mcs_index,
+			 uint16_t fw_rate, uint8_t nss);
+
 #endif /* end #if !defined(WLAN_HDD_STATS_H) */

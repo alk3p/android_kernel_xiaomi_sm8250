@@ -129,6 +129,7 @@ struct hdd_config {
 	bool action_oui_enable;
 	uint8_t action_oui_str[ACTION_OUI_MAXIMUM_ID][ACTION_OUI_MAX_STR_LEN];
 	bool is_unit_test_framework_enabled;
+	bool disable_channel;
 
 	/* HDD converged ini items are listed below this*/
 	bool bug_on_reinit_failure;
@@ -153,7 +154,8 @@ struct hdd_config {
 	bool enable_packet_log;
 #endif
 	uint32_t rx_mode;
-#ifdef MSM_PLATFORM
+
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 	uint32_t bus_bw_high_threshold;
 	uint32_t bus_bw_medium_threshold;
 	uint32_t bus_bw_low_threshold;
@@ -166,7 +168,8 @@ struct hdd_config {
 	uint32_t tcp_tx_high_tput_thres;
 	uint32_t tcp_delack_timer_count;
 	bool     enable_tcp_param_update;
-#endif /* MSM_PLATFORM */
+#endif /*WLAN_FEATURE_DP_BUS_BANDWIDTH*/
+
 #ifdef QCA_LL_LEGACY_TX_FLOW_CONTROL
 	uint32_t tx_flow_low_watermark;
 	uint32_t tx_flow_hi_watermark_offset;
@@ -206,68 +209,8 @@ struct hdd_config {
 	uint32_t derived_intf_pool;
 	uint8_t enable_rtt_support;
 	uint32_t cfg_wmi_credit_cnt;
-};
-
-#define VAR_OFFSET(_Struct, _Var) (offsetof(_Struct, _Var))
-#define VAR_SIZE(_Struct, _Var) (sizeof(((_Struct *)0)->_Var))
-
-#define VAR_FLAGS_NONE         (0)
-
-/* bit 0 is Required or Optional */
-#define VAR_FLAGS_REQUIRED     (1 << 0)
-#define VAR_FLAGS_OPTIONAL     (0 << 0)
-
-/*
- * bit 1 tells if range checking is required.
- * If less than MIN, assume MIN.
- * If greater than MAX, assume MAX.
- */
-#define VAR_FLAGS_RANGE_CHECK  (1 << 1)
-#define VAR_FLAGS_RANGE_CHECK_ASSUME_MINMAX (VAR_FLAGS_RANGE_CHECK)
-
-/*
- * bit 2 is range checking that assumes the DEFAULT value
- * If less than MIN, assume DEFAULT,
- * If greater than MAX, assume DEFAULT.
- */
-#define VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT (1 << 2)
-
-enum wlan_parameter_type {
-	WLAN_PARAM_Integer,
-	WLAN_PARAM_SignedInteger,
-	WLAN_PARAM_HexInteger,
-	WLAN_PARAM_String,
-	WLAN_PARAM_MacAddr,
-};
-
-#define REG_VARIABLE(_Name, _Type,  _Struct, _VarName,		\
-		      _Flags, _Default, _Min, _Max)		\
-	{							\
-		(_Name),					\
-		(_Type),					\
-		(_Flags),					\
-		0,						\
-		VAR_OFFSET(_Struct, _VarName),			\
-		VAR_SIZE(_Struct, _VarName),			\
-		(_Default),					\
-		(_Min),						\
-		(_Max),						\
-		NULL						\
-	}
-
-struct reg_table_entry {
-	char *RegName;          /* variable name in the qcom_cfg.ini file */
-	unsigned char RegType;    /* variable type in hdd_config struct */
-	unsigned char Flags;    /* Specify optional parms and if RangeCheck is performed */
-	unsigned char notifyId; /* Dynamic modification identifier */
-	unsigned short VarOffset;       /* offset to field from the base address of the structure */
-	unsigned short VarSize; /* size (in bytes) of the field */
-	unsigned long VarDefault;       /* default value to use */
-	unsigned long VarMin;   /* minimum value, for range checking */
-	unsigned long VarMax;   /* maximum value, for range checking */
-	/* Dynamic modification notifier */
-	void (*pfnDynamicnotify)(struct hdd_context *hdd_ctx,
-				 unsigned long notifyId);
+	uint32_t sar_version;
+	bool is_wow_disabled;
 };
 
 /**
@@ -278,9 +221,6 @@ struct reg_table_entry {
  * Return: CSR WMM mode
  */
 eCsrRoamWmmUserModeType hdd_to_csr_wmm_mode(uint8_t mode);
-
-/* Function declarations and documenation */
-QDF_STATUS hdd_parse_config_ini(struct hdd_context *hdd_ctx);
 
 QDF_STATUS hdd_update_mac_config(struct hdd_context *hdd_ctx);
 QDF_STATUS hdd_set_sme_config(struct hdd_context *hdd_ctx);
@@ -296,7 +236,7 @@ QDF_STATUS hdd_set_idle_ps_config(struct hdd_context *hdd_ctx, bool val);
 void hdd_get_pmkid_modes(struct hdd_context *hdd_ctx,
 			 struct pmkid_mode_bits *pmkid_modes);
 
-void hdd_update_tgt_cfg(hdd_handle_t hdd_handle, struct wma_tgt_cfg *cfg);
+int hdd_update_tgt_cfg(hdd_handle_t hdd_handle, struct wma_tgt_cfg *cfg);
 
 /**
  * hdd_string_to_u8_array() - used to convert decimal string into u8 array

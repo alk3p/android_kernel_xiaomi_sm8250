@@ -198,7 +198,7 @@ lim_check_rx_basic_rates(struct mac_context *mac, tSirMacRateSet rxRateSet,
 
 	/* Extract BSS basic rateset from operational rateset */
 	for (i = 0, j = 0;
-	     ((i < pRateSet->numRates) && (i < SIR_MAC_RATESET_EID_MAX)); i++) {
+	     ((i < pRateSet->numRates) && (i < WLAN_SUPPORTED_RATES_IE_MAX_LEN)); i++) {
 		if ((pRateSet->rate[i] & 0x80) == 0x80) {
 			/* msb is set, so this is a basic rate */
 			basicRate.rate[j++] = pRateSet->rate[i];
@@ -213,7 +213,7 @@ lim_check_rx_basic_rates(struct mac_context *mac, tSirMacRateSet rxRateSet,
 		match = 0;
 		for (i = 0;
 		     ((i < rxRateSet.numRates)
-		      && (i < SIR_MAC_RATESET_EID_MAX)); i++) {
+		      && (i < WLAN_SUPPORTED_RATES_IE_MAX_LEN)); i++) {
 			if ((rxRateSet.rate[i] | 0x80) == basicRate.rate[k])
 				match = 1;
 		}
@@ -692,10 +692,10 @@ lim_send_del_sta_cnf(struct mac_context *mac, struct qdf_mac_addr sta_dsaddr,
 	tLimMlmDeauthCnf mlmDeauthCnf;
 	tLimMlmPurgeStaInd mlmPurgeStaInd;
 
-	pe_debug("Sessionid: %d staDsAssocId: %d Trigger: %d statusCode: %d sta_dsaddr: "MAC_ADDRESS_STR,
+	pe_debug("Sessionid: %d staDsAssocId: %d Trigger: %d statusCode: %d sta_dsaddr: "QDF_MAC_ADDR_STR,
 		pe_session->peSessionId, staDsAssocId,
 		mlmStaContext.cleanupTrigger, statusCode,
-		MAC_ADDR_ARRAY(sta_dsaddr.bytes));
+		QDF_MAC_ADDR_ARRAY(sta_dsaddr.bytes));
 
 	if (LIM_IS_STA_ROLE(pe_session)) {
 		/* Set BSSID at CFG to null */
@@ -892,10 +892,10 @@ lim_reject_association(struct mac_context *mac_ctx, tSirMacAddr peer_addr,
 {
 	tpDphHashNode sta_ds;
 
-	pe_debug("Sessionid: %d auth_type: %d sub_type: %d add_pre_auth_context: %d sta_id: %d delete_sta: %d result_code : %d peer_addr: " MAC_ADDRESS_STR,
+	pe_debug("Sessionid: %d auth_type: %d sub_type: %d add_pre_auth_context: %d sta_id: %d delete_sta: %d result_code : %d peer_addr: " QDF_MAC_ADDR_STR,
 		session_entry->peSessionId, auth_type, sub_type,
 		add_pre_auth_context, sta_id, delete_sta, result_code,
-		MAC_ADDR_ARRAY(peer_addr));
+		QDF_MAC_ADDR_ARRAY(peer_addr));
 
 	if (add_pre_auth_context) {
 		/* Create entry for this STA in pre-auth list */
@@ -1553,7 +1553,7 @@ QDF_STATUS lim_populate_own_rate_set(struct mac_context *mac_ctx,
 		is_arate = 0;
 
 		for (j = 0; (j < temp_rate_set.numRates) &&
-			 (j < SIR_MAC_RATESET_EID_MAX); j++) {
+			 (j < WLAN_SUPPORTED_RATES_IE_MAX_LEN); j++) {
 			if ((uint32_t) (temp_rate_set.rate[j] & 0x7f) <
 					val) {
 				val = temp_rate_set.rate[j] & 0x7f;
@@ -1645,13 +1645,13 @@ QDF_STATUS lim_populate_peer_rate_set(struct mac_context *mac,
 	qdf_size_t val_len;
 
 	/* copy operational rate set from pe_session */
-	if (pe_session->rateSet.numRates <= SIR_MAC_RATESET_EID_MAX) {
+	if (pe_session->rateSet.numRates <= WLAN_SUPPORTED_RATES_IE_MAX_LEN) {
 		qdf_mem_copy((uint8_t *) tempRateSet.rate,
 			     (uint8_t *) (pe_session->rateSet.rate),
 			     pe_session->rateSet.numRates);
 		tempRateSet.numRates = pe_session->rateSet.numRates;
 	} else {
-		pe_err("more than SIR_MAC_RATESET_EID_MAX rates");
+		pe_err("more than WLAN_SUPPORTED_RATES_IE_MAX_LEN rates");
 		return QDF_STATUS_E_FAILURE;
 	}
 	if ((pe_session->dot11mode == MLME_DOT11_MODE_11G) ||
@@ -1659,7 +1659,7 @@ QDF_STATUS lim_populate_peer_rate_set(struct mac_context *mac,
 		(pe_session->dot11mode == MLME_DOT11_MODE_11AC) ||
 		(pe_session->dot11mode == MLME_DOT11_MODE_11N)) {
 		if (pe_session->extRateSet.numRates <=
-		    SIR_MAC_RATESET_EID_MAX) {
+		    WLAN_SUPPORTED_RATES_IE_MAX_LEN) {
 			qdf_mem_copy((uint8_t *) tempRateSet2.rate,
 				     (uint8_t *) (pe_session->extRateSet.
 						  rate),
@@ -1667,13 +1667,13 @@ QDF_STATUS lim_populate_peer_rate_set(struct mac_context *mac,
 			tempRateSet2.numRates =
 				pe_session->extRateSet.numRates;
 		} else {
-			pe_err("pe_session->extRateSet.numRates more than SIR_MAC_RATESET_EID_MAX rates");
+			pe_err("pe_session->extRateSet.numRates more than WLAN_SUPPORTED_RATES_IE_MAX_LEN rates");
 			return QDF_STATUS_E_FAILURE;
 		}
 	} else
 		tempRateSet2.numRates = 0;
 	if ((tempRateSet.numRates + tempRateSet2.numRates) >
-	    SIR_MAC_RATESET_EID_MAX) {
+	    WLAN_SUPPORTED_RATES_IE_MAX_LEN) {
 		pe_err("more than 12 rates in CFG");
 		return QDF_STATUS_E_FAILURE;
 	}
@@ -1698,7 +1698,7 @@ QDF_STATUS lim_populate_peer_rate_set(struct mac_context *mac,
 			isArate = 0;
 			for (j = 0;
 			     (j < tempRateSet.numRates)
-			     && (j < SIR_MAC_RATESET_EID_MAX); j++) {
+			     && (j < WLAN_SUPPORTED_RATES_IE_MAX_LEN); j++) {
 				if ((uint32_t) (tempRateSet.rate[j] & 0x7f) <
 				    val) {
 					val = tempRateSet.rate[j] & 0x7f;
@@ -1905,7 +1905,7 @@ QDF_STATUS lim_populate_matching_rate_set(struct mac_context *mac_ctx,
 	 * unicity of the rates so there cannot be more than 12
 	 */
 	for (i = 0; (i < oper_rate_set->numRates &&
-			 i < SIR_MAC_RATESET_EID_MAX); i++)
+			 i < WLAN_SUPPORTED_RATES_IE_MAX_LEN); i++)
 		temp_rate_set.rate[i] = oper_rate_set->rate[i];
 
 	temp_rate_set.numRates = oper_rate_set->numRates;
@@ -1920,7 +1920,7 @@ QDF_STATUS lim_populate_matching_rate_set(struct mac_context *mac_ctx,
 		int tail = temp_rate_set.numRates;
 
 		for (i = 0; (i < ext_rate_set->numRates &&
-				i < SIR_MAC_RATESET_EID_MAX); i++) {
+				i < WLAN_SUPPORTED_RATES_IE_MAX_LEN); i++) {
 			found = 0;
 			for (j = 0; j < (uint32_t) tail; j++) {
 				if ((temp_rate_set.rate[j] & 0x7F) ==
@@ -1940,8 +1940,8 @@ QDF_STATUS lim_populate_matching_rate_set(struct mac_context *mac_ctx,
 	} else if (ext_rate_set->numRates &&
 		 ((temp_rate_set.numRates + ext_rate_set->numRates) <= 12)) {
 		for (j = 0; ((j < ext_rate_set->numRates) &&
-				 (j < SIR_MAC_RATESET_EID_MAX) &&
-				 ((i + j) < SIR_MAC_RATESET_EID_MAX)); j++)
+				 (j < WLAN_SUPPORTED_RATES_IE_MAX_LEN) &&
+				 ((i + j) < WLAN_SUPPORTED_RATES_IE_MAX_LEN)); j++)
 			temp_rate_set.rate[i + j] = ext_rate_set->rate[j];
 
 		temp_rate_set.numRates += ext_rate_set->numRates;
@@ -1952,9 +1952,9 @@ QDF_STATUS lim_populate_matching_rate_set(struct mac_context *mac_ctx,
 	rates = &sta_ds->supportedRates;
 	qdf_mem_zero(rates, sizeof(*rates));
 	for (i = 0; (i < temp_rate_set2.numRates &&
-			 i < SIR_MAC_RATESET_EID_MAX); i++) {
+			 i < WLAN_SUPPORTED_RATES_IE_MAX_LEN); i++) {
 		for (j = 0; (j < temp_rate_set.numRates &&
-				 j < SIR_MAC_RATESET_EID_MAX); j++) {
+				 j < WLAN_SUPPORTED_RATES_IE_MAX_LEN); j++) {
 			if ((temp_rate_set2.rate[i] & 0x7F) !=
 				(temp_rate_set.rate[j] & 0x7F))
 				continue;
@@ -2150,8 +2150,8 @@ lim_add_sta(struct mac_context *mac_ctx,
 	else
 		sta_Addr = &sta_mac;
 
-	pe_debug(MAC_ADDRESS_STR ": Subtype(Assoc/Reassoc): %d",
-		MAC_ADDR_ARRAY(*sta_Addr), sta_ds->mlmStaContext.subType);
+	pe_debug(QDF_MAC_ADDR_STR ": Subtype(Assoc/Reassoc): %d",
+		QDF_MAC_ADDR_ARRAY(*sta_Addr), sta_ds->mlmStaContext.subType);
 
 	qdf_mem_copy((uint8_t *) add_sta_params->staMac,
 		     (uint8_t *) *sta_Addr, sizeof(tSirMacAddr));
@@ -2681,9 +2681,9 @@ lim_del_sta(struct mac_context *mac,
 
 	pe_debug("Sessionid %d :Sending SIR_HAL_DELETE_STA_REQ "
 		 "for STAID: %X and AssocID: %d MAC : "
-		 MAC_ADDRESS_STR, pDelStaParams->sessionId,
+		 QDF_MAC_ADDR_STR, pDelStaParams->sessionId,
 		pDelStaParams->staIdx, pDelStaParams->assocId,
-		MAC_ADDR_ARRAY(sta->staAddr));
+		QDF_MAC_ADDR_ARRAY(sta->staAddr));
 
 	MTRACE(mac_trace_msg_tx(mac, pe_session->peSessionId, msgQ.type));
 	retCode = wma_post_ctrl_msg(mac, &msgQ);
@@ -2744,7 +2744,7 @@ lim_add_sta_self(struct mac_context *mac, uint16_t staIdx, uint8_t updateSta,
 		(int)mac->roam.configParam.uCfgDot11Mode);
 
 	sir_copy_mac_addr(staMac, pe_session->selfMacAddr);
-	pe_debug(MAC_ADDRESS_STR ": ", MAC_ADDR_ARRAY(staMac));
+	pe_debug(QDF_MAC_ADDR_STR ": ", QDF_MAC_ADDR_ARRAY(staMac));
 	pAddStaParams = qdf_mem_malloc(sizeof(tAddStaParams));
 	if (!pAddStaParams)
 		return QDF_STATUS_E_NOMEM;
@@ -2900,9 +2900,9 @@ lim_add_sta_self(struct mac_context *mac, uint16_t staIdx, uint8_t updateSta,
 	msgQ.bodyptr = pAddStaParams;
 	msgQ.bodyval = 0;
 
-	pe_debug(MAC_ADDRESS_STR ":Sessionid %d : "
+	pe_debug(QDF_MAC_ADDR_STR ":Sessionid %d : "
 			       "Sending WMA_ADD_STA_REQ. (aid %d)",
-		MAC_ADDR_ARRAY(pAddStaParams->staMac),
+		QDF_MAC_ADDR_ARRAY(pAddStaParams->staMac),
 		pAddStaParams->sessionId, pAddStaParams->assocId);
 	MTRACE(mac_trace_msg_tx(mac, pe_session->peSessionId, msgQ.type));
 
@@ -3369,9 +3369,9 @@ lim_del_bss(struct mac_context *mac, tpDphHashNode sta, uint16_t bssIdx,
 		     sizeof(tSirMacAddr));
 	pDelBssParams->smesessionId = pe_session->smeSessionId;
 	pe_debug("Sessionid %d : Sending HAL_DELETE_BSS_REQ "
-			  "for bss idx: %X BSSID:" MAC_ADDRESS_STR,
+			  "for bss idx: %X BSSID:" QDF_MAC_ADDR_STR,
 		       pDelBssParams->sessionId, pDelBssParams->bssIdx,
-		       MAC_ADDR_ARRAY(pe_session->bssId));
+		       QDF_MAC_ADDR_ARRAY(pe_session->bssId));
 	/* we need to defer the message until we get the response back from HAL. */
 	SET_LIM_PROCESS_DEFD_MESGS(mac, false);
 
@@ -3568,7 +3568,8 @@ QDF_STATUS lim_sta_send_add_bss(struct mac_context *mac, tpSirAssocRsp pAssocRsp
 		pe_session->smeSessionId, updateEntry,
 		GET_LIM_SYSTEM_ROLE(pe_session));
 
-	pe_debug("BSSID: " MAC_ADDRESS_STR, MAC_ADDR_ARRAY(pAddBssParams->bssId));
+	pe_debug("BSSID: " QDF_MAC_ADDR_STR,
+		 QDF_MAC_ADDR_ARRAY(pAddBssParams->bssId));
 
 	pAddBssParams->bssType = eSIR_INFRASTRUCTURE_MODE;
 
@@ -3742,8 +3743,8 @@ QDF_STATUS lim_sta_send_add_bss(struct mac_context *mac, tpSirAssocRsp pAssocRsp
 				&pe_session->dph.dphHashTable);
 	if (!sta) {
 		pe_err("Couldn't get assoc id for " "MAC ADDR: "
-			MAC_ADDRESS_STR,
-			MAC_ADDR_ARRAY(
+			QDF_MAC_ADDR_STR,
+			QDF_MAC_ADDR_ARRAY(
 				pAddBssParams->staContext.staMac));
 			return QDF_STATUS_E_FAILURE;
 	}
@@ -3756,9 +3757,9 @@ QDF_STATUS lim_sta_send_add_bss(struct mac_context *mac, tpSirAssocRsp pAssocRsp
 		(uint8_t) pAssocRsp->capabilityInfo.shortPreamble;
 	pAddBssParams->staContext.updateSta = updateEntry;
 
-	pe_debug("StaContext: " MAC_ADDRESS_STR
+	pe_debug("StaContext: " QDF_MAC_ADDR_STR
 			" shortPreambleSupported: %d",
-			MAC_ADDR_ARRAY(pAddBssParams->staContext.staMac),
+			QDF_MAC_ADDR_ARRAY(pAddBssParams->staContext.staMac),
 			pAddBssParams->staContext.shortPreambleSupported);
 
 	if (IS_DOT11_MODE_HT(pe_session->dot11mode)
@@ -4112,8 +4113,8 @@ QDF_STATUS lim_sta_send_add_bss_pre_assoc(struct mac_context *mac, uint8_t updat
 		pe_session->smeSessionId, updateEntry,
 		GET_LIM_SYSTEM_ROLE(pe_session));
 
-	pe_debug("BSSID: " MAC_ADDRESS_STR,
-		MAC_ADDR_ARRAY(pAddBssParams->bssId));
+	pe_debug("BSSID: " QDF_MAC_ADDR_STR,
+		QDF_MAC_ADDR_ARRAY(pAddBssParams->bssId));
 	/* Incorrect BSS Type which caused UMA Descriptor to be overwritten on
 	 * top of an already established Infra link. This lead to issues in
 	 * concurrent data transfer.
@@ -4294,8 +4295,8 @@ QDF_STATUS lim_sta_send_add_bss_pre_assoc(struct mac_context *mac, uint8_t updat
 		(uint8_t) pBeaconStruct->capabilityInfo.shortPreamble;
 	pAddBssParams->staContext.updateSta = updateEntry;
 
-	pe_debug("StaCtx: " MAC_ADDRESS_STR " shortPreamble: %d",
-			MAC_ADDR_ARRAY(pAddBssParams->staContext.staMac),
+	pe_debug("StaCtx: " QDF_MAC_ADDR_STR " shortPreamble: %d",
+			QDF_MAC_ADDR_ARRAY(pAddBssParams->staContext.staMac),
 			pAddBssParams->staContext.shortPreambleSupported);
 
 	pAddBssParams->dot11_mode = pe_session->dot11mode;

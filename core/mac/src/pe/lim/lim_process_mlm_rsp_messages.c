@@ -996,8 +996,8 @@ static void lim_process_mlm_deauth_ind(struct mac_context *mac_ctx,
 					   deauth_ind->peerMacAddr,
 					   &session_id);
 	if (!session) {
-		pe_err("session does not exist for Addr:" MAC_ADDRESS_STR,
-		       MAC_ADDR_ARRAY(deauth_ind->peerMacAddr));
+		pe_err("session does not exist for Addr:" QDF_MAC_ADDR_STR,
+		       QDF_MAC_ADDR_ARRAY(deauth_ind->peerMacAddr));
 		return;
 	}
 	role = GET_LIM_SYSTEM_ROLE(session);
@@ -2825,9 +2825,6 @@ void lim_process_mlm_set_sta_key_rsp(struct mac_context *mac_ctx,
 	sme_session_id = set_key_params->smesessionId;
 	session_entry = pe_find_session_by_sme_session_id(mac_ctx,
 							  sme_session_id);
-	session_id = session_entry->peSessionId;
-	pe_debug("PE session ID %d, SME session id %d", session_id,
-		 sme_session_id);
 	if (!session_entry) {
 		pe_err("session does not exist for given session_id");
 		qdf_mem_zero(msg->bodyptr, sizeof(*set_key_params));
@@ -2839,6 +2836,9 @@ void lim_process_mlm_set_sta_key_rsp(struct mac_context *mac_ctx,
 					     sme_session_id);
 		return;
 	}
+	session_id = session_entry->peSessionId;
+	pe_debug("PE session ID %d, SME session id %d", session_id,
+		 sme_session_id);
 	result_status = set_key_params->status;
 	if (!lim_is_set_key_req_converged()) {
 		if (eLIM_MLM_WT_SET_STA_KEY_STATE !=
@@ -2923,9 +2923,6 @@ void lim_process_mlm_set_bss_key_rsp(struct mac_context *mac_ctx,
 	sme_session_id = ((tpSetBssKeyParams) msg->bodyptr)->smesessionId;
 	session_entry = pe_find_session_by_sme_session_id(mac_ctx,
 							  sme_session_id);
-	session_id = session_entry->peSessionId;
-	pe_debug("PE session ID %d, SME session id %d", session_id,
-		 sme_session_id);
 	if (!session_entry) {
 		pe_err("session does not exist for given sessionId [%d]",
 			session_id);
@@ -2937,6 +2934,9 @@ void lim_process_mlm_set_bss_key_rsp(struct mac_context *mac_ctx,
 					     sme_session_id);
 		return;
 	}
+	session_id = session_entry->peSessionId;
+	pe_debug("PE session ID %d, SME session id %d", session_id,
+		 sme_session_id);
 	if (eLIM_MLM_WT_SET_BSS_KEY_STATE == session_entry->limMlmState) {
 		result_status =
 			(uint16_t)(((tpSetBssKeyParams)msg->bodyptr)->status);
@@ -3144,9 +3144,9 @@ static void lim_process_switch_channel_join_req(
 				mac_ctx->lim.gLimHeartBeatApMac[apCount], sizeof(tSirMacAddr))) {
 
 				pe_err("Index %d Sessionid: %d Send deauth on "
-				"channel %d to BSSID: "MAC_ADDRESS_STR, apCount,
+				"channel %d to BSSID: "QDF_MAC_ADDR_STR, apCount,
 				session_entry->peSessionId, session_entry->currentOperChannel,
-				MAC_ADDR_ARRAY(session_entry->pLimMlmJoinReq->bssDescription.
+				QDF_MAC_ADDR_ARRAY(session_entry->pLimMlmJoinReq->bssDescription.
 											bssId));
 
 				lim_send_deauth_mgmt_frame(mac_ctx, eSIR_MAC_UNSPEC_FAILURE_REASON,
@@ -3187,9 +3187,9 @@ static void lim_process_switch_channel_join_req(
 	mac_ctx->lim.limTimers.gLimPeriodicJoinProbeReqTimer.sessionId =
 		session_entry->peSessionId;
 	pe_debug("Sessionid: %d Send Probe req on channel %d ssid:%.*s "
-		"BSSID: " MAC_ADDRESS_STR, session_entry->peSessionId,
+		"BSSID: " QDF_MAC_ADDR_STR, session_entry->peSessionId,
 		session_entry->currentOperChannel, ssId.length, ssId.ssId,
-		MAC_ADDR_ARRAY(
+		QDF_MAC_ADDR_ARRAY(
 		session_entry->pLimMlmJoinReq->bssDescription.bssId));
 
 	/*

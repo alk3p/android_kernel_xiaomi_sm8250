@@ -48,10 +48,6 @@
 #include "cfg_ucfg_api.h"
 #include "hdd_dp_cfg.h"
 
-struct reg_table_entry g_registry_table[] = {
-};
-
-
 /**
  * get_next_line() - find and locate the new line pointer
  * @str: pointer to string
@@ -129,89 +125,6 @@ static char *i_trim(char *str)
 	return str;
 }
 
-/* Maximum length of the confgiuration name and value */
-#define CFG_VALUE_MAX_LEN 256
-#define CFG_ENTRY_MAX_LEN (32+CFG_VALUE_MAX_LEN)
-
-/**
- * hdd_cfg_get_config() - get the configuration content
- * @reg_table: pointer to configuration table
- * @reg_table_count: number of @reg_table entries
- * @ini_struct: pointer to the hdd config blob
- * @hdd_ctx: pointer to hdd context
- * @print_fn: print function pointer
- *
- * Return: none
- */
-static void hdd_cfg_get_config(struct reg_table_entry *reg_table,
-			       unsigned long reg_table_count,
-			       uint8_t *ini_struct, struct hdd_context *hdd_ctx,
-			       void (*print_fn)(const char *))
-{
-	unsigned int idx;
-	struct reg_table_entry *reg_entry = reg_table;
-	uint32_t value;
-	char value_str[CFG_VALUE_MAX_LEN];
-	char config_str[CFG_ENTRY_MAX_LEN];
-	char *fmt;
-	void *field;
-	struct qdf_mac_addr *mac_addr;
-	int curlen;
-
-	for (idx = 0; idx < reg_table_count; idx++, reg_entry++) {
-		field = ini_struct + reg_entry->VarOffset;
-
-		if ((WLAN_PARAM_Integer == reg_entry->RegType) ||
-		    (WLAN_PARAM_SignedInteger == reg_entry->RegType) ||
-		    (WLAN_PARAM_HexInteger == reg_entry->RegType)) {
-			value = 0;
-
-			if ((reg_entry->VarSize > sizeof(value)) ||
-			    (reg_entry->VarSize == 0)) {
-				pr_warn("Invalid length of %s: %d",
-					reg_entry->RegName, reg_entry->VarSize);
-				continue;
-			}
-
-			memcpy(&value, field, reg_entry->VarSize);
-			if (WLAN_PARAM_HexInteger == reg_entry->RegType) {
-				fmt = "%x";
-			} else if (WLAN_PARAM_SignedInteger ==
-				   reg_entry->RegType) {
-				fmt = "%d";
-				value = sign_extend32(
-						value,
-						reg_entry->VarSize * 8 - 1);
-			} else {
-				fmt = "%u";
-			}
-			snprintf(value_str, CFG_VALUE_MAX_LEN, fmt, value);
-		} else if (WLAN_PARAM_String == reg_entry->RegType) {
-			snprintf(value_str, CFG_VALUE_MAX_LEN, "%s",
-				 (char *)field);
-		} else if (WLAN_PARAM_MacAddr == reg_entry->RegType) {
-			mac_addr = (struct qdf_mac_addr *) field;
-			snprintf(value_str, CFG_VALUE_MAX_LEN,
-				 "%02x:%02x:%02x:%02x:%02x:%02x",
-				 mac_addr->bytes[0],
-				 mac_addr->bytes[1],
-				 mac_addr->bytes[2],
-				 mac_addr->bytes[3],
-				 mac_addr->bytes[4], mac_addr->bytes[5]);
-		} else {
-			snprintf(value_str, CFG_VALUE_MAX_LEN, "(unhandled)");
-		}
-		curlen = scnprintf(config_str, CFG_ENTRY_MAX_LEN,
-				   "%s=%s%s\n",
-				   reg_entry->RegName,
-				   value_str,
-				   test_bit(idx,
-					    (void *)&hdd_ctx->config->
-					    bExplicitCfg) ? "*" : "");
-		(*print_fn)(config_str);
-	}
-}
-
 /** struct hdd_cfg_entry - ini configuration entry
  * @name: name of the entry
  * @value: value of the entry
@@ -220,53 +133,6 @@ struct hdd_cfg_entry {
 	char *name;
 	char *value;
 };
-
-/**
- * find_cfg_item() - find the configuration item
- * @iniTable: pointer to configuration table
- * @entries: number fo the configuration entries
- * @name: the interested configuration to find
- * @value: the value to read back
- *
- * Return: QDF_STATUS_SUCCESS if the interested configuration is found,
- *		otherwise QDF_STATUS_E_FAILURE
- */
-static QDF_STATUS find_cfg_item(struct hdd_cfg_entry *iniTable,
-				unsigned long entries,
-				char *name, char **value)
-{
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	unsigned long i;
-
-	for (i = 0; i < entries; i++) {
-		if (strcmp(iniTable[i].name, name) == 0) {
-			*value = iniTable[i].value;
-			hdd_debug("Found %s entry for Name=[%s] Value=[%s] ",
-				  WLAN_INI_FILE, name, *value);
-			return QDF_STATUS_SUCCESS;
-		}
-	}
-
-	return status;
-}
-
-/**
- * parse_hex_digit() - conversion to hex value
- * @c: the character to convert
- *
- * Return: the hex value, otherwise 0
- */
-static int parse_hex_digit(char c)
-{
-	if (c >= '0' && c <= '9')
-		return c - '0';
-	if (c >= 'a' && c <= 'f')
-		return c - 'a' + 10;
-	if (c >= 'A' && c <= 'F')
-		return c - 'A' + 10;
-
-	return 0;
-}
 
 /**
  * update_mac_from_string() - convert string to 6 bytes mac address
@@ -312,247 +178,6 @@ static QDF_STATUS update_mac_from_string(struct hdd_context *hdd_ctx,
 }
 
 /**
- * hdd_apply_cfg_ini() - apply the ini configuration file
- * @hdd_ctx: the pointer to hdd context
- * @iniTable: pointer to configuration table
- * @entries: number fo the configuration entries
- * It overwrites the MAC address if config file exist.
- *
- * Return: QDF_STATUS_SUCCESS if the ini configuration file is correctly parsed,
- *		otherwise QDF_STATUS_E_INVAL
- */
-static QDF_STATUS hdd_apply_cfg_ini(struct hdd_context *hdd_ctx,
-				    struct hdd_cfg_entry *iniTable,
-				    unsigned long entries)
-{
-	QDF_STATUS match_status = QDF_STATUS_E_FAILURE;
-	QDF_STATUS ret_status = QDF_STATUS_SUCCESS;
-	unsigned int idx;
-	void *pField;
-	char *value_str = NULL;
-	unsigned long len_value_str;
-	char *candidate;
-	uint32_t value;
-	int32_t svalue;
-	void *pStructBase = hdd_ctx->config;
-	struct reg_table_entry *pRegEntry = g_registry_table;
-	unsigned long cRegTableEntries = QDF_ARRAY_SIZE(g_registry_table);
-	uint32_t cbOutString;
-	int i;
-	int rv;
-
-	BUILD_BUG_ON(MAX_CFG_INI_ITEMS < cRegTableEntries);
-
-	for (idx = 0; idx < cRegTableEntries; idx++, pRegEntry++) {
-		/* Calculate the address of the destination field in the structure. */
-		pField = ((uint8_t *) pStructBase) + pRegEntry->VarOffset;
-
-		match_status =
-			find_cfg_item(iniTable, entries, pRegEntry->RegName,
-				      &value_str);
-
-		if ((match_status != QDF_STATUS_SUCCESS)
-		    && (pRegEntry->Flags & VAR_FLAGS_REQUIRED)) {
-			/* If we could not read the cfg item and it is required, this is an error. */
-			hdd_err("Failed to read required config parameter %s", pRegEntry->RegName);
-			ret_status = QDF_STATUS_E_FAILURE;
-			break;
-		}
-
-		if ((WLAN_PARAM_Integer == pRegEntry->RegType) ||
-		    (WLAN_PARAM_HexInteger == pRegEntry->RegType)) {
-			/* If successfully read from the registry, use the value read.
-			 * If not, use the default value.
-			 */
-			if (match_status == QDF_STATUS_SUCCESS
-			    && (WLAN_PARAM_Integer == pRegEntry->RegType)) {
-				rv = kstrtou32(value_str, 10, &value);
-				if (rv < 0) {
-					hdd_warn("Reg Parameter %s invalid. Enforcing default", pRegEntry->RegName);
-					value = pRegEntry->VarDefault;
-				}
-			} else if (match_status == QDF_STATUS_SUCCESS
-				   && (WLAN_PARAM_HexInteger ==
-				       pRegEntry->RegType)) {
-				rv = kstrtou32(value_str, 16, &value);
-				if (rv < 0) {
-					hdd_warn("Reg parameter %s invalid. Enforcing default", pRegEntry->RegName);
-					value = pRegEntry->VarDefault;
-				}
-			} else {
-				value = pRegEntry->VarDefault;
-			}
-
-			/* Only if the parameter is set in the ini file, do the range check here */
-			if (match_status == QDF_STATUS_SUCCESS &&
-			    pRegEntry->Flags & VAR_FLAGS_RANGE_CHECK) {
-				if (value > pRegEntry->VarMax) {
-					hdd_warn("Reg Parameter %s > allowed Maximum [%u > %lu]. Enforcing Maximum", pRegEntry->RegName,
-					       value, pRegEntry->VarMax);
-					value = pRegEntry->VarMax;
-				}
-
-				if (value < pRegEntry->VarMin) {
-					hdd_warn("Reg Parameter %s < allowed Minimum [%u < %lu]. Enforcing Minimum", pRegEntry->RegName,
-					       value, pRegEntry->VarMin);
-					value = pRegEntry->VarMin;
-				}
-			}
-			/* Only if the parameter is set in the ini file, do the range check here */
-			else if (match_status == QDF_STATUS_SUCCESS &&
-				 pRegEntry->Flags &
-					VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT) {
-				if (value > pRegEntry->VarMax) {
-					hdd_warn("Reg Parameter %s > allowed Maximum [%u > %lu]. Enforcing Default: %lu", pRegEntry->RegName,
-					       value, pRegEntry->VarMax,
-					       pRegEntry->VarDefault);
-					value = pRegEntry->VarDefault;
-				}
-
-				if (value < pRegEntry->VarMin) {
-					hdd_warn("Reg Parameter %s < allowed Minimum [%u < %lu]. Enforcing Default: %lu", pRegEntry->RegName,
-					       value, pRegEntry->VarMin,
-					       pRegEntry->VarDefault);
-					value = pRegEntry->VarDefault;
-				}
-			}
-			/* Move the variable into the output field. */
-			memcpy(pField, &value, pRegEntry->VarSize);
-		} else if (WLAN_PARAM_SignedInteger == pRegEntry->RegType) {
-			/* If successfully read from the registry, use the value read.
-			 * If not, use the default value.
-			 */
-			if (QDF_STATUS_SUCCESS == match_status) {
-				rv = kstrtos32(value_str, 10, &svalue);
-				if (rv < 0) {
-					hdd_warn("Reg Parameter %s invalid. Enforcing Default", pRegEntry->RegName);
-					svalue =
-						(int32_t) pRegEntry->VarDefault;
-				}
-			} else {
-				svalue = (int32_t) pRegEntry->VarDefault;
-			}
-
-			/* Only if the parameter is set in the ini file, do the range check here */
-			if (match_status == QDF_STATUS_SUCCESS &&
-			    pRegEntry->Flags & VAR_FLAGS_RANGE_CHECK) {
-				if (svalue > (int32_t) pRegEntry->VarMax) {
-					hdd_warn("Reg Parameter %s > allowed Maximum "
-					       "[%d > %d]. Enforcing Maximum", pRegEntry->RegName,
-					       svalue, (int)pRegEntry->VarMax);
-					svalue = (int32_t) pRegEntry->VarMax;
-				}
-
-				if (svalue < (int32_t) pRegEntry->VarMin) {
-					hdd_warn("Reg Parameter %s < allowed Minimum "
-					       "[%d < %d]. Enforcing Minimum", pRegEntry->RegName,
-					       svalue, (int)pRegEntry->VarMin);
-					svalue = (int32_t) pRegEntry->VarMin;
-				}
-			}
-			/* Only if the parameter is set in the ini file, do the range check here */
-			else if (match_status == QDF_STATUS_SUCCESS &&
-				 pRegEntry->Flags &
-					VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT) {
-				if (svalue > (int32_t) pRegEntry->VarMax) {
-					hdd_warn("Reg Parameter %s > allowed Maximum "
-					       "[%d > %d]. Enforcing Default: %d", pRegEntry->RegName,
-					       svalue, (int)pRegEntry->VarMax,
-					       (int)pRegEntry->VarDefault);
-					svalue =
-						(int32_t) pRegEntry->VarDefault;
-				}
-
-				if (svalue < (int32_t) pRegEntry->VarMin) {
-					hdd_warn("Reg Parameter %s < allowed Minimum "
-					       "[%d < %d]. Enforcing Default: %d", pRegEntry->RegName,
-					       svalue, (int)pRegEntry->VarMin,
-					       (int)pRegEntry->VarDefault);
-					svalue = pRegEntry->VarDefault;
-				}
-			}
-			/* Move the variable into the output field. */
-			memcpy(pField, &svalue, pRegEntry->VarSize);
-		}
-		/* Handle string parameters */
-		else if (WLAN_PARAM_String == pRegEntry->RegType) {
-#ifdef WLAN_CFG_DEBUG
-			hdd_debug("RegName = %s, VarOffset %u VarSize %u VarDefault %s",
-				  pRegEntry->RegName, pRegEntry->VarOffset,
-				  pRegEntry->VarSize,
-				  (char *)pRegEntry->VarDefault);
-#endif
-
-			if (match_status == QDF_STATUS_SUCCESS) {
-				len_value_str = strlen(value_str);
-
-				if (len_value_str > (pRegEntry->VarSize - 1)) {
-					hdd_err("Invalid Value=[%s] specified for Name=[%s] in %s", value_str,
-					       pRegEntry->RegName,
-					       WLAN_INI_FILE);
-					cbOutString =
-						QDF_MIN(strlen
-							 ((char *)pRegEntry->
-								 VarDefault),
-							 pRegEntry->VarSize - 1);
-					memcpy(pField,
-					       (void *)(pRegEntry->VarDefault),
-					       cbOutString);
-					((uint8_t *) pField)[cbOutString] =
-						'\0';
-				} else {
-					memcpy(pField, (void *)(value_str),
-					       len_value_str);
-					((uint8_t *) pField)[len_value_str] =
-						'\0';
-				}
-			} else {
-				/* Failed to read the string parameter from the registry.  Use the default. */
-				cbOutString =
-					QDF_MIN(strlen((char *)pRegEntry->VarDefault),
-						 pRegEntry->VarSize - 1);
-				memcpy(pField, (void *)(pRegEntry->VarDefault),
-				       cbOutString);
-				((uint8_t *) pField)[cbOutString] = '\0';
-			}
-		} else if (WLAN_PARAM_MacAddr == pRegEntry->RegType) {
-			if (pRegEntry->VarSize != QDF_MAC_ADDR_SIZE) {
-				hdd_warn("Invalid VarSize %u for Name=[%s]", pRegEntry->VarSize,
-				       pRegEntry->RegName);
-				continue;
-			}
-			candidate = (char *)pRegEntry->VarDefault;
-			if (match_status == QDF_STATUS_SUCCESS) {
-				len_value_str = strlen(value_str);
-				if (len_value_str != (QDF_MAC_ADDR_SIZE * 2)) {
-					hdd_err("Invalid MAC addr [%s] specified for Name=[%s] in %s", value_str,
-					       pRegEntry->RegName,
-					       WLAN_INI_FILE);
-				} else
-					candidate = value_str;
-			}
-			/* parse the string and store it in the byte array */
-			for (i = 0; i < QDF_MAC_ADDR_SIZE; i++) {
-				((char *)pField)[i] =
-					(char)(parse_hex_digit(candidate[i * 2]) *
-					       16 +
-					       parse_hex_digit(candidate[i * 2 + 1]));
-			}
-		} else {
-			hdd_warn("Unknown param type for name[%s] in registry table", pRegEntry->RegName);
-		}
-
-		/* did we successfully parse a cfg item for this parameter? */
-		if ((match_status == QDF_STATUS_SUCCESS) &&
-		    (idx < MAX_CFG_INI_ITEMS)) {
-			set_bit(idx, (void *)&hdd_ctx->config->bExplicitCfg);
-		}
-	}
-
-	return ret_status;
-}
-
-/**
  * hdd_set_power_save_offload_config() - set power save offload configuration
  * @hdd_ctx: the pointer to hdd context
  *
@@ -561,11 +186,18 @@ static QDF_STATUS hdd_apply_cfg_ini(struct hdd_context *hdd_ctx,
 static void hdd_set_power_save_offload_config(struct hdd_context *hdd_ctx)
 {
 	uint32_t listen_interval = 0;
+	char *power_usage = NULL;
 
-	if (strcmp(ucfg_mlme_get_power_usage(hdd_ctx->psoc), "Min") == 0)
+	power_usage = ucfg_mlme_get_power_usage(hdd_ctx->psoc);
+	if (!power_usage) {
+		hdd_err("invalid power usage");
+		return;
+	}
+
+	if (strcmp(power_usage, "Min") == 0)
 		ucfg_mlme_get_bmps_min_listen_interval(hdd_ctx->psoc,
 						       &listen_interval);
-	else if (strcmp(ucfg_mlme_get_power_usage(hdd_ctx->psoc), "Max") == 0)
+	else if (strcmp(power_usage, "Max") == 0)
 		ucfg_mlme_get_bmps_max_listen_interval(hdd_ctx->psoc,
 						       &listen_interval);
 	/*
@@ -747,124 +379,6 @@ void hdd_override_all_ps(struct hdd_context *hdd_ctx)
 	ucfg_mlme_override_bmps_imps(hdd_ctx->psoc);
 	hdd_disable_runtime_pm(cfg_ini);
 	hdd_disable_auto_shutdown(cfg_ini);
-}
-
-/**
- * hdd_parse_config_ini() - parse the ini configuration file
- * @hdd_ctx: the pointer to hdd context
- *
- * This function reads the qcom_cfg.ini file and
- * parses each 'Name=Value' pair in the ini file
- *
- * Return: QDF_STATUS_SUCCESS if the qcom_cfg.ini is correctly read,
- *		otherwise QDF_STATUS_E_INVAL
- */
-QDF_STATUS hdd_parse_config_ini(struct hdd_context *hdd_ctx)
-{
-	int status = 0;
-	int i = 0;
-	int retry = 0;
-	/** Pointer for firmware image data */
-	const struct firmware *fw = NULL;
-	char *buffer, *line, *pTemp = NULL;
-	size_t size;
-	char *name, *value;
-	struct hdd_cfg_entry *cfg_ini_table;
-	QDF_STATUS qdf_status = QDF_STATUS_SUCCESS;
-
-	size = MAX_CFG_INI_ITEMS * sizeof(*cfg_ini_table);
-	cfg_ini_table = qdf_mem_malloc(size);
-
-	if (!cfg_ini_table) {
-		hdd_err("Failed to alloc %zu bytes for cfg_ini_table", size);
-		return QDF_STATUS_E_NOMEM;
-	}
-
-	do {
-		if (status == -EAGAIN)
-			msleep(HDD_CFG_REQUEST_FIRMWARE_DELAY);
-
-		status = request_firmware(&fw, WLAN_INI_FILE,
-					  hdd_ctx->parent_dev);
-
-		retry++;
-	} while ((retry < HDD_CFG_REQUEST_FIRMWARE_RETRIES) &&
-		 (status == -EAGAIN));
-
-	if (status) {
-		hdd_alert("request_firmware failed %d", status);
-		qdf_status = QDF_STATUS_E_FAILURE;
-		goto config_exit;
-	}
-	if (!fw || !fw->data || !fw->size) {
-		hdd_alert("%s download failed", WLAN_INI_FILE);
-		qdf_status = QDF_STATUS_E_FAILURE;
-		goto config_exit;
-	}
-
-	hdd_debug("qcom_cfg.ini Size %zu", fw->size);
-
-	buffer = (char *)qdf_mem_malloc(fw->size);
-
-	if (!buffer) {
-		hdd_err("qdf_mem_malloc failure");
-		qdf_status = QDF_STATUS_E_NOMEM;
-		goto config_exit;
-	}
-	pTemp = buffer;
-
-	qdf_mem_copy((void *)buffer, (void *)fw->data, fw->size);
-	size = fw->size;
-
-	while (buffer) {
-		line = get_next_line(buffer);
-		buffer = i_trim(buffer);
-
-		hdd_debug("%s: item", buffer);
-
-		if (strlen((char *)buffer) == 0 || *buffer == '#') {
-			buffer = line;
-			continue;
-		}
-
-		if (strncmp(buffer, "END", 3) == 0)
-			break;
-
-		name = buffer;
-		while (*buffer != '=' && *buffer != '\0')
-			buffer++;
-		if (*buffer != '\0') {
-			*buffer++ = '\0';
-			i_trim(name);
-			if (strlen(name) != 0) {
-				buffer = i_trim(buffer);
-				if (strlen(buffer) > 0) {
-					value = buffer;
-					while (*buffer != '\0')
-						buffer++;
-					*buffer = '\0';
-					cfg_ini_table[i].name = name;
-					cfg_ini_table[i++].value = value;
-					if (i >= MAX_CFG_INI_ITEMS) {
-						hdd_err("Number of items in %s > %d",
-							WLAN_INI_FILE,
-							MAX_CFG_INI_ITEMS);
-						break;
-					}
-				}
-			}
-		}
-		buffer = line;
-	}
-
-	/* Loop through the registry table and apply all these configs */
-	qdf_status = hdd_apply_cfg_ini(hdd_ctx, cfg_ini_table, i);
-
-config_exit:
-	release_firmware(fw);
-	qdf_mem_free(pTemp);
-	qdf_mem_free(cfg_ini_table);
-	return qdf_status;
 }
 
 /**
@@ -1400,20 +914,10 @@ QDF_STATUS hdd_set_sme_config(struct hdd_context *hdd_ctx)
 	return status;
 }
 
-static void print_info_handler(const char *buf)
-{
-	hdd_nofl_info("%s", buf);
-}
-
-static void print_debug_handler(const char *buf)
-{
-	hdd_nofl_debug("%s", buf);
-}
-
 /**
  * hdd_cfg_get_global_config() - get the configuration table
  * @hdd_ctx: pointer to hdd context
- * @pBuf: buffer to store the configuration
+ * @buf: buffer to store the configuration
  * @buflen: size of the buffer
  *
  * Return: none
@@ -1421,13 +925,10 @@ static void print_debug_handler(const char *buf)
 void hdd_cfg_get_global_config(struct hdd_context *hdd_ctx, char *buf,
 			       int buflen)
 {
-	hdd_cfg_get_config(g_registry_table,
-			   ARRAY_SIZE(g_registry_table),
-			   (uint8_t *)hdd_ctx->config, hdd_ctx,
-			   &print_info_handler);
+	ucfg_cfg_store_print(hdd_ctx->psoc);
 
 	snprintf(buf, buflen,
-		 "WLAN configuration written to system log");
+		 "WLAN configuration written to debug log");
 }
 
 /**
@@ -1438,10 +939,11 @@ void hdd_cfg_get_global_config(struct hdd_context *hdd_ctx, char *buf,
  */
 void hdd_cfg_print_global_config(struct hdd_context *hdd_ctx)
 {
-	hdd_cfg_get_config(g_registry_table,
-			   ARRAY_SIZE(g_registry_table),
-			   (uint8_t *)hdd_ctx->config, hdd_ctx,
-			   &print_debug_handler);
+	QDF_STATUS status;
+
+	status = ucfg_cfg_store_print(hdd_ctx->psoc);
+	if (QDF_IS_STATUS_ERROR(status))
+		hdd_err("Failed to log cfg ini");
 }
 
 /**

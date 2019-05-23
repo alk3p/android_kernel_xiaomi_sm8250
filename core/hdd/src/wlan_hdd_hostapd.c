@@ -36,6 +36,7 @@
 #include <cds_sched.h>
 #include <linux/etherdevice.h>
 #include "osif_sync.h"
+#include <linux/ethtool.h>
 #include <wlan_hdd_includes.h>
 #include <qc_sap_ioctl.h>
 #include "osif_sync.h"
@@ -683,9 +684,9 @@ static int __hdd_hostapd_set_mac_address(struct net_device *dev, void *addr)
 	if (adapter_temp) {
 		if (!qdf_str_cmp(adapter_temp->dev->name, dev->name))
 			return 0;
-		hdd_err("%s adapter exist with same address " MAC_ADDRESS_STR,
+		hdd_err("%s adapter exist with same address " QDF_MAC_ADDR_STR,
 			adapter_temp->dev->name,
-			MAC_ADDR_ARRAY(mac_addr.bytes));
+			QDF_MAC_ADDR_ARRAY(mac_addr.bytes));
 		return -EINVAL;
 	}
 
@@ -699,13 +700,13 @@ static int __hdd_hostapd_set_mac_address(struct net_device *dev, void *addr)
 		return -EINVAL;
 	}
 
-	if (ETHER_IS_MULTICAST(psta_mac_addr->sa_data)) {
+	if (qdf_is_macaddr_group(&mac_addr)) {
 		hdd_err("MAC is Multicast");
 		return -EINVAL;
 	}
 
-	hdd_info("Changing MAC to " MAC_ADDRESS_STR " of interface %s ",
-		 MAC_ADDR_ARRAY(mac_addr.bytes),
+	hdd_info("Changing MAC to " QDF_MAC_ADDR_STR " of interface %s ",
+		 QDF_MAC_ADDR_ARRAY(mac_addr.bytes),
 		 dev->name);
 	hdd_update_dynamic_mac(hdd_ctx, &adapter->mac_addr, &mac_addr);
 	memcpy(&adapter->mac_addr, psta_mac_addr->sa_data, ETH_ALEN);
@@ -1896,6 +1897,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 						    ap_ctx->operating_channel);
 
 		hostapd_state->bss_state = BSS_START;
+		hdd_start_tsf_sync(adapter);
 
 		/* Set default key index */
 		hdd_debug("default key index %hu", ap_ctx->wep_def_key_idx);
@@ -2125,8 +2127,8 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		memcpy(msg.src_addr.sa_data,
 		       &sap_event->sapevt.sapStationMICFailureEvent.
 		       staMac, QDF_MAC_ADDR_SIZE);
-		hdd_debug("MIC MAC " MAC_ADDRESS_STR,
-		       MAC_ADDR_ARRAY(msg.src_addr.sa_data));
+		hdd_debug("MIC MAC " QDF_MAC_ADDR_STR,
+			  QDF_MAC_ADDR_ARRAY(msg.src_addr.sa_data));
 		if (sap_event->sapevt.sapStationMICFailureEvent.
 		    multicast == true)
 			msg.flags = IW_MICFAILURE_GROUP;
@@ -2159,8 +2161,8 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 	case eSAP_STA_REASSOC_EVENT:
 		event = &sap_event->sapevt.sapStationAssocReassocCompleteEvent;
 		if (eSAP_STATUS_FAILURE == event->status) {
-			hdd_info("assoc failure: " MAC_ADDRESS_STR,
-				 MAC_ADDR_ARRAY(wrqu.addr.sa_data));
+			hdd_info("assoc failure: " QDF_MAC_ADDR_STR,
+				 QDF_MAC_ADDR_ARRAY(wrqu.addr.sa_data));
 			break;
 		}
 
@@ -2169,8 +2171,8 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		wrqu.addr.sa_family = ARPHRD_ETHER;
 		memcpy(wrqu.addr.sa_data,
 		       &event->staMac, QDF_MAC_ADDR_SIZE);
-		hdd_info("associated " MAC_ADDRESS_STR,
-			 MAC_ADDR_ARRAY(wrqu.addr.sa_data));
+		hdd_info("associated " QDF_MAC_ADDR_STR,
+			 QDF_MAC_ADDR_ARRAY(wrqu.addr.sa_data));
 		we_event = IWEVREGISTERED;
 
 		if ((eCSR_ENCRYPT_TYPE_NONE == ap_ctx->encryption_type) ||
@@ -2192,8 +2194,8 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 						event->wmmEnabled);
 			if (!QDF_IS_STATUS_SUCCESS(qdf_status))
 				hdd_err("Failed to register STA %d "
-					  MAC_ADDRESS_STR "", qdf_status,
-				       MAC_ADDR_ARRAY(wrqu.addr.sa_data));
+					QDF_MAC_ADDR_STR "", qdf_status,
+					QDF_MAC_ADDR_ARRAY(wrqu.addr.sa_data));
 		} else {
 			qdf_status = hdd_softap_register_sta(
 						adapter,
@@ -2205,8 +2207,8 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 						event->wmmEnabled);
 			if (!QDF_IS_STATUS_SUCCESS(qdf_status))
 				hdd_err("Failed to register STA %d "
-					  MAC_ADDRESS_STR "", qdf_status,
-				       MAC_ADDR_ARRAY(wrqu.addr.sa_data));
+					QDF_MAC_ADDR_STR "", qdf_status,
+					QDF_MAC_ADDR_ARRAY(wrqu.addr.sa_data));
 		}
 
 		sta_id = event->staId;
@@ -2232,7 +2234,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 			QDF_TRACE_DEFAULT_PDEV_ID,
 			QDF_PROTO_TYPE_MGMT, QDF_PROTO_MGMT_ASSOC));
 
-#ifdef MSM_PLATFORM
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 		/* start timer in sap/p2p_go */
 		if (ap_ctx->ap_active == false) {
 			spin_lock_bh(&hdd_ctx->bus_bw_lock);
@@ -2320,11 +2322,13 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 			cache_stainfo->rssi = disassoc_comp->rssi;
 			cache_stainfo->tx_rate = disassoc_comp->tx_rate;
 			cache_stainfo->rx_rate = disassoc_comp->rx_rate;
+			cache_stainfo->rx_mc_bc_cnt =
+						disassoc_comp->rx_mc_bc_cnt;
 			cache_stainfo->reason_code = disassoc_comp->reason_code;
 			cache_stainfo->disassoc_ts = qdf_system_ticks();
 		}
-		hdd_info(" disassociated " MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(wrqu.addr.sa_data));
+		hdd_info(" disassociated " QDF_MAC_ADDR_STR,
+			 QDF_MAC_ADDR_ARRAY(wrqu.addr.sa_data));
 
 		qdf_status = qdf_event_set(&hostapd_state->qdf_sta_disassoc_event);
 		if (!QDF_IS_STATUS_SUCCESS(qdf_status))
@@ -2409,7 +2413,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 						NULL,
 						adapter->device_mode);
 		}
-#ifdef MSM_PLATFORM
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 		/*stop timer in sap/p2p_go */
 		if (ap_ctx->ap_active == false) {
 			spin_lock_bh(&hdd_ctx->bus_bw_lock);
@@ -2430,13 +2434,8 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 
 	case eSAP_UNKNOWN_STA_JOIN:
 		snprintf(unknownSTAEvent, IW_CUSTOM_MAX,
-			 "JOIN_UNKNOWN_STA-%02x:%02x:%02x:%02x:%02x:%02x",
-			 sap_event->sapevt.sapUnknownSTAJoin.macaddr.bytes[0],
-			 sap_event->sapevt.sapUnknownSTAJoin.macaddr.bytes[1],
-			 sap_event->sapevt.sapUnknownSTAJoin.macaddr.bytes[2],
-			 sap_event->sapevt.sapUnknownSTAJoin.macaddr.bytes[3],
-			 sap_event->sapevt.sapUnknownSTAJoin.macaddr.bytes[4],
-			 sap_event->sapevt.sapUnknownSTAJoin.macaddr.bytes[5]);
+			 "JOIN_UNKNOWN_STA-"QDF_MAC_ADDR_STR,
+			 QDF_MAC_ADDR_ARRAY(sap_event->sapevt.sapUnknownSTAJoin.macaddr.bytes));
 		we_event = IWEVCUSTOM;  /* Discovered a new node (AP mode). */
 		wrqu.data.pointer = unknownSTAEvent;
 		wrqu.data.length = strlen(unknownSTAEvent);
@@ -2446,16 +2445,10 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 
 	case eSAP_MAX_ASSOC_EXCEEDED:
 		snprintf(maxAssocExceededEvent, IW_CUSTOM_MAX,
-			 "Peer %02x:%02x:%02x:%02x:%02x:%02x denied"
+			 "Peer "QDF_MAC_ADDR_STR" denied"
 			 " assoc due to Maximum Mobile Hotspot connections reached. Please disconnect"
 			 " one or more devices to enable the new device connection",
-			 sap_event->sapevt.sapMaxAssocExceeded.macaddr.bytes[0],
-			 sap_event->sapevt.sapMaxAssocExceeded.macaddr.bytes[1],
-			 sap_event->sapevt.sapMaxAssocExceeded.macaddr.bytes[2],
-			 sap_event->sapevt.sapMaxAssocExceeded.macaddr.bytes[3],
-			 sap_event->sapevt.sapMaxAssocExceeded.macaddr.bytes[4],
-			 sap_event->sapevt.sapMaxAssocExceeded.macaddr.
-			 bytes[5]);
+			 QDF_MAC_ADDR_ARRAY(sap_event->sapevt.sapMaxAssocExceeded.macaddr.bytes));
 		we_event = IWEVCUSTOM;  /* Discovered a new node (AP mode). */
 		wrqu.data.pointer = maxAssocExceededEvent;
 		wrqu.data.length = strlen(maxAssocExceededEvent);
@@ -2642,6 +2635,7 @@ stopbss:
 		 * re-enabled
 		 */
 		hostapd_state->bss_state = BSS_STOP;
+		hdd_stop_tsf_sync(adapter);
 
 #ifdef FEATURE_WLAN_AUTO_SHUTDOWN
 		wlan_hdd_auto_shutdown_enable(hdd_ctx, true);
@@ -3162,6 +3156,12 @@ sap_restart:
 }
 #endif
 
+#ifdef WLAN_FEATURE_TSF_PTP
+static const struct ethtool_ops wlan_hostapd_ethtool_ops = {
+	.get_ts_info = wlan_get_ts_info,
+};
+#endif
+
 const struct net_device_ops net_ops_struct = {
 	.ndo_open = hdd_hostapd_open,
 	.ndo_stop = hdd_hostapd_stop,
@@ -3175,10 +3175,18 @@ const struct net_device_ops net_ops_struct = {
 	.ndo_select_queue = hdd_select_queue,
 };
 
+#ifdef WLAN_FEATURE_TSF_PTP
+void hdd_set_ap_ops(struct net_device *dev)
+{
+	dev->netdev_ops = &net_ops_struct;
+	dev->ethtool_ops = &wlan_hostapd_ethtool_ops;
+}
+#else
 void hdd_set_ap_ops(struct net_device *dev)
 {
 	dev->netdev_ops = &net_ops_struct;
 }
+#endif
 
 bool hdd_sap_create_ctx(struct hdd_adapter *adapter)
 {
@@ -4092,14 +4100,10 @@ int wlan_hdd_cfg80211_update_apies(struct hdd_adapter *adapter)
 	wlan_hdd_add_extra_ie(adapter, genie, &total_ielen,
 			      WLAN_EID_INTERWORKING);
 
-	if (test_bit(SOFTAP_BSS_STARTED, &adapter->event_flags))
-		wlan_hdd_add_extra_ie(adapter, genie, &total_ielen,
-				      WLAN_EID_RSN);
-
 #ifdef FEATURE_WLAN_WAPI
 	if (QDF_SAP_MODE == adapter->device_mode) {
 		wlan_hdd_add_extra_ie(adapter, genie, &total_ielen,
-				      WLAN_EID_WAPI);
+				      WLAN_ELEMID_WAPI);
 	}
 #endif
 
@@ -4903,10 +4907,6 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 	bool ignore_cac = 0;
 	uint8_t is_overlap_enable = 0, scc_on_dfs_chan = 0;
 	uint8_t beacon_fixed_len, indoor_chnl_marking = 0;
-	int value;
-	uint32_t auto_channel_select_weight =
-		cfg_default(CFG_AUTO_CHANNEL_SELECT_WEIGHT);
-	uint8_t pref_chan_location = 0;
 	bool sap_force_11n_for_11ac = 0;
 	bool go_force_11n_for_11ac = 0;
 	bool bval = false;
@@ -5026,26 +5026,14 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 	config->beacon_int = mgmt_frame->u.beacon.beacon_int;
 	config->dfs_cac_offload = hdd_ctx->dfs_cac_offload;
 
-	status = ucfg_mlme_get_auto_channel_weight(hdd_ctx->psoc,
-						   &auto_channel_select_weight);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		hdd_err("ucfg_mlme_get_auto_channel_weight failed, set def");
-
-	config->auto_channel_select_weight = auto_channel_select_weight;
-
 	status = ucfg_policy_mgr_get_enable_overlap_chnl(hdd_ctx->psoc,
 							 &is_overlap_enable);
 	if (!QDF_IS_STATUS_SUCCESS(status))
 		hdd_err("can't get overlap channel INI value, using default");
 	config->enOverLapCh = is_overlap_enable;
 
-	status = ucfg_mlme_get_sap_reduces_beacon_interval(hdd_ctx->psoc,
-							   &value);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		hdd_err("ucfg_mlme_get_sap_reduces_beacon_interval fail");
 	config->dtim_period = beacon->dtim_period;
 
-	config->reduced_beacon_interval = value;
 	hdd_debug("acs_mode %d", config->acs_cfg.acs_mode);
 
 	if (config->acs_cfg.acs_mode == true) {
@@ -5088,10 +5076,17 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 		config->countryCode[0] = hdd_ctx->reg.alpha2[0];
 		config->countryCode[1] = hdd_ctx->reg.alpha2[1];
 
-		ret = wlan_hdd_sap_cfg_dfs_override(adapter);
-		if (ret < 0)
-			goto error;
-
+		/* Overwrite second AP's channel with first only when:
+		 * 1. If operating mode is single mac
+		 * 2. or if 2nd AP is coming up on 5G band channel
+		 */
+		ret = 0;
+		if (!policy_mgr_is_hw_dbs_capable(hdd_ctx->psoc) ||
+		    WLAN_REG_IS_5GHZ_CH(config->channel)) {
+			ret = wlan_hdd_sap_cfg_dfs_override(adapter);
+			if (ret < 0)
+				goto error;
+		}
 		if (!ret && wlan_reg_is_dfs_ch(hdd_ctx->pdev, config->channel))
 			hdd_ctx->dev_dfs_cac_status = DFS_CAC_NEVER_DONE;
 
@@ -5134,10 +5129,9 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 			ignore_cac = 1;
 
 		wlansap_set_dfs_ignore_cac(mac_handle, ignore_cac);
-		ucfg_mlme_get_pref_chan_location(hdd_ctx->psoc,
-						 &pref_chan_location);
-		wlansap_set_dfs_preferred_channel_location(mac_handle,
-							   pref_chan_location);
+
+		wlansap_set_dfs_preferred_channel_location(mac_handle);
+
 		wlan_hdd_set_sap_mcc_chnl_avoid(hdd_ctx);
 	} else if (adapter->device_mode == QDF_P2P_GO_MODE) {
 		config->countryCode[0] = hdd_ctx->reg.alpha2[0];
@@ -5366,7 +5360,7 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 
 		if (ie) {
 			ie++;
-			if (ie[0] > SIR_MAC_RATESET_EID_MAX) {
+			if (ie[0] > WLAN_SUPPORTED_RATES_IE_MAX_LEN) {
 				hdd_err("Invalid supported rates %d",
 					ie[0]);
 				ret = -EINVAL;
@@ -5388,7 +5382,7 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 					      beacon->tail_len);
 		if (ie) {
 			ie++;
-			if (ie[0] > SIR_MAC_RATESET_EID_MAX) {
+			if (ie[0] > WLAN_SUPPORTED_RATES_IE_MAX_LEN) {
 				hdd_err("Invalid supported rates %d",
 					ie[0]);
 				ret = -EINVAL;
@@ -5478,8 +5472,8 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 		  config->mfpCapable, config->mfpRequired);
 #endif
 
-	hdd_debug("SOftAP macaddress : " MAC_ADDRESS_STR,
-	       MAC_ADDR_ARRAY(adapter->mac_addr.bytes));
+	hdd_debug("SOftAP macaddress : " QDF_MAC_ADDR_STR,
+		  QDF_MAC_ADDR_ARRAY(adapter->mac_addr.bytes));
 	hdd_debug("ssid =%s, beaconint=%d, channel=%d",
 	       config->SSIDinfo.ssid.ssId, (int)config->beacon_int,
 	       (int)config->channel);
@@ -5590,7 +5584,7 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 	hdd_unsafe_channel_restart_sap(hdd_ctx);
 
 	hdd_set_connection_in_progress(false);
-
+	policy_mgr_nan_sap_post_enable_conc_check(hdd_ctx->psoc);
 	ret = 0;
 	goto free;
 
@@ -5952,7 +5946,7 @@ static int __wlan_hdd_cfg80211_start_ap(struct wiphy *wiphy,
 	struct sme_sta_inactivity_timeout  *sta_inactivity_timer;
 	uint8_t channel, mandt_chnl_list = 0;
 	bool sta_sap_scc_on_dfs_chan;
-	uint16_t sta_cnt;
+	uint16_t sta_cnt, sap_cnt;
 	bool val;
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 
@@ -6030,9 +6024,10 @@ static int __wlan_hdd_cfg80211_start_ap(struct wiphy *wiphy,
 	sta_sap_scc_on_dfs_chan =
 		policy_mgr_is_sta_sap_scc_allowed_on_dfs_chan(
 							hdd_ctx->psoc);
-	sta_cnt =
-		policy_mgr_mode_specific_connection_count(
-					hdd_ctx->psoc, PM_STA_MODE, NULL);
+	sta_cnt = policy_mgr_mode_specific_connection_count(hdd_ctx->psoc,
+							    PM_STA_MODE, NULL);
+	sap_cnt = policy_mgr_mode_specific_connection_count(hdd_ctx->psoc,
+							    PM_SAP_MODE, NULL);
 
 	hdd_debug("sta_sap_scc_on_dfs_chan %u, sta_cnt %u",
 		  sta_sap_scc_on_dfs_chan, sta_cnt);
@@ -6084,9 +6079,17 @@ static int __wlan_hdd_cfg80211_start_ap(struct wiphy *wiphy,
 		sap_cfg->SapHw_mode = eCSR_DOT11_MODE_abg;
 	}
 
-	/* Disable NAN Discovery before starting P2P GO */
-	if (adapter->device_mode == QDF_P2P_GO_MODE)
+	/* Disable NAN Disc before starting P2P GO or STA+SAP or SAP+SAP */
+	if (adapter->device_mode == QDF_P2P_GO_MODE || sta_cnt || sap_cnt) {
+		hdd_debug("Invalid NAN concurrency. SAP: %d STA: %d P2P_GO: %d",
+			  sap_cnt, sta_cnt,
+			  (adapter->device_mode == QDF_P2P_GO_MODE));
 		ucfg_nan_disable_concurrency(hdd_ctx->psoc);
+	}
+
+	if (!policy_mgr_nan_sap_pre_enable_conc_check(hdd_ctx->psoc,
+						      PM_SAP_MODE, channel))
+		hdd_debug("NAN disabled due to concurrency constraints");
 
 	/* check if concurrency is allowed */
 	if (!policy_mgr_allow_concurrency(hdd_ctx->psoc,

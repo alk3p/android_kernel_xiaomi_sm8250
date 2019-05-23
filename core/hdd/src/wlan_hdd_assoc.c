@@ -149,13 +149,13 @@ u8 ccp_rsn_oui_13[HDD_RSN_OUI_SIZE] = {0x50, 0x6F, 0x9A, 0x01};
  * beacon_filter_table - table of IEs used for beacon filtering
  */
 static const int beacon_filter_table[] = {
-	SIR_MAC_DS_PARAM_SET_EID,
-	SIR_MAC_ERP_INFO_EID,
-	SIR_MAC_EDCA_PARAM_SET_EID,
-	SIR_MAC_QOS_CAPABILITY_EID,
-	SIR_MAC_HT_INFO_EID,
-	SIR_MAC_VHT_OPMODE_EID,
-	SIR_MAC_VHT_OPERATION_EID,
+	WLAN_ELEMID_DSPARMS,
+	WLAN_ELEMID_ERP,
+	WLAN_ELEMID_EDCAPARMS,
+	WLAN_ELEMID_QOS_CAPABILITY,
+	WLAN_ELEMID_HTINFO_ANA,
+	WLAN_ELEMID_OP_MODE_NOTIFY,
+	WLAN_ELEMID_VHTOP,
 #ifdef WLAN_FEATURE_11AX_BSS_COLOR
 	/*
 	 * EID: 221 vendor IE is being used temporarily by 11AX
@@ -163,7 +163,7 @@ static const int beacon_filter_table[] = {
 	 * vendor EID needs to be replaced with bss-color-change IE
 	 * number.
 	 */
-	SIR_MAC_EID_VENDOR,
+	WLAN_ELEMID_VENDOR,
 #endif
 };
 
@@ -1372,10 +1372,10 @@ static void hdd_send_association_event(struct net_device *dev,
 
 		ucfg_p2p_status_connect(adapter->vdev);
 
-		hdd_info("wlan: " MAC_ADDRESS_STR " connected to "
-			MAC_ADDRESS_STR "\n",
-			MAC_ADDR_ARRAY(adapter->mac_addr.bytes),
-			MAC_ADDR_ARRAY(wrqu.ap_addr.sa_data));
+		hdd_info("wlan: " QDF_MAC_ADDR_STR " connected to "
+			QDF_MAC_ADDR_STR "\n",
+			QDF_MAC_ADDR_ARRAY(adapter->mac_addr.bytes),
+			QDF_MAC_ADDR_ARRAY(wrqu.ap_addr.sa_data));
 		hdd_send_update_beacon_ies_event(adapter, roam_info);
 
 		/*
@@ -1436,7 +1436,7 @@ static void hdd_send_association_event(struct net_device *dev,
 				       adapter->vdev);
 #endif
 
-#ifdef MSM_PLATFORM
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 		/* start timer in sta/p2p_cli */
 		spin_lock_bh(&hdd_ctx->bus_bw_lock);
 		adapter->prev_tx_packets = adapter->stats.tx_packets;
@@ -1454,8 +1454,8 @@ static void hdd_send_association_event(struct net_device *dev,
 				adapter->vdev_id);
 		memcpy(wrqu.ap_addr.sa_data, sta_ctx->conn_info.bssid.bytes,
 				ETH_ALEN);
-		hdd_debug("wlan: new IBSS peer connection to BSSID " MAC_ADDRESS_STR,
-			MAC_ADDR_ARRAY(sta_ctx->conn_info.bssid.bytes));
+		hdd_debug("wlan: new IBSS peer connection to BSSID " QDF_MAC_ADDR_STR,
+			QDF_MAC_ADDR_ARRAY(sta_ctx->conn_info.bssid.bytes));
 	} else {                /* Not Associated */
 		hdd_debug("wlan: disconnected");
 		memset(wrqu.ap_addr.sa_data, '\0', ETH_ALEN);
@@ -1488,7 +1488,7 @@ static void hdd_send_association_event(struct net_device *dev,
 					  false,
 					  adapter->vdev);
 
-#ifdef MSM_PLATFORM
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 		/* stop timer in sta/p2p_cli */
 		spin_lock_bh(&hdd_ctx->bus_bw_lock);
 		adapter->prev_tx_packets = 0;
@@ -2126,7 +2126,6 @@ QDF_STATUS hdd_roam_register_sta(struct hdd_adapter *adapter,
 				(struct cdp_pdev *)pdev,
 				adapter->vdev_id);
 	if (!adapter->txrx_vdev) {
-		hdd_err("%s find vdev fail", __func__);
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -2243,7 +2242,7 @@ void hdd_save_gtk_params(struct hdd_adapter *adapter,
 		kek_len = csr_roam_info->fils_join_rsp->kek_len;
 	}
 
-	wlan_hdd_save_gtk_offload_params(adapter, NULL, kek, kek_len,
+	wlan_hdd_save_gtk_offload_params(adapter, NULL, 0, kek, kek_len,
 					 csr_roam_info->replay_ctr, true);
 
 	hdd_debug("Kek len %d", kek_len);
@@ -2262,7 +2261,7 @@ void hdd_save_gtk_params(struct hdd_adapter *adapter,
 	kek = csr_roam_info->kek;
 	kek_len = csr_roam_info->kek_len;
 
-	wlan_hdd_save_gtk_offload_params(adapter, NULL, kek, kek_len,
+	wlan_hdd_save_gtk_offload_params(adapter, NULL, 0, kek, kek_len,
 					 csr_roam_info->replay_ctr, true);
 
 	hdd_debug("Kek len %d", kek_len);
@@ -2371,7 +2370,7 @@ static void hdd_send_re_assoc_event(struct net_device *dev,
 	if (!bss)
 		hdd_warn("Get BSS returned NULL");
 	buf_ptr = buf_ssid_ie;
-	*buf_ptr = SIR_MAC_SSID_EID;
+	*buf_ptr = WLAN_ELEMID_SSID;
 	buf_ptr++;
 	*buf_ptr = roam_profile.SSID.length; /*len of ssid*/
 	buf_ptr++;
@@ -2466,8 +2465,8 @@ static uint8_t hdd_get_ibss_peer_sta_id(struct hdd_station_ctx *hddstactx,
 				&roaminfo->peerMac, &sta_id);
 		if (status != QDF_STATUS_SUCCESS) {
 			hdd_err("Unable to find station ID for "
-				MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(roaminfo->peerMac.bytes));
+				QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(roaminfo->peerMac.bytes));
 		}
 	}
 
@@ -2656,8 +2655,8 @@ hdd_roam_set_key_complete_handler(struct hdd_adapter *adapter,
 	 * directly into 'authenticated' state.
 	 */
 	hdd_debug("Set Key completion roam_status =%d roam_result=%d "
-		  MAC_ADDRESS_STR, roam_status, roam_result,
-		  MAC_ADDR_ARRAY(roam_info->peerMac.bytes));
+		  QDF_MAC_ADDR_STR, roam_status, roam_result,
+		  QDF_MAC_ADDR_ARRAY(roam_info->peerMac.bytes));
 
 	connected = hdd_conn_get_connected_cipher_algo(sta_ctx,
 						       &algorithm);
@@ -3198,9 +3197,9 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 									reqRsnLength);
 					else {
 						hdd_debug("sending connect indication to nl80211:for bssid "
-							 MAC_ADDRESS_STR
+							 QDF_MAC_ADDR_STR
 							 " result:%d and Status:%d",
-							 MAC_ADDR_ARRAY
+							 QDF_MAC_ADDR_ARRAY
 							 (roam_info->bssid.bytes),
 							 roam_result, roam_status);
 
@@ -3336,14 +3335,14 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 			qdf_copy_macaddr(&roam_info->bssid,
 					 &sta_ctx->requested_bssid);
 		if (roam_info)
-			hdd_err("wlan: connection failed with " MAC_ADDRESS_STR
+			hdd_err("wlan: connection failed with " QDF_MAC_ADDR_STR
 				 " result: %d and Status: %d",
-				 MAC_ADDR_ARRAY(roam_info->bssid.bytes),
+				 QDF_MAC_ADDR_ARRAY(roam_info->bssid.bytes),
 				 roam_result, roam_status);
 		else
-			hdd_err("wlan: connection failed with " MAC_ADDRESS_STR
+			hdd_err("wlan: connection failed with " QDF_MAC_ADDR_STR
 				 " result: %d and Status: %d",
-				 MAC_ADDR_ARRAY(sta_ctx->requested_bssid.bytes),
+				 QDF_MAC_ADDR_ARRAY(sta_ctx->requested_bssid.bytes),
 				 roam_result, roam_status);
 
 		if ((eCSR_ROAM_RESULT_SCAN_FOR_SSID_FAILURE == roam_result) ||
@@ -3375,18 +3374,18 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 		    && !hddDisconInProgress) {
 			if (roam_info) {
 				hdd_err("send connect failure to nl80211: for bssid "
-					MAC_ADDRESS_STR
+					QDF_MAC_ADDR_STR
 					" result: %d and Status: %d reasoncode: %d",
-					MAC_ADDR_ARRAY(roam_info->bssid.bytes),
+					QDF_MAC_ADDR_ARRAY(roam_info->bssid.bytes),
 					roam_result, roam_status,
 					roam_info->reasonCode);
 				sta_ctx->conn_info.assoc_status_code =
 					roam_info->statusCode;
 			} else {
 				hdd_err("connect failed: for bssid "
-				       MAC_ADDRESS_STR
+				       QDF_MAC_ADDR_STR
 				       " result: %d and status: %d ",
-				       MAC_ADDR_ARRAY(sta_ctx->requested_bssid.bytes),
+				       QDF_MAC_ADDR_ARRAY(sta_ctx->requested_bssid.bytes),
 				       roam_result, roam_status);
 			}
 			hdd_debug("Invoking packetdump deregistration API");
@@ -3545,9 +3544,9 @@ static void hdd_roam_ibss_indication_handler(struct hdd_adapter *adapter,
 			unsigned int freq;
 #endif
 			/* we created the IBSS, notify supplicant */
-			hdd_debug("%s: created ibss " MAC_ADDRESS_STR,
+			hdd_debug("%s: created ibss " QDF_MAC_ADDR_STR,
 				adapter->dev->name,
-				MAC_ADDR_ARRAY(
+				QDF_MAC_ADDR_ARRAY(
 					roam_info->pBssDesc->bssId));
 
 			/* we must first give cfg80211 the BSS information */
@@ -3879,10 +3878,10 @@ roam_roam_connect_status_update_handler(struct hdd_adapter *adapter,
 		eCsrEncryptionType encr_type = sta_ctx->ibss_enc_key.encType;
 
 		hdd_debug("IBSS New Peer indication from SME "
-			 "with peerMac " MAC_ADDRESS_STR " BSSID: "
-			 MAC_ADDRESS_STR " and stationID= %d",
-			 MAC_ADDR_ARRAY(roam_info->peerMac.bytes),
-			 MAC_ADDR_ARRAY(sta_ctx->conn_info.bssid.bytes),
+			 "with peerMac " QDF_MAC_ADDR_STR " BSSID: "
+			 QDF_MAC_ADDR_STR " and stationID= %d",
+			 QDF_MAC_ADDR_ARRAY(roam_info->peerMac.bytes),
+			 QDF_MAC_ADDR_ARRAY(sta_ctx->conn_info.bssid.bytes),
 			 roam_info->staId);
 
 		if (!hdd_save_peer
@@ -3967,10 +3966,10 @@ roam_roam_connect_status_update_handler(struct hdd_adapter *adapter,
 			hdd_warn("IBSS peer departed by cannot find peer in our registration table with TL");
 
 		hdd_debug("IBSS Peer Departed from SME "
-			 "with peerMac " MAC_ADDRESS_STR " BSSID: "
-			 MAC_ADDRESS_STR " and stationID= %d",
-			 MAC_ADDR_ARRAY(roam_info->peerMac.bytes),
-			 MAC_ADDR_ARRAY(sta_ctx->conn_info.bssid.bytes),
+			 "with peerMac " QDF_MAC_ADDR_STR " BSSID: "
+			 QDF_MAC_ADDR_STR " and stationID= %d",
+			 QDF_MAC_ADDR_ARRAY(roam_info->peerMac.bytes),
+			 QDF_MAC_ADDR_ARRAY(sta_ctx->conn_info.bssid.bytes),
 			 roam_info->staId);
 
 		hdd_roam_deregister_sta(adapter, roam_info->staId);
@@ -4020,6 +4019,7 @@ QDF_STATUS hdd_roam_register_tdlssta(struct hdd_adapter *adapter,
 	struct ol_txrx_ops txrx_ops;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 	void *pdev = cds_get_context(QDF_MODULE_ID_TXRX);
+	struct cdp_vdev *txrx_vdev;
 
 	/*
 	 * TDLS sta in BSS should be set as STA type TDLS and STA MAC should
@@ -4039,12 +4039,16 @@ QDF_STATUS hdd_roam_register_tdlssta(struct hdd_adapter *adapter,
 		txrx_ops.rx.rx = hdd_rx_packet_cbk;
 		txrx_ops.rx.rx_stack = NULL;
 	}
+	txrx_vdev = cdp_get_vdev_from_vdev_id(soc,
+					      (struct cdp_pdev *)pdev,
+					      adapter->vdev_id);
+	if (!txrx_vdev)
+		return QDF_STATUS_E_FAILURE;
 
-	cdp_vdev_register(soc,
-		(struct cdp_vdev *)cdp_get_vdev_from_vdev_id(soc,
-		(struct cdp_pdev *)pdev, adapter->vdev_id),
-		adapter, (struct cdp_ctrl_objmgr_vdev *)adapter->vdev,
-		&txrx_ops);
+	cdp_vdev_register(soc, txrx_vdev,
+			  adapter,
+			  (struct cdp_ctrl_objmgr_vdev *)adapter->vdev,
+			  &txrx_ops);
 	adapter->tx_fn = txrx_ops.tx.tx;
 	txrx_ops.rx.stats_rx = hdd_tx_rx_collect_connectivity_stats_info;
 
@@ -4245,8 +4249,8 @@ hdd_indicate_cckm_pre_auth(struct hdd_adapter *adapter,
 	memset(buf, '\0', sizeof(buf));
 
 	/* Timestamp0 is lower 32 bits and Timestamp1 is upper 32 bits */
-	hdd_debug("CCXPREAUTHNOTIFY=" MAC_ADDRESS_STR " %d:%d",
-		 MAC_ADDR_ARRAY(roam_info->bssid.bytes),
+	hdd_debug("CCXPREAUTHNOTIFY=" QDF_MAC_ADDR_STR " %d:%d",
+		 QDF_MAC_ADDR_ARRAY(roam_info->bssid.bytes),
 		 roam_info->timestamp[0], roam_info->timestamp[1]);
 
 	nBytes = snprintf(pos, freeBytes, "CCXPREAUTHNOTIFY=");

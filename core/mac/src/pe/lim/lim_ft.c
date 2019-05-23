@@ -529,6 +529,7 @@ void lim_fill_ft_session(struct mac_context *mac,
 	int8_t regMax;
 	tSchBeaconStruct *pBeaconStruct;
 	ePhyChanBondState cbEnabledMode;
+	struct lim_max_tx_pwr_attr tx_pwr_attr = {0};
 
 	pBeaconStruct = qdf_mem_malloc(sizeof(tSchBeaconStruct));
 	if (!pBeaconStruct)
@@ -540,6 +541,7 @@ void lim_fill_ft_session(struct mac_context *mac,
 	ft_session->limWsmEnabled = pe_session->limWsmEnabled;
 	ft_session->lim11hEnable = pe_session->lim11hEnable;
 	ft_session->isOSENConnection = pe_session->isOSENConnection;
+	ft_session->connected_akm = pe_session->connected_akm;
 
 	/* Fields to be filled later */
 	ft_session->pLimJoinReq = NULL;
@@ -681,10 +683,15 @@ void lim_fill_ft_session(struct mac_context *mac,
 	ft_session->isFastRoamIniFeatureEnabled =
 		pe_session->isFastRoamIniFeatureEnabled;
 
+	tx_pwr_attr.reg_max = regMax;
+	tx_pwr_attr.ap_tx_power = localPowerConstraint;
+	tx_pwr_attr.ini_tx_power = mac->mlme_cfg->power.max_tx_power;
+	tx_pwr_attr.frequency =
+		wlan_reg_get_channel_freq(mac->pdev,
+					  ft_session->currentOperChannel);
+
 #ifdef FEATURE_WLAN_ESE
-	ft_session->maxTxPower =
-		lim_get_max_tx_power(regMax, localPowerConstraint,
-				     mac->mlme_cfg->power.max_tx_power);
+	ft_session->maxTxPower = lim_get_max_tx_power(mac, &tx_pwr_attr);
 #else
 	ft_session->maxTxPower = QDF_MIN(regMax, (localPowerConstraint));
 #endif
@@ -808,8 +815,8 @@ bool lim_process_ft_update_key(struct mac_context *mac, uint32_t *pMsgBuf)
 
 		pAddBssParams->extSetStaKeyParam.staIdx = 0;
 
-		pe_debug("BSSID: " MAC_ADDRESS_STR,
-			       MAC_ADDR_ARRAY(pKeyInfo->bssid.bytes));
+		pe_debug("BSSID: " QDF_MAC_ADDR_STR,
+			       QDF_MAC_ADDR_ARRAY(pKeyInfo->bssid.bytes));
 
 		qdf_copy_macaddr(&pAddBssParams->extSetStaKeyParam.peer_macaddr,
 				 &pKeyInfo->bssid);
@@ -839,7 +846,7 @@ lim_ft_send_aggr_qos_rsp(struct mac_context *mac, uint8_t rspReqd,
 	rsp->sessionId = smesessionId;
 	rsp->length = sizeof(*rsp);
 	rsp->aggrInfo.tspecIdx = aggrQosRsp->tspecIdx;
-	for (i = 0; i < SIR_QOS_NUM_AC_MAX; i++) {
+	for (i = 0; i < QCA_WLAN_AC_ALL; i++) {
 		if ((1 << i) & aggrQosRsp->tspecIdx) {
 			if (QDF_IS_STATUS_SUCCESS(aggrQosRsp->status[i]))
 				rsp->aggrInfo.aggrRsp[i].status =
@@ -886,27 +893,28 @@ void lim_process_ft_aggr_qos_rsp(struct mac_context *mac,
 		pe_err("pe_session is not in STA mode");
 		return;
 	}
-	for (i = 0; i < WMI_QOS_NUM_AC_MAX; i++) {
+	for (i = 0; i < QCA_WLAN_AC_ALL; i++) {
 		if ((((1 << i) & pAggrQosRspMsg->tspecIdx)) &&
 		    (pAggrQosRspMsg->status[i] != QDF_STATUS_SUCCESS)) {
 			sir_copy_mac_addr(peerMacAddr, pe_session->bssId);
-			addTsParam.staIdx = pAggrQosRspMsg->staIdx;
-			addTsParam.sessionId = pAggrQosRspMsg->sessionId;
+			addTsParam.sta_idx = pAggrQosRspMsg->staIdx;
+			addTsParam.pe_session_id = pAggrQosRspMsg->sessionId;
 			addTsParam.tspec = pAggrQosRspMsg->tspec[i];
-			addTsParam.tspecIdx = pAggrQosRspMsg->tspecIdx;
+			addTsParam.tspec_idx = pAggrQosRspMsg->tspecIdx;
 			lim_send_delts_req_action_frame(mac, peerMacAddr, rspReqd,
 							&addTsParam.tspec.tsinfo,
 							&addTsParam.tspec,
 							pe_session);
 			pSta =
-				dph_lookup_assoc_id(mac, addTsParam.staIdx, &assocId,
+				dph_lookup_assoc_id(mac, addTsParam.sta_idx,
+						    &assocId,
 						    &pe_session->dph.dphHashTable);
 			if (pSta) {
 				lim_admit_control_delete_ts(mac, assocId,
 							    &addTsParam.tspec.
 							    tsinfo, NULL,
 							    (uint8_t *) &
-							    addTsParam.tspecIdx);
+							    addTsParam.tspec_idx);
 			}
 		}
 	}
@@ -967,7 +975,7 @@ QDF_STATUS lim_process_ft_aggr_qos_req(struct mac_context *mac,
 	pAggrAddTsParam->tspecIdx = aggrQosReq->aggrInfo.tspecIdx;
 	pAggrAddTsParam->vdev_id = pe_session->smeSessionId;
 
-	for (i = 0; i < WMI_QOS_NUM_AC_MAX; i++) {
+	for (i = 0; i < QCA_WLAN_AC_ALL; i++) {
 		if (aggrQosReq->aggrInfo.tspecIdx & (1 << i)) {
 			struct mac_tspec_ie *pTspec =
 				&aggrQosReq->aggrInfo.aggrAddTsInfo[i].tspec;

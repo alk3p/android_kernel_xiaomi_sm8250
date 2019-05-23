@@ -641,8 +641,8 @@ static void wma_process_send_addba_req(tp_wma_handle wma_handle,
 	if (QDF_STATUS_SUCCESS != status) {
 		WMA_LOGE(FL("Failed to process WMA_SEND_ADDBA_REQ"));
 	}
-	WMA_LOGD(FL("sent ADDBA req to" MAC_ADDRESS_STR "tid %d buff_size %d"),
-			MAC_ADDR_ARRAY(send_addba->mac_addr),
+	wma_debug("sent ADDBA req to" QDF_MAC_ADDR_STR "tid %d buff_size %d",
+			QDF_MAC_ADDR_ARRAY(send_addba->mac_addr),
 			send_addba->param.tidno,
 			send_addba->param.buffersize);
 
@@ -2033,7 +2033,7 @@ static void wma_state_info_dump(char **buf_ptr, uint16_t *size)
 			"nwType %d\n"
 			"tx_streams %d\n"
 			"rx_streams %d\n"
-			"chain_mask %d\n",
+			"chain_mask %d",
 			vdev_id,
 			stats.pno_match_wake_up_count,
 			stats.pno_complete_wake_up_count,
@@ -2115,7 +2115,6 @@ static void wma_state_info_dump(char **buf_ptr, uint16_t *size)
 			"\tipv6_mcast_ns %u\n"
 			"\tipv6_mcast_na %u\n"
 			"\toem_response %u\n"
-			"conn_state %d\n"
 			"dtimPeriod %d\n"
 			"chanmode %d\n"
 			"vht_capable %d\n"
@@ -2131,9 +2130,7 @@ static void wma_state_info_dump(char **buf_ptr, uint16_t *size)
 			"nwType %d\n"
 			"tx_streams %d\n"
 			"rx_streams %d\n"
-			"chain_mask %d\n"
-			"nss_2g %d\n"
-			"nss_5g %d",
+			"chain_mask %d",
 			vdev_id,
 			stats->pno_match,
 			stats->pno_complete,
@@ -2150,7 +2147,6 @@ static void wma_state_info_dump(char **buf_ptr, uint16_t *size)
 			stats->ipv6_mcast_ns,
 			stats->ipv6_mcast_na,
 			stats->oem_response,
-			iface->conn_state,
 			iface->dtimPeriod,
 			iface->chanmode,
 			iface->vht_capable,
@@ -2166,9 +2162,7 @@ static void wma_state_info_dump(char **buf_ptr, uint16_t *size)
 			iface->nwType,
 			iface->tx_streams,
 			iface->rx_streams,
-			iface->chain_mask,
-			iface->nss_2g,
-			iface->nss_5g);
+			iface->chain_mask);
 	}
 
 	*size -= len;
@@ -3844,8 +3838,8 @@ static int wma_set_base_macaddr_indicate(tp_wma_handle wma_handle,
 				     (uint8_t *)customAddr);
 	if (err)
 		return -EIO;
-	WMA_LOGD("Base MAC Addr: " MAC_ADDRESS_STR,
-		 MAC_ADDR_ARRAY((*customAddr)));
+	wma_debug("Base MAC Addr: " QDF_MAC_ADDR_STR,
+		 QDF_MAC_ADDR_ARRAY((*customAddr)));
 
 	return 0;
 }
@@ -5471,6 +5465,25 @@ static void wma_update_obss_detection_support(tp_wma_handle wh,
 }
 
 /**
+ * wma_update_bcast_twt_support() - update bcost twt support
+ * @wh: wma handle
+ * @tgt_cfg: target configuration to be updated
+ *
+ * Update braodcast twt support based on service bit.
+ *
+ * Return: None
+ */
+static void wma_update_bcast_twt_support(tp_wma_handle wh,
+					 struct wma_tgt_cfg *tgt_cfg)
+{
+	if (wmi_service_enabled(wh->wmi_handle,
+				wmi_service_bcast_twt_support))
+		tgt_cfg->bcast_twt_support = true;
+	else
+		tgt_cfg->bcast_twt_support = false;
+}
+
+/**
  * wma_update_obss_color_collision_support() - update obss color collision
  *   offload support
  * @wh: wma handle
@@ -5592,9 +5605,9 @@ wma_fill_chain_cfg(struct target_psoc_info *tgt_hdl,
  * wma_update_hdd_cfg() - update HDD config
  * @wma_handle: wma handle
  *
- * Return: none
+ * Return: Zero on success err number on failure
  */
-static void wma_update_hdd_cfg(tp_wma_handle wma_handle)
+static int wma_update_hdd_cfg(tp_wma_handle wma_handle)
 {
 	struct wma_tgt_cfg tgt_cfg;
 	void *hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
@@ -5603,26 +5616,28 @@ static void wma_update_hdd_cfg(tp_wma_handle wma_handle)
 	struct target_psoc_info *tgt_hdl;
 	struct wmi_unified *wmi_handle;
 	uint8_t i;
+	int ret;
 
 	WMA_LOGD("%s: Enter", __func__);
 
 	tgt_hdl = wlan_psoc_get_tgt_if_handle(wma_handle->psoc);
 	if (!tgt_hdl) {
 		WMA_LOGE("%s: target psoc info is NULL", __func__);
-		return;
+		return -EINVAL;
 	}
 
 	wlan_res_cfg = target_psoc_get_wlan_res_cfg(tgt_hdl);
 	if (!wlan_res_cfg) {
 		WMA_LOGE("%s: wlan_res_cfg is null", __func__);
-		return;
+		return -EINVAL;
 	}
+
 	service_ext_param =
 			target_psoc_get_service_ext_param(tgt_hdl);
 	wmi_handle = get_wmi_unified_hdl_from_psoc(wma_handle->psoc);
 	if (!wmi_handle) {
 		WMA_LOGE("%s: wmi handle is NULL", __func__);
-		return;
+		return -EINVAL;
 	}
 
 	qdf_mem_zero(&tgt_cfg, sizeof(struct wma_tgt_cfg));
@@ -5632,6 +5647,16 @@ static void wma_update_hdd_cfg(tp_wma_handle wma_handle)
 	tgt_cfg.eeprom_rd_ext = wma_handle->reg_cap.eeprom_rd_ext;
 
 	tgt_cfg.max_intf_count = wlan_res_cfg->num_vdevs;
+
+	if (wmi_service_enabled(wmi_handle, wmi_service_wpa3_ft_sae_support))
+		tgt_cfg.ft_akm_service_bitmap |= (1 << AKM_FT_SAE);
+
+	if (wmi_service_enabled(wmi_handle,
+				wmi_service_wpa3_ft_suite_b_support))
+		tgt_cfg.ft_akm_service_bitmap |= (1 << AKM_FT_SUITEB_SHA384);
+
+	if (wmi_service_enabled(wmi_handle, wmi_service_ft_fils))
+		tgt_cfg.ft_akm_service_bitmap |= (1 << AKM_FT_FILS);
 
 	qdf_mem_copy(tgt_cfg.hw_macaddr.bytes, wma_handle->hwaddr,
 		     ATH_MAC_LEN);
@@ -5682,16 +5707,21 @@ static void wma_update_hdd_cfg(tp_wma_handle wma_handle)
 	wma_update_obss_color_collision_support(wma_handle, &tgt_cfg);
 	wma_update_hdd_cfg_ndp(wma_handle, &tgt_cfg);
 	wma_update_nan_target_caps(wma_handle, &tgt_cfg);
+	wma_update_bcast_twt_support(wma_handle, &tgt_cfg);
 
 	/* Take the max of chains supported by FW, which will limit nss */
 	for (i = 0; i < tgt_hdl->info.total_mac_phy_cnt; i++)
 		wma_fill_chain_cfg(tgt_hdl, i);
 
-	wma_handle->tgt_cfg_update_cb(hdd_ctx, &tgt_cfg);
+	ret = wma_handle->tgt_cfg_update_cb(hdd_ctx, &tgt_cfg);
+	if (ret)
+		return -EINVAL;
 	target_if_store_pdev_target_if_ctx(wma_get_pdev_from_scn_handle);
 	target_pdev_set_wmi_handle(wma_handle->pdev->tgt_if_handle,
 				   wma_handle->wmi_handle);
 	wma_green_ap_register_handlers(wma_handle);
+
+	return ret;
 }
 
 /**
@@ -5788,9 +5818,37 @@ static void wma_set_pmo_caps(struct wlan_objmgr_psoc *psoc)
 		WMA_LOGE("Failed to set PMO capabilities; status:%d", status);
 }
 
+/**
+ * wma_set_mlme_caps() - Populate the MLME related target capabilities to the
+ * mlme component
+ * @psoc: Pointer to psoc object
+ *
+ * Return: None
+ */
+static void wma_set_mlme_caps(struct wlan_objmgr_psoc *psoc)
+{
+	tp_wma_handle wma;
+	bool tgt_cap;
+	QDF_STATUS status;
+
+	wma = cds_get_context(QDF_MODULE_ID_WMA);
+	if (!wma) {
+		WMA_LOGE("%s: wma handler is null", __func__);
+		return;
+	}
+
+	tgt_cap = wmi_service_enabled(wma->wmi_handle,
+				      wmi_service_adaptive_11r_support);
+
+	status = ucfg_mlme_set_tgt_adaptive_11r_cap(psoc, tgt_cap);
+	if (QDF_IS_STATUS_ERROR(status))
+		WMA_LOGE("Failed to set adaptive 11r cap");
+}
+
 static void wma_set_component_caps(struct wlan_objmgr_psoc *psoc)
 {
 	wma_set_pmo_caps(psoc);
+	wma_set_mlme_caps(psoc);
 }
 
 #if defined(WLAN_FEATURE_GTK_OFFLOAD) && defined(WLAN_POWER_MANAGEMENT_OFFLOAD)
@@ -6796,6 +6854,7 @@ int wma_rx_ready_event(void *handle, uint8_t *cmd_param_info,
 	tp_wma_handle wma_handle = (tp_wma_handle) handle;
 	WMI_READY_EVENTID_param_tlvs *param_buf = NULL;
 	wmi_ready_event_fixed_param *ev = NULL;
+	int ret;
 
 	WMA_LOGD("%s: Enter", __func__);
 
@@ -6824,7 +6883,10 @@ int wma_rx_ready_event(void *handle, uint8_t *cmd_param_info,
 	/* copy the mac addr */
 	WMI_MAC_ADDR_TO_CHAR_ARRAY(&ev->mac_addr, wma_handle->myaddr);
 	WMI_MAC_ADDR_TO_CHAR_ARRAY(&ev->mac_addr, wma_handle->hwaddr);
-	wma_update_hdd_cfg(wma_handle);
+	ret = wma_update_hdd_cfg(wma_handle);
+	if (ret)
+		return ret;
+
 	WMA_LOGD("Exit");
 
 	return 0;
@@ -6896,6 +6958,11 @@ QDF_STATUS wma_wait_for_ready_event(WMA_HANDLE handle)
 
 	status = qdf_wait_for_event_completion(&tgt_hdl->info.event,
 					       WMA_READY_EVENTID_TIMEOUT);
+	if (!tgt_hdl->info.wmi_ready) {
+		wma_err("Error in pdev creation");
+		return QDF_STATUS_E_INVAL;
+	}
+
 	if (status == QDF_STATUS_E_TIMEOUT)
 		wma_err("Timeout waiting for FW ready event");
 	else if (QDF_IS_STATUS_ERROR(status))
@@ -8001,6 +8068,11 @@ int wma_motion_det_host_event_handler(void *handle, uint8_t *event,
 
 	if (!param_buf) {
 		WMA_LOGE("Invalid motion det host event buffer");
+		return -EINVAL;
+	}
+
+	if (!pmac || !pmac->sme.md_host_evt_cb) {
+		WMA_LOGE("Invalid motion detect callback");
 		return -EINVAL;
 	}
 

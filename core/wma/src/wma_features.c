@@ -45,9 +45,9 @@
 #include "wma_types.h"
 #include "lim_api.h"
 #include "lim_session_utils.h"
-
+#include "cfg_ucfg_api.h"
 #include "cds_utils.h"
-
+#include "cfg_qos.h"
 #if !defined(REMOVE_PKT_LOG)
 #include "pktlog_ac.h"
 #endif /* REMOVE_PKT_LOG */
@@ -597,11 +597,11 @@ QDF_STATUS wma_process_dhcp_ind(WMA_HANDLE handle,
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	WMA_LOGD("%s: WMA --> WMI_PEER_SET_PARAM triggered by DHCP, msgType=%s, device_mode=%d, macAddr=" MAC_ADDRESS_STR,
-		__func__, ta_dhcp_ind->msgType == WMA_DHCP_START_IND ?
+	wma_debug("WMA --> WMI_PEER_SET_PARAM triggered by DHCP, msgType=%s, device_mode=%d, macAddr=" QDF_MAC_ADDR_STR,
+		ta_dhcp_ind->msgType == WMA_DHCP_START_IND ?
 		"WMA_DHCP_START_IND" : "WMA_DHCP_STOP_IND",
 		ta_dhcp_ind->device_mode,
-		MAC_ADDR_ARRAY(ta_dhcp_ind->peerMacAddr.bytes));
+		QDF_MAC_ADDR_ARRAY(ta_dhcp_ind->peerMacAddr.bytes));
 
 	/* fill in values */
 	peer_set_param_fp.vdev_id = vdev_id;
@@ -2323,8 +2323,8 @@ static void wma_wow_parse_data_pkt(t_wma_handle *wma,
 
 	src_mac = data + QDF_NBUF_SRC_MAC_OFFSET;
 	dest_mac = data + QDF_NBUF_DEST_MAC_OFFSET;
-	WMA_LOGI("Src_mac: " MAC_ADDRESS_STR ", Dst_mac: " MAC_ADDRESS_STR,
-		 MAC_ADDR_ARRAY(src_mac), MAC_ADDR_ARRAY(dest_mac));
+	wma_info("Src_mac: " QDF_MAC_ADDR_STR ", Dst_mac: " QDF_MAC_ADDR_STR,
+		 QDF_MAC_ADDR_ARRAY(src_mac), QDF_MAC_ADDR_ARRAY(dest_mac));
 
 	wma_wow_inc_wake_lock_stats_by_dst_addr(wma, vdev_id, dest_mac);
 
@@ -2414,9 +2414,9 @@ static void wma_wow_dump_mgmt_buffer(uint8_t *wow_packet_buffer,
 		uint8_t to_from_ds, frag_num;
 		uint32_t seq_num;
 
-		WMA_LOGE("RA: " MAC_ADDRESS_STR " TA: " MAC_ADDRESS_STR,
-			MAC_ADDR_ARRAY(wh->i_addr1),
-			MAC_ADDR_ARRAY(wh->i_addr2));
+		wma_err("RA: " QDF_MAC_ADDR_STR " TA: " QDF_MAC_ADDR_STR,
+			QDF_MAC_ADDR_ARRAY(wh->i_addr1),
+			QDF_MAC_ADDR_ARRAY(wh->i_addr2));
 
 		WMA_LOGE("TO_DS: %u, FROM_DS: %u",
 			wh->i_fc[1] & IEEE80211_FC1_DIR_TODS,
@@ -2426,23 +2426,23 @@ static void wma_wow_dump_mgmt_buffer(uint8_t *wow_packet_buffer,
 
 		switch (to_from_ds) {
 		case IEEE80211_FC1_DIR_NODS:
-			WMA_LOGE("BSSID: " MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(wh->i_addr3));
+			wma_err("BSSID: " QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(wh->i_addr3));
 			break;
 		case IEEE80211_FC1_DIR_TODS:
-			WMA_LOGE("DA: " MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(wh->i_addr3));
+			wma_err("DA: " QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(wh->i_addr3));
 			break;
 		case IEEE80211_FC1_DIR_FROMDS:
-			WMA_LOGE("SA: " MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(wh->i_addr3));
+			wma_err("SA: " QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(wh->i_addr3));
 			break;
 		case IEEE80211_FC1_DIR_DSTODS:
 			if (buf_len >= sizeof(struct ieee80211_frame_addr4))
-				WMA_LOGE("DA: " MAC_ADDRESS_STR " SA: "
-					MAC_ADDRESS_STR,
-					MAC_ADDR_ARRAY(wh->i_addr3),
-					MAC_ADDR_ARRAY(wh->i_addr4));
+				wma_err("DA: " QDF_MAC_ADDR_STR " SA: "
+					QDF_MAC_ADDR_STR,
+					QDF_MAC_ADDR_ARRAY(wh->i_addr3),
+					QDF_MAC_ADDR_ARRAY(wh->i_addr4));
 			break;
 		}
 
@@ -3066,7 +3066,7 @@ void wma_add_ts_req(tp_wma_handle wma, struct add_ts_param *msg)
 			msg->status = QDF_STATUS_E_FAILURE;
 
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
-		if (msg->setRICparams == true)
+		if (msg->set_ric_params)
 			wma_set_ric_req(wma, msg, true);
 #endif /* WLAN_FEATURE_ROAM_OFFLOAD */
 
@@ -4079,9 +4079,9 @@ int wma_update_tdls_peer_state(WMA_HANDLE handle,
 		restore_last_peer = cdp_peer_is_vdev_restore_last_peer(
 						soc, peer);
 
-		WMA_LOGD("%s: calling wma_remove_peer for peer " MAC_ADDRESS_STR
-			 " vdevId: %d", __func__,
-			 MAC_ADDR_ARRAY(peer_mac_addr),
+		wma_debug("calling wma_remove_peer for peer " QDF_MAC_ADDR_STR
+			 " vdevId: %d",
+			 QDF_MAC_ADDR_ARRAY(peer_mac_addr),
 			 peer_state->vdev_id);
 		qdf_status = wma_remove_peer(wma_handle, peer_mac_addr,
 					     peer_state->vdev_id, peer, false);
@@ -4093,6 +4093,13 @@ int wma_update_tdls_peer_state(WMA_HANDLE handle,
 		cdp_peer_update_last_real_peer(soc,
 				pdev, vdev, &peer_id,
 				restore_last_peer);
+	}
+
+	if (TDLS_PEER_STATE_CONNECTED == peer_state->peer_state) {
+		peer_mac_addr = cdp_peer_get_peer_mac_addr(soc, peer);
+		if (peer_mac_addr)
+			cdp_peer_state_update(soc, pdev, peer_mac_addr,
+					      OL_TXRX_PEER_STATE_AUTH);
 	}
 
 end_tdls_peer_state:
@@ -4672,7 +4679,7 @@ static QDF_STATUS wma_set_sw_retry_by_qos(
 	return QDF_STATUS_SUCCESS;
 }
 
-QDF_STATUS wma_set_sw_retry_threshold(
+QDF_STATUS wma_set_sw_retry_threshold_per_ac(
 	WMA_HANDLE handle,
 	struct sir_set_tx_sw_retry_threshold *tx_sw_retry_threshold)
 {
@@ -4736,6 +4743,29 @@ QDF_STATUS wma_set_sw_retry_threshold(
 	return QDF_STATUS_SUCCESS;
 }
 
+QDF_STATUS wma_set_sw_retry_threshold(uint8_t vdev_id, uint32_t retry,
+				      uint32_t param_id)
+{
+	uint32_t max, min;
+	uint32_t ret;
+
+	if (param_id == WMI_PDEV_PARAM_AGG_SW_RETRY_TH) {
+		max = cfg_max(CFG_TX_AGGR_SW_RETRY);
+		min = cfg_min(CFG_TX_AGGR_SW_RETRY);
+	} else {
+		max = cfg_max(CFG_TX_NON_AGGR_SW_RETRY);
+		min = cfg_min(CFG_TX_NON_AGGR_SW_RETRY);
+	}
+
+	retry = (retry > max) ? max : retry;
+	retry = (retry < min) ? min : retry;
+
+	ret = wma_cli_set_command(vdev_id, param_id, retry, PDEV_CMD);
+	if (ret)
+		return QDF_STATUS_E_IO;
+
+	return QDF_STATUS_SUCCESS;
+}
 #ifndef QCA_SUPPORT_CP_STATS
 /**
  * wma_get_wakelock_stats() - Populates wake lock stats
@@ -5472,7 +5502,7 @@ int wma_pdev_div_info_evt_handler(void *handle, u_int8_t *event_buf,
 	qdf_mem_zero(&chain_rssi_result, sizeof(chain_rssi_result));
 
 	WMI_MAC_ADDR_TO_CHAR_ARRAY(&event->macaddr, macaddr);
-	WMA_LOGD(FL("macaddr: " MAC_ADDRESS_STR), MAC_ADDR_ARRAY(macaddr));
+	wma_debug("macaddr: " QDF_MAC_ADDR_STR, QDF_MAC_ADDR_ARRAY(macaddr));
 
 	WMA_LOGD(FL("num_chains_valid: %d"), event->num_chains_valid);
 	chain_rssi_result.num_chains_valid = event->num_chains_valid;
@@ -5604,6 +5634,59 @@ static void wma_send_set_key_rsp(uint8_t session_id, bool pairwise,
 	}
 }
 
+static uint32_t wma_cipher_to_cap(enum wlan_crypto_cipher_type cipher)
+{
+	switch (cipher) {
+	case WLAN_CRYPTO_CIPHER_WEP:  return WLAN_CRYPTO_CAP_WEP;
+	case WLAN_CRYPTO_CIPHER_WEP_40:  return WLAN_CRYPTO_CAP_WEP;
+	case WLAN_CRYPTO_CIPHER_WEP_104:  return WLAN_CRYPTO_CAP_WEP;
+	case WLAN_CRYPTO_CIPHER_AES_OCB:  return WLAN_CRYPTO_CAP_AES;
+	case WLAN_CRYPTO_CIPHER_AES_CCM:  return WLAN_CRYPTO_CAP_AES;
+	case WLAN_CRYPTO_CIPHER_AES_CCM_256:  return WLAN_CRYPTO_CAP_AES;
+	case WLAN_CRYPTO_CIPHER_AES_GCM:  return WLAN_CRYPTO_CAP_AES;
+	case WLAN_CRYPTO_CIPHER_AES_GCM_256:  return WLAN_CRYPTO_CAP_AES;
+	case WLAN_CRYPTO_CIPHER_CKIP: return WLAN_CRYPTO_CAP_CKIP;
+	case WLAN_CRYPTO_CIPHER_TKIP: return WLAN_CRYPTO_CAP_TKIP_MIC;
+	case WLAN_CRYPTO_CIPHER_WAPI_SMS4: return WLAN_CRYPTO_CAP_WAPI_SMS4;
+	case WLAN_CRYPTO_CIPHER_WAPI_GCM4: return WLAN_CRYPTO_CAP_WAPI_GCM4;
+	case WLAN_CRYPTO_CIPHER_FILS_AEAD: return WLAN_CRYPTO_CAP_FILS_AEAD;
+	default: return 0;
+	}
+}
+
+void wma_set_peer_ucast_cipher(uint8_t *mac_addr,
+			       enum wlan_crypto_cipher_type cipher)
+{
+	int32_t set_val = 0, cipher_cap;
+	struct wlan_objmgr_peer *peer;
+	tp_wma_handle wma = cds_get_context(QDF_MODULE_ID_WMA);
+
+	if (!wma) {
+		wma_err("wma context is NULL");
+		return;
+	}
+
+	peer = wlan_objmgr_get_peer(wma->psoc,
+				    wlan_objmgr_pdev_get_pdev_id(wma->pdev),
+				    mac_addr, WLAN_LEGACY_WMA_ID);
+	if (!peer) {
+		wma_err("Peer of peer_mac %pM not found", mac_addr);
+		return;
+	}
+	cipher_cap = wma_cipher_to_cap(cipher);
+	MLME_SET_BIT(set_val, cipher_cap);
+	wlan_crypto_set_peer_param(peer, WLAN_CRYPTO_PARAM_CIPHER_CAP,
+				   set_val);
+	set_val = 0;
+	MLME_SET_BIT(set_val, cipher);
+	wlan_crypto_set_peer_param(peer, WLAN_CRYPTO_PARAM_UCAST_CIPHER,
+				   set_val);
+	wlan_objmgr_peer_release_ref(peer, WLAN_LEGACY_WMA_ID);
+
+	wma_debug("Set unicast cipher %x and cap %x for %pM", 1 << cipher,
+		  1 << cipher_cap, mac_addr);
+}
+
 static void wma_reset_ipn(struct wma_txrx_node *iface, uint8_t key_index)
 {
 	if (key_index == WMA_IGTK_KEY_INDEX_4 ||
@@ -5628,17 +5711,21 @@ void wma_update_set_key(uint8_t session_id, bool pairwise,
 	if (!iface)
 		wma_info("iface not found for session id %d", session_id);
 
-	wma_reset_ipn(iface, key_index);
-	if (iface && pairwise)
-		iface->ucast_key_cipher =
+	if (cipher_type == WLAN_CRYPTO_CIPHER_AES_GMAC ||
+	    cipher_type == WLAN_CRYPTO_CIPHER_AES_GMAC_256 ||
+	    cipher_type == WLAN_CRYPTO_CIPHER_AES_CMAC)
+		iface->key.key_cipher =
 			wlan_crypto_cipher_to_wmi_cipher(cipher_type);
+
+	if (iface) {
+		wma_reset_ipn(iface, key_index);
+		iface->is_waiting_for_key = false;
+	}
 	if (!pairwise && iface) {
 		/* Its GTK release the wake lock */
 		wma_debug("Release set key wake lock");
 		wma_release_wakelock(&iface->vdev_set_key_wakelock);
 	}
-	if (iface)
-		iface->is_waiting_for_key = false;
 
 	wma_send_set_key_rsp(session_id, pairwise, key_index);
 }

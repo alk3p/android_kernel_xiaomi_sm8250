@@ -816,9 +816,9 @@ QDF_STATUS csr_neighbor_roam_indicate_disconnect(struct mac_context *mac,
 	}
 	QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_DEBUG,
 			FL("Disconn ind on session %d in state %d from bss :"
-			MAC_ADDRESS_STR), sessionId,
+			QDF_MAC_ADDR_STR), sessionId,
 			pNeighborRoamInfo->neighborRoamState,
-			MAC_ADDR_ARRAY(pSession->connectedProfile.bssid.bytes));
+			QDF_MAC_ADDR_ARRAY(pSession->connectedProfile.bssid.bytes));
 	/*
 	 * Free the current previous profile and move
 	 * the current profile to prev profile.

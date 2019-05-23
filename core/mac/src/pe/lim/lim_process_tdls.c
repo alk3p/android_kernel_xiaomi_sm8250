@@ -423,12 +423,12 @@ static uint32_t lim_prepare_tdls_frame_header(struct mac_context *mac, uint8_t *
 		     (uint8_t *) (addr3), sizeof(tSirMacAddr));
 
 	pe_debug("Preparing TDLS frame header to %s A1:"
-		   MAC_ADDRESS_STR", A2:"MAC_ADDRESS_STR", A3:"
-		   MAC_ADDRESS_STR,
+		   QDF_MAC_ADDR_STR", A2:"QDF_MAC_ADDR_STR", A3:"
+		   QDF_MAC_ADDR_STR,
 		(tdlsLinkType == TDLS_LINK_AP) ? "AP" : "DIRECT",
-		MAC_ADDR_ARRAY(pMacHdr->addr1),
-		MAC_ADDR_ARRAY(pMacHdr->addr2),
-		MAC_ADDR_ARRAY(pMacHdr->addr3));
+		QDF_MAC_ADDR_ARRAY(pMacHdr->addr1),
+		QDF_MAC_ADDR_ARRAY(pMacHdr->addr2),
+		QDF_MAC_ADDR_ARRAY(pMacHdr->addr3));
 
 	if (pMacHdr->fc.subType == SIR_MAC_DATA_QOS_DATA) {
 		pMacHdr->qosControl.tid = tid;
@@ -635,10 +635,10 @@ static QDF_STATUS lim_send_tdls_dis_req_frame(struct mac_context *mac,
 	}
 #endif
 
-	pe_debug("[TDLS] action: %d (%s) -AP-> OTA peer="MAC_ADDRESS_STR,
+	pe_debug("[TDLS] action: %d (%s) -AP-> OTA peer="QDF_MAC_ADDR_STR,
 		SIR_MAC_TDLS_DIS_REQ,
 		lim_trace_tdls_action_string(SIR_MAC_TDLS_DIS_REQ),
-		MAC_ADDR_ARRAY(peer_mac.bytes));
+		QDF_MAC_ADDR_ARRAY(peer_mac.bytes));
 
 	mac->lim.tdls_frm_session_id = pe_session->smeSessionId;
 	lim_diag_mgmt_tx_event_report(mac, (tpSirMacMgmtHdr) pFrame,
@@ -938,10 +938,10 @@ static QDF_STATUS lim_send_tdls_dis_rsp_frame(struct mac_context *mac,
 		qdf_mem_copy(pFrame + sizeof(tSirMacMgmtHdr) + nPayload, addIe,
 			     addIeLen);
 	}
-	pe_debug("[TDLS] action: %d (%s) -DIRECT-> OTA peer="MAC_ADDRESS_STR,
+	pe_debug("[TDLS] action: %d (%s) -DIRECT-> OTA peer="QDF_MAC_ADDR_STR,
 		SIR_MAC_TDLS_DIS_RSP,
 		lim_trace_tdls_action_string(SIR_MAC_TDLS_DIS_RSP),
-		MAC_ADDR_ARRAY(peer_mac.bytes));
+		QDF_MAC_ADDR_ARRAY(peer_mac.bytes));
 
 	mac->lim.tdls_frm_session_id = pe_session->smeSessionId;
 	lim_diag_mgmt_tx_event_report(mac, (tpSirMacMgmtHdr) pFrame,
@@ -1002,8 +1002,8 @@ static void populate_dotf_tdls_vht_aid(struct mac_context *mac, uint32_t selfDot
 			} else {
 				Aid->present = 0;
 				pe_err("sta is NULL for "
-					   MAC_ADDRESS_STR,
-					MAC_ADDR_ARRAY(peerMac.bytes));
+					   QDF_MAC_ADDR_STR,
+					QDF_MAC_ADDR_ARRAY(peerMac.bytes));
 			}
 		}
 	} else {
@@ -1312,10 +1312,10 @@ QDF_STATUS lim_send_tdls_link_setup_req_frame(struct mac_context *mac,
 			     addIeLen);
 	}
 
-	pe_debug("[TDLS] action: %d (%s) -AP-> OTA peer="MAC_ADDRESS_STR,
+	pe_debug("[TDLS] action: %d (%s) -AP-> OTA peer="QDF_MAC_ADDR_STR,
 		SIR_MAC_TDLS_SETUP_REQ,
 		lim_trace_tdls_action_string(SIR_MAC_TDLS_SETUP_REQ),
-		MAC_ADDR_ARRAY(peer_mac.bytes));
+		QDF_MAC_ADDR_ARRAY(peer_mac.bytes));
 
 	mac->lim.tdls_frm_session_id = pe_session->smeSessionId;
 	lim_diag_mgmt_tx_event_report(mac, (tpSirMacMgmtHdr) pFrame,
@@ -1503,12 +1503,12 @@ QDF_STATUS lim_send_tdls_teardown_frame(struct mac_context *mac,
 				    padLen - MIN_VENDOR_SPECIFIC_IE_SIZE);
 	}
 #endif
-	pe_debug("[TDLS] action: %d (%s) -%s-> OTA peer="MAC_ADDRESS_STR,
+	pe_debug("[TDLS] action: %d (%s) -%s-> OTA peer="QDF_MAC_ADDR_STR,
 		SIR_MAC_TDLS_TEARDOWN,
 		lim_trace_tdls_action_string(SIR_MAC_TDLS_TEARDOWN),
 		((reason == eSIR_MAC_TDLS_TEARDOWN_PEER_UNREACHABLE) ? "AP" :
 		    "DIRECT"),
-		MAC_ADDR_ARRAY(peer_mac.bytes));
+		QDF_MAC_ADDR_ARRAY(peer_mac.bytes));
 
 	mac->lim.tdls_frm_session_id = pe_session->smeSessionId;
 	lim_diag_mgmt_tx_event_report(mac, (tpSirMacMgmtHdr) pFrame,
@@ -1764,10 +1764,10 @@ static QDF_STATUS lim_send_tdls_setup_rsp_frame(struct mac_context *mac,
 			     addIeLen);
 	}
 
-	pe_debug("[TDLS] action: %d (%s) -AP-> OTA peer="MAC_ADDRESS_STR,
+	pe_debug("[TDLS] action: %d (%s) -AP-> OTA peer="QDF_MAC_ADDR_STR,
 		SIR_MAC_TDLS_SETUP_RSP,
 		lim_trace_tdls_action_string(SIR_MAC_TDLS_SETUP_RSP),
-		MAC_ADDR_ARRAY(peer_mac.bytes));
+		QDF_MAC_ADDR_ARRAY(peer_mac.bytes));
 
 	mac->lim.tdls_frm_session_id = pe_session->smeSessionId;
 	lim_diag_mgmt_tx_event_report(mac, (tpSirMacMgmtHdr) pFrame,
@@ -1971,10 +1971,10 @@ QDF_STATUS lim_send_tdls_link_setup_cnf_frame(struct mac_context *mac,
 	}
 #endif
 
-	pe_debug("[TDLS] action: %d (%s) -AP-> OTA peer="MAC_ADDRESS_STR,
+	pe_debug("[TDLS] action: %d (%s) -AP-> OTA peer="QDF_MAC_ADDR_STR,
 		SIR_MAC_TDLS_SETUP_CNF,
 		lim_trace_tdls_action_string(SIR_MAC_TDLS_SETUP_CNF),
-	       MAC_ADDR_ARRAY(peer_mac.bytes));
+	       QDF_MAC_ADDR_ARRAY(peer_mac.bytes));
 
 	mac->lim.tdls_frm_session_id = pe_session->smeSessionId;
 	lim_diag_mgmt_tx_event_report(mac, (tpSirMacMgmtHdr) pFrame,
@@ -2315,10 +2315,10 @@ lim_tdls_populate_matching_rate_set(struct mac_context *mac_ctx,
 	 * Copy received rates in temp_rate_set, the parser has ensured
 	 * unicity of the rates so there cannot be more than 12 .
 	 */
-	if (supp_rates_len > SIR_MAC_RATESET_EID_MAX) {
+	if (supp_rates_len > WLAN_SUPPORTED_RATES_IE_MAX_LEN) {
 		pe_warn("Supported rates length: %d more than the Max limit, reset to Max",
 			supp_rates_len);
-		supp_rates_len = SIR_MAC_RATESET_EID_MAX;
+		supp_rates_len = WLAN_SUPPORTED_RATES_IE_MAX_LEN;
 	}
 
 	for (i = 0; i < supp_rates_len; i++)
@@ -2552,16 +2552,19 @@ static QDF_STATUS lim_tdls_setup_add_sta(struct mac_context *mac,
 
 	sta = dph_lookup_hash_entry(mac, pAddStaReq->peermac.bytes, &aid,
 				       &pe_session->dph.dphHashTable);
-
+	if (!sta && pAddStaReq->tdls_oper == TDLS_OPER_UPDATE) {
+		pe_err("TDLS update peer is given without peer creation");
+		return QDF_STATUS_E_FAILURE;
+	}
 	if (sta && pAddStaReq->tdls_oper == TDLS_OPER_ADD) {
-		pe_err("TDLS entry for peer: "MAC_ADDRESS_STR " already exist, cannot add new entry",
-			MAC_ADDR_ARRAY(pAddStaReq->peermac.bytes));
+		pe_err("TDLS entry for peer: "QDF_MAC_ADDR_STR " already exist, cannot add new entry",
+			QDF_MAC_ADDR_ARRAY(pAddStaReq->peermac.bytes));
 			return QDF_STATUS_E_FAILURE;
 	}
 
 	if (sta && sta->staType != STA_ENTRY_TDLS_PEER) {
-		pe_err("Non TDLS entry for peer: "MAC_ADDRESS_STR " already exist",
-			MAC_ADDR_ARRAY(pAddStaReq->peermac.bytes));
+		pe_err("Non TDLS entry for peer: "QDF_MAC_ADDR_STR " already exist",
+			QDF_MAC_ADDR_ARRAY(pAddStaReq->peermac.bytes));
 			return QDF_STATUS_E_FAILURE;
 	}
 
@@ -2569,16 +2572,16 @@ static QDF_STATUS lim_tdls_setup_add_sta(struct mac_context *mac,
 		aid = lim_assign_peer_idx(mac, pe_session);
 
 		if (!aid) {
-			pe_err("No more free AID for peer: "MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(pAddStaReq->peermac.bytes));
+			pe_err("No more free AID for peer: "QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(pAddStaReq->peermac.bytes));
 			return QDF_STATUS_E_FAILURE;
 		}
 
 		/* Set the aid in peerAIDBitmap as it has been assigned to TDLS peer */
 		SET_PEER_AID_BITMAP(pe_session->peerAIDBitmap, aid);
 
-		pe_debug("Aid: %d, for peer: " MAC_ADDRESS_STR,
-			aid, MAC_ADDR_ARRAY(pAddStaReq->peermac.bytes));
+		pe_debug("Aid: %d, for peer: " QDF_MAC_ADDR_STR,
+			aid, QDF_MAC_ADDR_ARRAY(pAddStaReq->peermac.bytes));
 		sta =
 			dph_get_hash_entry(mac, aid,
 					   &pe_session->dph.dphHashTable);
@@ -2632,8 +2635,8 @@ static QDF_STATUS lim_tdls_del_sta(struct mac_context *mac,
 				       &pe_session->dph.dphHashTable);
 
 	if (sta) {
-		pe_debug("DEL STA peer MAC: "MAC_ADDRESS_STR,
-			 MAC_ADDR_ARRAY(sta->staAddr));
+		pe_debug("DEL STA peer MAC: "QDF_MAC_ADDR_STR,
+			 QDF_MAC_ADDR_ARRAY(sta->staAddr));
 
 		pe_debug("STA type: %x, sta idx: %x resp_reqd: %d",
 			 sta->staType,
@@ -2642,8 +2645,8 @@ static QDF_STATUS lim_tdls_del_sta(struct mac_context *mac,
 
 		status = lim_del_sta(mac, sta, resp_reqd, pe_session);
 	} else {
-		pe_debug("DEL STA peer MAC: "MAC_ADDRESS_STR" not found",
-			 MAC_ADDR_ARRAY(peerMac.bytes));
+		pe_debug("DEL STA peer MAC: "QDF_MAC_ADDR_STR" not found",
+			 QDF_MAC_ADDR_ARRAY(peerMac.bytes));
 	}
 
 	return status;
@@ -2709,9 +2712,9 @@ QDF_STATUS lim_process_tdls_add_sta_rsp(struct mac_context *mac, void *msg,
 	uint16_t aid = 0;
 
 	SET_LIM_PROCESS_DEFD_MESGS(mac, true);
-	pe_debug("staIdx: %d, staMac: "MAC_ADDRESS_STR,
+	pe_debug("staIdx: %d, staMac: "QDF_MAC_ADDR_STR,
 	       pAddStaParams->staIdx,
-	       MAC_ADDR_ARRAY(pAddStaParams->staMac));
+	       QDF_MAC_ADDR_ARRAY(pAddStaParams->staMac));
 
 	if (pAddStaParams->status != QDF_STATUS_SUCCESS) {
 		QDF_ASSERT(0);
@@ -3110,8 +3113,8 @@ static void lim_check_aid_and_delete_peer(struct mac_context *p_mac,
 			if (!stads)
 				goto skip;
 
-			pe_debug("Deleting "MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(stads->staAddr));
+			pe_debug("Deleting "QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(stads->staAddr));
 
 			if (!lim_is_roam_synch_in_progress(session_entry)) {
 				lim_send_deauth_mgmt_frame(p_mac,
@@ -3125,8 +3128,8 @@ static void lim_check_aid_and_delete_peer(struct mac_context *p_mac,
 				status = lim_tdls_del_sta(p_mac, mac_addr,
 							 session_entry, false);
 				if (status != QDF_STATUS_SUCCESS)
-					pe_debug("peer "MAC_ADDRESS_STR" not found",
-						MAC_ADDR_ARRAY(stads->staAddr));
+					pe_debug("peer "QDF_MAC_ADDR_STR" not found",
+						QDF_MAC_ADDR_ARRAY(stads->staAddr));
 			}
 
 			dph_delete_hash_entry(p_mac,
@@ -3169,6 +3172,9 @@ QDF_STATUS lim_delete_tdls_peers(struct mac_context *mac_ctx,
 
 	lim_check_aid_and_delete_peer(mac_ctx, session_entry);
 
+	tgt_tdls_delete_all_peers_indication(mac_ctx->psoc,
+					     session_entry->smeSessionId);
+
 	if (lim_is_roam_synch_in_progress(session_entry))
 		return QDF_STATUS_SUCCESS;
 	/* In case of CSA, Only peers in lim and TDLS component
@@ -3181,9 +3187,6 @@ QDF_STATUS lim_delete_tdls_peers(struct mac_context *mac_ctx,
 						    session_entry->
 						    smeSessionId);
 	}
-
-	tgt_tdls_delete_all_peers_indication(mac_ctx->psoc,
-					     session_entry->smeSessionId);
 
 	/* reset the set_state_disable flag */
 	session_entry->tdls_send_set_state_disable = true;

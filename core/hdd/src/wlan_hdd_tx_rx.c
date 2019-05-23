@@ -416,6 +416,7 @@ static inline struct sk_buff *hdd_skb_orphan(struct hdd_adapter *adapter,
 uint32_t hdd_txrx_get_tx_ack_count(struct hdd_adapter *adapter)
 {
 	return cdp_get_tx_ack_stats(cds_get_context(QDF_MODULE_ID_SOC),
+				    cds_get_context(QDF_MODULE_ID_TXRX),
 				    adapter->vdev_id);
 }
 
@@ -2357,6 +2358,47 @@ static void wlan_hdd_update_pause_time(struct hdd_adapter *adapter,
 
 }
 
+uint32_t
+wlan_hdd_dump_queue_history_state(struct hdd_netif_queue_history *queue_history,
+				  char *buf, uint32_t size)
+{
+	unsigned int i;
+	unsigned int index = 0;
+
+	for (i = 0; i < NUM_TX_QUEUES; i++) {
+		index += qdf_scnprintf(buf + index,
+				       size - index,
+				       "%u:0x%lx ",
+				       i, queue_history->tx_q_state[i]);
+	}
+
+	return index;
+}
+
+/**
+ * wlan_hdd_update_queue_history_state() - Save a copy of dev TX queues state
+ * @adapter: adapter handle
+ *
+ * Save netdev TX queues state into adapter queue history.
+ *
+ * Return: None
+ */
+static void
+wlan_hdd_update_queue_history_state(struct net_device *dev,
+				    struct hdd_netif_queue_history *q_hist)
+{
+	unsigned int i = 0;
+	uint32_t num_tx_queues = 0;
+	struct netdev_queue *txq = NULL;
+
+	num_tx_queues = qdf_min(dev->num_tx_queues, (uint32_t)NUM_TX_QUEUES);
+
+	for (i = 0; i < num_tx_queues; i++) {
+		txq = netdev_get_tx_queue(dev, i);
+		q_hist->tx_q_state[i] = txq->state;
+	}
+}
+
 /**
  * wlan_hdd_stop_non_priority_queue() - stop non prority queues
  * @adapter: adapter handle
@@ -2402,6 +2444,7 @@ void wlan_hdd_netif_queue_control(struct hdd_adapter *adapter,
 {
 	uint32_t temp_map;
 	uint8_t index;
+	struct hdd_netif_queue_history *txq_hist_ptr;
 
 	if ((!adapter) || (WLAN_HDD_ADAPTER_MAGIC != adapter->magic) ||
 		 (!adapter->dev)) {
@@ -2562,6 +2605,9 @@ void wlan_hdd_netif_queue_control(struct hdd_adapter *adapter,
 		spin_unlock_bh(&adapter->pause_map_lock);
 		break;
 
+	case WLAN_NETIF_ACTION_TYPE_NONE:
+		break;
+
 	default:
 		hdd_err("unsupported action %d", action);
 	}
@@ -2581,6 +2627,25 @@ void wlan_hdd_netif_queue_control(struct hdd_adapter *adapter,
 	adapter->queue_oper_history[index].netif_action = action;
 	adapter->queue_oper_history[index].netif_reason = reason;
 	adapter->queue_oper_history[index].pause_map = adapter->pause_map;
+
+	txq_hist_ptr = &adapter->queue_oper_history[index];
+
+	wlan_hdd_update_queue_history_state(adapter->dev, txq_hist_ptr);
+}
+
+void hdd_print_netdev_txq_status(struct net_device *dev)
+{
+	unsigned int i;
+
+	if (!dev)
+		return;
+
+	for (i = 0; i < dev->num_tx_queues; i++) {
+		struct netdev_queue *txq = netdev_get_tx_queue(dev, i);
+
+			hdd_debug("netdev tx queue[%u] state:0x%lx",
+				  i, txq->state);
+	}
 }
 
 #ifdef FEATURE_MONITOR_MODE_SUPPORT
@@ -2765,7 +2830,7 @@ void hdd_tx_queue_cb(hdd_handle_t hdd_handle, uint32_t vdev_id,
 	wlan_hdd_netif_queue_control(adapter, action, reason);
 }
 
-#ifdef MSM_PLATFORM
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 /**
  * hdd_reset_tcp_delack() - Reset tcp delack value to default
  * @hdd_ctx: Handle to hdd context
@@ -2800,7 +2865,7 @@ bool hdd_is_current_high_throughput(struct hdd_context *hdd_ctx)
 	else
 		return true;
 }
-#endif /* MSM_PLATFORM */
+#endif
 
 #ifdef QCA_LL_LEGACY_TX_FLOW_CONTROL
 /**
@@ -2839,7 +2904,7 @@ static void hdd_ini_tx_flow_control(struct hdd_config *config,
 }
 #endif
 
-#ifdef MSM_PLATFORM
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 /**
  * hdd_ini_tx_flow_control() - Initialize INIs concerned about bus bandwidth
  * @config: pointer to hdd config
@@ -2889,7 +2954,7 @@ static void hdd_ini_tcp_settings(struct hdd_config *config,
 }
 #else
 static void hdd_ini_bus_bandwidth(struct hdd_config *config,
-				  struct wlan_objmgr_psoc *psoc)
+				 struct wlan_objmgr_psoc *psoc)
 {
 }
 
@@ -2897,7 +2962,7 @@ static void hdd_ini_tcp_settings(struct hdd_config *config,
 				 struct wlan_objmgr_psoc *psoc)
 {
 }
-#endif
+#endif /*WLAN_FEATURE_DP_BUS_BANDWIDTH*/
 
 /**
  * hdd_set_rx_mode_value() - set rx_mode values

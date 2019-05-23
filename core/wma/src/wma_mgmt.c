@@ -77,6 +77,7 @@
 #include "wlan_mlme_api.h"
 #include "wmi_unified_bcn_api.h"
 #include <wlan_crypto_global_api.h>
+#include <wlan_mlme_main.h>
 
 /**
  * wma_send_bcn_buf_ll() - prepare and send beacon buffer to fw for LL
@@ -1913,6 +1914,23 @@ wma_skip_bip_key_set(tp_wma_handle wma_handle, uint32_t key_cipher)
 	return false;
 }
 
+static void wma_set_peer_unicast_cipher(tp_wma_handle wma,
+					struct set_key_params *params)
+{
+	struct wlan_objmgr_peer *peer;
+
+	peer = wlan_objmgr_get_peer(wma->psoc,
+				    wlan_objmgr_pdev_get_pdev_id(wma->pdev),
+				    params->peer_mac, WLAN_LEGACY_WMA_ID);
+	if (!peer) {
+		WMA_LOGE("Peer of peer_mac %pM not found", params->peer_mac);
+		return;
+	}
+
+	wlan_peer_set_unicast_cipher(peer, params->key_cipher);
+	wlan_objmgr_peer_release_ref(peer, WLAN_LEGACY_WMA_ID);
+}
+
 /**
  * wma_setup_install_key_cmd() - set key parameters
  * @wma_handle: wma handle
@@ -2089,10 +2107,10 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 					     CMAC_IPN_LEN);
 		}
 	}
-
-	if (key_params->unicast && iface)
-		iface->ucast_key_cipher = params.key_cipher;
 #endif /* WLAN_FEATURE_11W */
+
+	if (key_params->unicast)
+		wma_set_peer_unicast_cipher(wma_handle, &params);
 
 	WMA_LOGD("Key setup : vdev_id %d key_idx %d key_type %d key_len %d",
 		 key_params->vdev_id, key_params->key_idx,
@@ -2626,7 +2644,7 @@ QDF_STATUS wma_process_update_edca_param_req(WMA_HANDLE handle,
 					     tEdcaParams *edca_params)
 {
 	tp_wma_handle wma_handle = (tp_wma_handle) handle;
-	struct wmi_host_wme_vparams wmm_param[WME_NUM_AC];
+	struct wmi_host_wme_vparams wmm_param[QCA_WLAN_AC_ALL];
 	tSirMacEdcaParamRecord *edca_record;
 	int ac;
 	struct cdp_pdev *pdev;
@@ -2641,7 +2659,7 @@ QDF_STATUS wma_process_update_edca_param_req(WMA_HANDLE handle,
 		goto fail;
 	}
 
-	for (ac = 0; ac < WME_NUM_AC; ac++) {
+	for (ac = 0; ac < QCA_WLAN_AC_ALL; ac++) {
 		switch (ac) {
 		case QCA_WLAN_AC_BE:
 			edca_record = &edca_params->acbe;
@@ -3895,7 +3913,8 @@ int wma_process_rmf_frame(tp_wma_handle wma_handle,
 {
 	uint8_t *orig_hdr;
 	uint8_t *ccmp;
-	uint8_t mic_len, hdr_len;
+	uint8_t mic_len, hdr_len, pdev_id;
+	QDF_STATUS status;
 
 	if ((wh)->i_fc[1] & IEEE80211_FC1_WEP) {
 		if (QDF_IS_ADDR_BROADCAST(wh->i_addr1) ||
@@ -3904,19 +3923,23 @@ int wma_process_rmf_frame(tp_wma_handle wma_handle,
 			cds_pkt_return_packet(rx_pkt);
 			return -EINVAL;
 		}
-	if (iface->ucast_key_cipher == WMI_CIPHER_AES_GCM) {
-		hdr_len = WLAN_IEEE80211_GCMP_HEADERLEN;
-		mic_len = WLAN_IEEE80211_GCMP_MICLEN;
-	} else {
-		hdr_len = IEEE80211_CCMP_HEADERLEN;
-		mic_len = IEEE80211_CCMP_MICLEN;
-	}
-	if (qdf_nbuf_len(wbuf) < (sizeof(*wh) + hdr_len + mic_len)) {
-		WMA_LOGE("Buffer length less than expected %d",
-					(int)qdf_nbuf_len(wbuf));
-		cds_pkt_return_packet(rx_pkt);
-		return -EINVAL;
-	}
+
+		pdev_id = wlan_objmgr_pdev_get_pdev_id(wma_handle->pdev);
+		status = mlme_get_peer_mic_len(wma_handle->psoc, pdev_id,
+					       wh->i_addr2, &mic_len,
+					       &hdr_len);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			WMA_LOGE("Failed to get mic hdr and length");
+			cds_pkt_return_packet(rx_pkt);
+			return -EINVAL;
+		}
+
+		if (qdf_nbuf_len(wbuf) < (sizeof(*wh) + hdr_len + mic_len)) {
+			WMA_LOGE("Buffer length less than expected %d",
+				 (int)qdf_nbuf_len(wbuf));
+			cds_pkt_return_packet(rx_pkt);
+			return -EINVAL;
+		}
 
 		orig_hdr = (uint8_t *) qdf_nbuf_data(wbuf);
 		/* Pointer to head of CCMP header */
@@ -3969,8 +3992,9 @@ int wma_process_rmf_frame(tp_wma_handle wma_handle,
 		rx_pkt->pkt_meta.mpdu_data_ptr =
 		rx_pkt->pkt_meta.mpdu_hdr_ptr +
 		rx_pkt->pkt_meta.mpdu_hdr_len;
-		WMA_LOGD(FL("BSSID: "MAC_ADDRESS_STR" tsf_delta: %u"),
-		    MAC_ADDR_ARRAY(wh->i_addr3), rx_pkt->pkt_meta.tsf_delta);
+		wma_debug("BSSID: "QDF_MAC_ADDR_STR" tsf_delta: %u",
+			  QDF_MAC_ADDR_ARRAY(wh->i_addr3),
+			  rx_pkt->pkt_meta.tsf_delta);
 	} else {
 		if (QDF_IS_ADDR_BROADCAST(wh->i_addr1) ||
 		    IEEE80211_IS_MULTICAST(wh->i_addr1)) {
@@ -4153,9 +4177,9 @@ int wma_form_rx_packet(qdf_nbuf_t buf,
 	 * If the mpdu_data_len is greater than Max (2k), drop the frame
 	 */
 	if (rx_pkt->pkt_meta.mpdu_data_len > WMA_MAX_MGMT_MPDU_LEN) {
-		WMA_LOGE("Data Len %d greater than max, dropping frame from "MAC_ADDRESS_STR,
+		wma_err("Data Len %d greater than max, dropping frame from "QDF_MAC_ADDR_STR,
 			 rx_pkt->pkt_meta.mpdu_data_len,
-			 MAC_ADDR_ARRAY(wh->i_addr3));
+			 QDF_MAC_ADDR_ARRAY(wh->i_addr3));
 		qdf_nbuf_free(buf);
 		qdf_mem_free(rx_pkt);
 		return -EINVAL;
@@ -4202,8 +4226,8 @@ int wma_form_rx_packet(qdf_nbuf_t buf,
 		if (mgmt_rx_params->buf_len <=
 			(sizeof(struct ieee80211_frame) +
 			offsetof(struct wlan_bcn_frame, ie))) {
-			WMA_LOGD("Dropping frame from "MAC_ADDRESS_STR,
-				 MAC_ADDR_ARRAY(wh->i_addr3));
+			wma_debug("Dropping frame from "QDF_MAC_ADDR_STR,
+				 QDF_MAC_ADDR_ARRAY(wh->i_addr3));
 			cds_pkt_return_packet(rx_pkt);
 			return -EINVAL;
 		}
@@ -4425,7 +4449,9 @@ QDF_STATUS wma_register_roaming_callbacks(
 	QDF_STATUS (*pe_roam_synch_cb)(struct mac_context *mac,
 		struct roam_offload_synch_ind *roam_synch_data,
 		struct bss_description *bss_desc_ptr,
-		enum sir_roam_op_code reason))
+		enum sir_roam_op_code reason),
+	QDF_STATUS (*pe_disconnect_cb) (struct mac_context *mac,
+					uint8_t vdev_id))
 {
 
 	tp_wma_handle wma = cds_get_context(QDF_MODULE_ID_WMA);
@@ -4436,6 +4462,7 @@ QDF_STATUS wma_register_roaming_callbacks(
 	}
 	wma->csr_roam_synch_cb = csr_roam_synch_cb;
 	wma->pe_roam_synch_cb = pe_roam_synch_cb;
+	wma->pe_disconnect_cb = pe_disconnect_cb;
 	WMA_LOGD("Registered roam synch callbacks with WMA successfully");
 	return QDF_STATUS_SUCCESS;
 }

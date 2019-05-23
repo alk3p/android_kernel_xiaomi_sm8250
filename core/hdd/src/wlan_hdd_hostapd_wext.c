@@ -175,17 +175,26 @@ static int __iw_softap_set_two_ints_getnone(struct net_device *dev,
 			req.stats, req.mac_id);
 		sta_info = adapter->sta_info;
 		if (value[1] == CDP_TXRX_STATS_28) {
+			req.peer_addr = (char *)&adapter->mac_addr;
+			ret = cdp_txrx_stats_request(soc, vdev, &req);
+
 			for (count = 0; count < WLAN_MAX_STA_COUNT; count++) {
-				if (sta_info[count].in_use) {
+				if (sta_info->in_use) {
 					hdd_debug("sta: %d: bss_id: %pM",
 						  sta_info->sta_id,
 						  (void *)&sta_info->sta_mac);
 					req.peer_addr =
 						(char *)&sta_info->sta_mac;
+					ret = cdp_txrx_stats_request(soc, vdev,
+								     &req);
 				}
+
+				sta_info++;
 			}
+		} else {
+			ret = cdp_txrx_stats_request(soc, vdev, &req);
 		}
-		ret = cdp_txrx_stats_request(soc, vdev, &req);
+
 		break;
 	}
 
@@ -273,8 +282,8 @@ static void print_mac_list(struct qdf_mac_addr *macList, uint8_t size)
 
 	for (i = 0; i < size; i++) {
 		macArray = (macList + i)->bytes;
-		pr_info("ACL entry %i - %02x:%02x:%02x:%02x:%02x:%02x\n",
-			i, MAC_ADDR_ARRAY(macArray));
+		pr_info("ACL entry %i - "QDF_MAC_ADDR_STR"\n",
+			i, QDF_MAC_ADDR_ARRAY(macArray));
 	}
 }
 
@@ -381,8 +390,8 @@ static int hdd_set_peer_rate(struct hdd_adapter *adapter, int set_value)
 	    (OL_TXRX_PEER_STATE_CONN == adapter->sta_info[aid].peer_state)) {
 		peer_mac =
 		    (uint8_t *)&(adapter->sta_info[aid].sta_mac.bytes[0]);
-		hdd_info("Peer AID: %d MAC_ADDR: "MAC_ADDRESS_STR,
-			 aid, MAC_ADDR_ARRAY(peer_mac));
+		hdd_info("Peer AID: %d MAC_ADDR: "QDF_MAC_ADDR_STR,
+			 aid, QDF_MAC_ADDR_ARRAY(peer_mac));
 	} else {
 		hdd_err("No matching peer found for AID: %d", aid);
 		return -EINVAL;
@@ -1491,8 +1500,8 @@ int __iw_softap_modify_acl(struct net_device *dev,
 	i++;
 	cmd = (int)(*(value + i));
 
-	hdd_debug("Modify ACL mac:" MAC_ADDRESS_STR " type: %d cmd: %d",
-	       MAC_ADDR_ARRAY(peer_mac), list_type, cmd);
+	hdd_debug("Modify ACL mac:" QDF_MAC_ADDR_STR " type: %d cmd: %d",
+	       QDF_MAC_ADDR_ARRAY(peer_mac), list_type, cmd);
 
 	qdf_status = wlansap_modify_acl(
 		WLAN_HDD_GET_SAP_CTX_PTR(adapter),
@@ -1886,8 +1895,8 @@ static __iw_softap_disassoc_sta(struct net_device *dev,
 	 */
 	peer_macaddr = (uint8_t *) (extra);
 
-	hdd_debug("data " MAC_ADDRESS_STR,
-		  MAC_ADDR_ARRAY(peer_macaddr));
+	hdd_debug("data " QDF_MAC_ADDR_STR,
+		  QDF_MAC_ADDR_ARRAY(peer_macaddr));
 	wlansap_populate_del_sta_params(peer_macaddr,
 					eSIR_MAC_DEAUTH_LEAVING_BSS_REASON,
 					(SIR_MAC_MGMT_DISASSOC >> 4),
@@ -2288,7 +2297,7 @@ static int hdd_softap_get_sta_info(struct hdd_adapter *adapter,
 			continue;
 
 		written += scnprintf(buf + written, size - written,
-				     "%5d %02x:%02x:%02x:%02x:%02x:%02x ecsa=%d\n",
+				     "%5d "QDF_MAC_ADDR_STR" ecsa=%d\n",
 				     sta->sta_id,
 				     sta->sta_mac.bytes[0],
 				     sta->sta_mac.bytes[1],
@@ -2365,8 +2374,8 @@ static int __iw_softap_get_ba_timeout(struct net_device *dev,
 				      union iwreq_data *wrqu, char *extra)
 {
 	int errno;
-	uint8_t ac_cat = 4;
-	uint32_t duration[QCA_WLAN_AC_ALL], i;
+	uint32_t i;
+	enum qca_wlan_ac_type duration[QCA_WLAN_AC_ALL];
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 	struct hdd_adapter *adapter;
 	struct hdd_context *hdd_ctx;
@@ -2388,7 +2397,7 @@ static int __iw_softap_get_ba_timeout(struct net_device *dev,
 		return -EINVAL;
 	}
 
-	for (i = 0; i < ac_cat; i++)
+	for (i = 0; i < QCA_WLAN_AC_ALL; i++)
 		cdp_get_ba_timeout(soc, i, &duration[i]);
 
 	snprintf(extra, WE_SAP_MAX_STA_INFO,
@@ -2397,10 +2406,11 @@ static int __iw_softap_get_ba_timeout(struct net_device *dev,
 		 "|--------------------------------|\n"
 		 "|VO |  %d        |\n"
 		 "|VI |  %d        |\n"
-		 "|BE |  %d        |\n"
 		 "|BK |  %d        |\n"
+		 "|BE |  %d        |\n"
 		 "|--------------------------------|\n",
-		duration[3], duration[2], duration[1], duration[0]);
+		duration[QCA_WLAN_AC_VO], duration[QCA_WLAN_AC_VI],
+		duration[QCA_WLAN_AC_BK], duration[QCA_WLAN_AC_BE]);
 
 	wrqu->data.length = strlen(extra) + 1;
 	hdd_exit();

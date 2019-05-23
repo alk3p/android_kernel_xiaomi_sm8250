@@ -112,6 +112,14 @@ struct hdd_context;
 #define WLAN_AKM_SUITE_SAE 0x000FAC08
 #endif
 
+#ifndef WLAN_AKM_SUITE_FT_SAE
+#define WLAN_AKM_SUITE_FT_SAE 0x000FAC09
+#endif
+
+#ifndef WLAN_AKM_SUITE_FT_EAP_SHA_384
+#define WLAN_AKM_SUITE_FT_EAP_SHA_384 0x000FAC0D
+#endif
+
 #ifdef FEATURE_WLAN_TDLS
 #define WLAN_IS_TDLS_SETUP_ACTION(action) \
 	((SIR_MAC_TDLS_SETUP_REQ <= action) && \
@@ -579,11 +587,13 @@ int wlan_hdd_merge_avoid_freqs(struct ch_avoid_ind_type *destFreqList,
  */
 void hdd_bt_activity_cb(hdd_handle_t hdd_handle, uint32_t bt_activity);
 
+#ifdef WLAN_FEATURE_GTK_OFFLOAD
 /**
  * wlan_hdd_save_gtk_offload_params() - Save gtk offload parameters in STA
  *                                      context for offload operations.
  * @adapter: Adapter context
  * @kck_ptr: KCK buffer pointer
+ * @kck_len: KCK length
  * @kek_ptr: KEK buffer pointer
  * @kek_len: KEK length
  * @replay_ctr: Pointer to 64 bit long replay counter
@@ -592,11 +602,17 @@ void hdd_bt_activity_cb(hdd_handle_t hdd_handle, uint32_t bt_activity);
  * Return: None
  */
 void wlan_hdd_save_gtk_offload_params(struct hdd_adapter *adapter,
-					     uint8_t *kck_ptr,
-					     uint8_t *kek_ptr,
-					     uint32_t kek_len,
-					     uint8_t *replay_ctr,
-					     bool big_endian);
+				      uint8_t *kck_ptr, uint8_t  kck_len,
+				      uint8_t *kek_ptr, uint32_t kek_len,
+				      uint8_t *replay_ctr, bool big_endian);
+#else
+void wlan_hdd_save_gtk_offload_params(struct hdd_adapter *adapter,
+				      uint8_t *kck_ptr, uint8_t kck_len,
+				      uint8_t *kek_ptr, uint32_t kek_len,
+				      uint8_t *replay_ctr, bool big_endian)
+{}
+#endif
+
 
 /**
  * wlan_hdd_flush_pmksa_cache() - flush pmksa cache for adapter
@@ -624,6 +640,32 @@ int wlan_hdd_send_mode_change_event(void);
  */
 int wlan_hdd_restore_channels(struct hdd_context *hdd_ctx,
 			      bool notify_sap_event);
+
+/**
+ * hdd_store_sar_config() - Store SAR config in HDD context
+ * @hdd_ctx: The HDD context
+ * @sar_limit_cmd: The sar_limit_cmd_params struct to save
+ *
+ * After SSR, the SAR configuration is lost. As SSR is hidden from
+ * userland, this command will not come from userspace after a SSR. To
+ * restore this configuration, save this in hdd context and restore
+ * after re-init.
+ *
+ * Return: None
+ */
+void hdd_store_sar_config(struct hdd_context *hdd_ctx,
+			  struct sar_limit_cmd_params *sar_limit_cmd);
+
+/**
+ * hdd_free_sar_config() - Free the resources allocated while storing SAR config
+ * @hdd_ctx: HDD context
+ *
+ * The driver stores the SAR config values in HDD context so that it can be
+ * restored in the case SSR is invoked. Free those resources.
+ *
+ * Return: None
+ */
+void wlan_hdd_free_sar_config(struct hdd_context *hdd_ctx);
 
 /*
  * wlan_hdd_send_sta_authorized_event: Function to send station authorized

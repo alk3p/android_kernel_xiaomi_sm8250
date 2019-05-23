@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -383,6 +383,14 @@ void pmo_tgt_update_target_suspend_flag(struct wlan_objmgr_psoc *psoc,
 		uint8_t val);
 
 /**
+ * pmo_tgt_is_target_suspended() - Get WMI target Suspend flag
+ * @psoc: objmgr psoc
+ *
+ * Return: true if target suspended, false otherwise.
+ */
+bool pmo_tgt_is_target_suspended(struct wlan_objmgr_psoc *psoc);
+
+/**
  * pmo_tgt_psoc_send_wow_enable_req() -Send wow enable request
  * @psoc: objmgr psoc
  * @param: WOW enable request buffer
@@ -435,5 +443,16 @@ QDF_STATUS pmo_tgt_psoc_send_host_wakeup_ind(struct wlan_objmgr_psoc *psoc);
  * Return: QDF_STATUS_SUCCESS on success else error code
  */
 QDF_STATUS pmo_tgt_psoc_send_target_resume_req(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * pmo_tgt_psoc_send_idle_roam_monitor() - Send idle roam set suspend mode
+ * command to firmware
+ * @psoc: objmgr psoc
+ * @val: Set suspend mode value
+ *
+ * Return: QDF_STATUS_SUCCESS on success else error code
+ */
+QDF_STATUS pmo_tgt_psoc_send_idle_roam_monitor(struct wlan_objmgr_psoc *psoc,
+					       uint8_t val);
 
 #endif /* end  of _WLAN_PMO_TGT_API_H_ */

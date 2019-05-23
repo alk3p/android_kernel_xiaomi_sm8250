@@ -595,6 +595,7 @@ endif
 
 ifeq ($(CONFIG_LEAK_DETECTION), y)
 	QDF_OBJS += $(QDF_OBJ_DIR)/qdf_debug_domain.o
+	QDF_OBJS += $(QDF_OBJ_DIR)/qdf_tracker.o
 endif
 
 ifeq ($(CONFIG_QDF_TEST), y)
@@ -604,6 +605,7 @@ ifeq ($(CONFIG_QDF_TEST), y)
 	QDF_OBJS += $(QDF_TEST_OBJ_DIR)/qdf_ptr_hash_test.o
 	QDF_OBJS += $(QDF_TEST_OBJ_DIR)/qdf_slist_test.o
 	QDF_OBJS += $(QDF_TEST_OBJ_DIR)/qdf_talloc_test.o
+	QDF_OBJS += $(QDF_TEST_OBJ_DIR)/qdf_tracker_test.o
 	QDF_OBJS += $(QDF_TEST_OBJ_DIR)/qdf_types_test.o
 endif
 
@@ -614,6 +616,7 @@ cppflags-$(CONFIG_QDF_TEST) += -DWLAN_PERIODIC_WORK_TEST
 cppflags-$(CONFIG_QDF_TEST) += -DWLAN_PTR_HASH_TEST
 cppflags-$(CONFIG_QDF_TEST) += -DWLAN_SLIST_TEST
 cppflags-$(CONFIG_QDF_TEST) += -DWLAN_TALLOC_TEST
+cppflags-$(CONFIG_QDF_TEST) += -DWLAN_TRACKER_TEST
 cppflags-$(CONFIG_QDF_TEST) += -DWLAN_TYPES_TEST
 
 ############ WBUFF ############
@@ -2024,6 +2027,8 @@ ifeq (y,$(findstring y,$(CONFIG_ARCH_MSM) $(CONFIG_ARCH_QCOM)))
 cppflags-y += -DMSM_PLATFORM
 endif
 
+cppflags-$(CONFIG_WLAN_FEATURE_DP_BUS_BANDWIDTH) += -DWLAN_FEATURE_DP_BUS_BANDWIDTH
+
 cppflags-y +=	-DQCA_SUPPORT_TXRX_LOCAL_PEER_ID
 
 cppflags-$(CONFIG_WLAN_TX_FLOW_CONTROL_V2) += -DQCA_LL_TX_FLOW_CONTROL_V2
@@ -2051,7 +2056,9 @@ cppflags-y += \
 	-DMEMORY_DEBUG \
 	-DNBUF_MEMORY_DEBUG \
 	-DNBUF_MAP_UNMAP_DEBUG \
-	-DTIMER_MANAGER
+	-DTIMER_MANAGER \
+	-DWLAN_DELAYED_WORK_DEBUG \
+	-DWLAN_PERIODIC_WORK_DEBUG
 endif
 
 cppflags-y += -DWLAN_FEATURE_P2P
@@ -2140,6 +2147,9 @@ cppflags-$(CONFIG_FEATURE_BECN_STATS) += -DWLAN_FEATURE_BEACON_RECEPTION_STATS
 #Set RX_PERFORMANCE
 cppflags-$(CONFIG_RX_PERFORMANCE) += -DRX_PERFORMANCE
 
+#Set QCS403_MEM_OPTIMIZE
+cppflags-$(CONFIG_QCS403_MEM_OPTIMIZE) += -DQCS403_MEM_OPTIMIZE
+
 #Enable OL debug and wmi unified functions
 cppflags-$(CONFIG_ATH_PERF_PWR_OFFLOAD) += -DATH_PERF_PWR_OFFLOAD
 
@@ -2203,7 +2213,10 @@ cppflags-$(CONFIG_QCA_HL_NETDEV_FLOW_CONTROL) += -DQCA_HL_NETDEV_FLOW_CONTROL
 cppflags-$(CONFIG_FEATURE_HL_GROUP_CREDIT_FLOW_CONTROL) += -DFEATURE_HL_GROUP_CREDIT_FLOW_CONTROL
 cppflags-$(CONFIG_FEATURE_HL_DBS_GROUP_CREDIT_SHARING) += -DFEATURE_HL_DBS_GROUP_CREDIT_SHARING
 cppflags-$(CONFIG_CREDIT_REP_THROUGH_CREDIT_UPDATE) += -DCONFIG_CREDIT_REP_THROUGH_CREDIT_UPDATE
+cppflags-$(CONFIG_RX_PN_CHECK_OFFLOAD) += -DCONFIG_RX_PN_CHECK_OFFLOAD
 
+cppflags-$(CONFIG_WLAN_SYNC_TSF_PTP) += -DWLAN_FEATURE_TSF_PTP
+cppflags-$(CONFIG_WLAN_SYNC_TSF_PLUS_EXT_GPIO_IRQ) += -DWLAN_FEATURE_TSF_PLUS_EXT_GPIO_IRQ
 cppflags-$(CONFIG_TX_DESC_HI_PRIO_RESERVE) += -DCONFIG_TX_DESC_HI_PRIO_RESERVE
 
 #Enable FW logs through ini
@@ -2514,6 +2527,9 @@ cppflags-$(CONFIG_ENABLE_SMMU_S1_TRANSLATION) += -DENABLE_SMMU_S1_TRANSLATION
 #Flag to enable/disable MTRACE feature
 cppflags-$(CONFIG_ENABLE_MTRACE_LOG) += -DENABLE_MTRACE_LOG
 
+#Flag to enable/disable Adaptive 11r feature
+cppflags-$(CONFIG_ADAPTIVE_11R) += -DWLAN_ADAPTIVE_11R
+
 #Flag to enable NUD tracking
 cppflags-$(CONFIG_WLAN_NUD_TRACKING) += -DWLAN_NUD_TRACKING
 
@@ -2643,7 +2659,7 @@ CONFIG_SCAN_MAX_SCAN_TIME ?= 30000
 ccflags-y += -DSCAN_MAX_SCAN_TIME=$(CONFIG_SCAN_MAX_SCAN_TIME)
 CONFIG_SCAN_NETWORK_IDLE_TIMEOUT ?= 0
 ccflags-y += -DSCAN_NETWORK_IDLE_TIMEOUT=$(CONFIG_SCAN_NETWORK_IDLE_TIMEOUT)
-CONFIG_HIDDEN_SSID_TIME ?= 1*60*1000
+CONFIG_HIDDEN_SSID_TIME ?= 0xFFFFFFFF
 ccflags-y += -DHIDDEN_SSID_TIME=$(CONFIG_HIDDEN_SSID_TIME)
 CONFIG_SCAN_CHAN_STATS_EVENT_ENAB ?= false
 ccflags-y += -DSCAN_CHAN_STATS_EVENT_ENAB=$(CONFIG_SCAN_CHAN_STATS_EVENT_ENAB)
@@ -2668,6 +2684,9 @@ endif
 ifdef CONFIG_FW_THERMAL_THROTTLE
 ccflags-y += -DFW_THERMAL_THROTTLE_SUPPORT
 endif
+
+cppflags-y += -DFEATURE_NBUFF_REPLENISH_TIMER
+cppflags-y += -DPEER_CACHE_RX_PKTS
 
 ccflags-$(CONFIG_HASTINGS_BT_WAR) += -DHASTINGS_BT_WAR
 
@@ -2694,10 +2713,22 @@ endif
 # This allows multiple instances of the driver with different module names.
 # If the module name is wlan, leave MULTI_IF_NAME undefined and the code will
 # treat the driver as the primary driver.
+#
+# If DYNAMIC_SINGLE_CHIP is defined, which means there are multiple possible
+# drivers, but only 1 driver will be loaded at a time(WLAN dynamic detect),
+# leave MULTI_IF_NAME undefined, no matter what the module name is, then
+# host driver will only append DYNAMIC_SINGLE_CHIP to the path of
+# firmware/mac/ini file.
+ifneq ($(DYNAMIC_SINGLE_CHIP),)
+ccflags-y += -DDYNAMIC_SINGLE_CHIP=\"$(DYNAMIC_SINGLE_CHIP)\"
+else
+
 ifneq ($(MODNAME), wlan)
 CHIP_NAME ?= $(MODNAME)
 ccflags-y += -DMULTI_IF_NAME=\"$(CHIP_NAME)\"
 endif
+
+endif #DYNAMIC_SINGLE_CHIP
 
 # WLAN_HDD_ADAPTER_MAGIC must be unique for all instances of the driver on the
 # system. If it is not defined, then the host driver will use the first 4

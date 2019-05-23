@@ -31,6 +31,7 @@
 #include <linux/skbuff.h>
 #include "cdp_txrx_flow_ctrl_legacy.h"
 
+struct hdd_netif_queue_history;
 struct hdd_context;
 
 #define hdd_dp_alert(params...) QDF_TRACE_FATAL(QDF_MODULE_ID_HDD_DATA, params)
@@ -268,6 +269,7 @@ int hdd_get_peer_idx(struct hdd_station_ctx *sta_ctx,
 
 const char *hdd_reason_type_to_string(enum netif_reason_type reason);
 const char *hdd_action_type_to_string(enum netif_action_type action);
+
 void wlan_hdd_netif_queue_control(struct hdd_adapter *adapter,
 		enum netif_action_type action, enum netif_reason_type reason);
 
@@ -285,7 +287,7 @@ void hdd_send_rps_ind(struct hdd_adapter *adapter);
 void hdd_send_rps_disable_ind(struct hdd_adapter *adapter);
 void wlan_hdd_classify_pkt(struct sk_buff *skb);
 
-#ifdef MSM_PLATFORM
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 void hdd_reset_tcp_delack(struct hdd_context *hdd_ctx);
 bool hdd_is_current_high_throughput(struct hdd_context *hdd_ctx);
 #define HDD_MSM_CFG(msm_cfg)	msm_cfg
@@ -375,4 +377,27 @@ hdd_skb_nontso_linearize(struct sk_buff *skb)
 void hdd_dp_cfg_update(struct wlan_objmgr_psoc *psoc,
 		       struct hdd_context *hdd_ctx);
 
+/**
+ * hdd_print_netdev_txq_status() - print netdev tx queue status
+ * @dev: Pointer to network device
+ *
+ * This function is used to print netdev tx queue status
+ *
+ * Return: None
+ */
+void hdd_print_netdev_txq_status(struct net_device *dev);
+
+/**
+ * wlan_hdd_dump_queue_history_state() - Dump hdd queue history states
+ * @q_hist: pointer to hdd queue history structure
+ * @buf: buffer where the queue history string is dumped
+ * @size: size of the buffer
+ *
+ * Dump hdd queue history states into a buffer
+ *
+ * Return: number of bytes written to the buffer
+ */
+uint32_t
+wlan_hdd_dump_queue_history_state(struct hdd_netif_queue_history *q_hist,
+				  char *buf, uint32_t size);
 #endif /* end #if !defined(WLAN_HDD_TX_RX_H) */

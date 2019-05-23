@@ -516,7 +516,7 @@ populate_dot11f_ext_supp_rates(struct mac_context *mac, uint8_t nChannelNum,
 {
 	QDF_STATUS nsir_status;
 	qdf_size_t nRates = 0;
-	uint8_t rates[SIR_MAC_RATESET_EID_MAX];
+	uint8_t rates[WLAN_SUPPORTED_RATES_IE_MAX_LEN];
 
 	/* Use the ext rates present in session entry whenever nChannelNum is set to OPERATIONAL
 	   else use the ext supported rate set from CFG, which is fixed and does not change dynamically and is used for
@@ -2773,15 +2773,120 @@ static inline void fils_convert_assoc_rsp_frame2_struct(tDot11fAssocResponse
 { }
 #endif
 
+QDF_STATUS wlan_parse_ftie_sha384(uint8_t *frame, uint32_t frame_len,
+				  struct sSirAssocRsp *assoc_rsp)
+{
+	const uint8_t *ie, *ie_end, *pos;
+	uint8_t ie_len;
+	struct wlan_sha384_ftinfo_subelem *ft_subelem;
+
+	ie = wlan_get_ie_ptr_from_eid(DOT11F_EID_FTINFO, frame, frame_len);
+	if (!ie) {
+		pe_err("FT IE not present");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	if (!ie[1]) {
+		pe_err("FT IE length is zero");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	ie_len = ie[1];
+	if (ie_len < sizeof(struct wlan_sha384_ftinfo)) {
+		pe_err("Invalid FTIE len:%d", ie_len);
+		return QDF_STATUS_E_FAILURE;
+	}
+	pos = ie + 2;
+	qdf_mem_copy(&assoc_rsp->sha384_ft_info, pos,
+		     sizeof(struct wlan_sha384_ftinfo));
+	ie_end = ie + ie_len;
+	pos += sizeof(struct wlan_sha384_ftinfo);
+	ft_subelem = &assoc_rsp->sha384_ft_subelem;
+	qdf_mem_zero(ft_subelem, sizeof(*ft_subelem));
+	while (ie_end - pos >= 2) {
+		uint8_t id, len;
+
+		id = *pos++;
+		len = *pos++;
+		if (len < 1) {
+			pe_err("Invalid FT subelem length");
+			return QDF_STATUS_E_FAILURE;
+		}
+
+		switch (id) {
+		case FTIE_SUBELEM_R1KH_ID:
+			if (len != FTIE_R1KH_LEN) {
+				pe_err("Invalid R1KH-ID length: %d",
+				       len);
+				return QDF_STATUS_E_FAILURE;
+			}
+			ft_subelem->r1kh_id.present = 1;
+			qdf_mem_copy(ft_subelem->r1kh_id.PMK_R1_ID,
+				     pos, FTIE_R1KH_LEN);
+			break;
+		case FTIE_SUBELEM_GTK:
+			if (ft_subelem->gtk) {
+				qdf_mem_zero(ft_subelem->gtk,
+					     ft_subelem->gtk_len);
+				ft_subelem->gtk_len = 0;
+				qdf_mem_free(ft_subelem->gtk);
+			}
+			ft_subelem->gtk = qdf_mem_malloc(len);
+			if (!ft_subelem->gtk)
+				return QDF_STATUS_E_NOMEM;
+
+			qdf_mem_copy(ft_subelem->gtk, pos, len);
+			ft_subelem->gtk_len = len;
+			break;
+		case FTIE_SUBELEM_R0KH_ID:
+			if (len < 1 || len > FTIE_R0KH_MAX_LEN) {
+				pe_err("Invalid R0KH-ID length: %d",
+				       len);
+				return QDF_STATUS_E_FAILURE;
+			}
+			ft_subelem->r0kh_id.present = 1;
+			ft_subelem->r0kh_id.num_PMK_R0_ID = len;
+			qdf_mem_copy(ft_subelem->r0kh_id.PMK_R0_ID,
+				     pos, len);
+			break;
+		case FTIE_SUBELEM_IGTK:
+			if (ft_subelem->igtk) {
+				qdf_mem_zero(ft_subelem->igtk,
+					     ft_subelem->igtk_len);
+				ft_subelem->igtk_len = 0;
+				qdf_mem_free(ft_subelem->igtk);
+			}
+			ft_subelem->igtk = qdf_mem_malloc(len);
+			if (!ft_subelem->igtk)
+				return QDF_STATUS_E_NOMEM;
+
+			qdf_mem_copy(ft_subelem->igtk, pos, len);
+			ft_subelem->igtk_len = len;
+
+			break;
+		default:
+			pe_debug("Unknown subelem id %d len:%d",
+				 id, len);
+			break;
+		}
+		pos += len;
+	}
+	return QDF_STATUS_SUCCESS;
+}
+
 QDF_STATUS
 sir_convert_assoc_resp_frame2_struct(struct mac_context *mac,
-		struct pe_session *session_entry,
-		uint8_t *pFrame, uint32_t nFrame,
-		tpSirAssocRsp pAssocRsp)
+				     struct pe_session *session_entry,
+				     uint8_t *frame, uint32_t frame_len,
+				     tpSirAssocRsp pAssocRsp)
 {
 	tDot11fAssocResponse *ar;
-	uint32_t status;
+	enum ani_akm_type auth_type;
+	uint32_t status, ie_len;
+	QDF_STATUS qdf_status;
 	uint8_t cnt = 0;
+	bool sha384_akm;
+	uint8_t *ie_ptr;
 
 	ar = qdf_mem_malloc(sizeof(*ar));
 	if (!ar)
@@ -2790,7 +2895,7 @@ sir_convert_assoc_resp_frame2_struct(struct mac_context *mac,
 	/* decrypt the cipher text using AEAD decryption */
 	if (lim_is_fils_connection(session_entry)) {
 		status = aead_decrypt_assoc_rsp(mac, session_entry,
-						ar, pFrame, &nFrame);
+						ar, frame, &frame_len);
 		if (!QDF_IS_STATUS_SUCCESS(status)) {
 			pe_err("FILS assoc rsp AEAD decrypt fails");
 			qdf_mem_free(ar);
@@ -2798,12 +2903,11 @@ sir_convert_assoc_resp_frame2_struct(struct mac_context *mac,
 		}
 	}
 
-	status = dot11f_parse_assoc_response(mac, pFrame, nFrame, ar, false);
+	status = dot11f_parse_assoc_response(mac, frame, frame_len, ar, false);
 	if (QDF_STATUS_SUCCESS != status) {
 		qdf_mem_free(ar);
 		return status;
 	}
-
 
 	/* Capabilities */
 	pAssocRsp->capabilityInfo.ess = ar->Capabilities.ess;
@@ -2889,13 +2993,39 @@ sir_convert_assoc_resp_frame2_struct(struct mac_context *mac,
 			(unsigned int)pAssocRsp->mdie[2]);
 	}
 
-	if (ar->FTInfo.present) {
-		pe_debug("FT Info present %d %d %d",
-			ar->FTInfo.R0KH_ID.num_PMK_R0_ID,
-			ar->FTInfo.R0KH_ID.present, ar->FTInfo.R1KH_ID.present);
+	/*
+	 * If the connection is based on SHA384 AKM suite,
+	 * then the length of MIC is 24 bytes, but frame parser
+	 * has FTIE MIC of 16 bytes only. This results in parsing FTIE
+	 * failure and R0KH and R1KH are not sent to firmware over RSO
+	 * command. Frame parser doesn't have
+	 * info on the connected AKM. So parse the FTIE again if
+	 * AKM is sha384 based and extract the R0KH and R1KH using the new
+	 * parsing logic.
+	 */
+	auth_type = session_entry->connected_akm;
+	sha384_akm = lim_is_sha384_akm(auth_type);
+	if (sha384_akm) {
+		ie_ptr = frame + FIXED_PARAM_OFFSET_ASSOC_RSP;
+		ie_len = frame_len - FIXED_PARAM_OFFSET_ASSOC_RSP;
+		qdf_status = wlan_parse_ftie_sha384(ie_ptr, ie_len, pAssocRsp);
+		if (QDF_IS_STATUS_ERROR(qdf_status)) {
+			pe_err("FT IE parsing failed status:%d", status);
+		} else {
+			pe_debug("FT: R0KH present:%d len:%d R1KH present%d",
+				 pAssocRsp->sha384_ft_subelem.r0kh_id.present,
+				 pAssocRsp->sha384_ft_subelem.r0kh_id.num_PMK_R0_ID,
+				 pAssocRsp->sha384_ft_subelem.r1kh_id.present);
+			ar->FTInfo.present = false;
+		}
+	} else if (ar->FTInfo.present) {
+		pe_debug("FT: R0KH present:%d, len:%d R1KH present:%d",
+			 ar->FTInfo.R0KH_ID.present,
+			 ar->FTInfo.R0KH_ID.num_PMK_R0_ID,
+			 ar->FTInfo.R1KH_ID.present);
 		pAssocRsp->ftinfoPresent = 1;
 		qdf_mem_copy(&pAssocRsp->FTInfo, &ar->FTInfo,
-				sizeof(tDot11fIEFTInfo));
+			     sizeof(tDot11fIEFTInfo));
 	}
 
 	if (ar->num_RICDataDesc && ar->num_RICDataDesc <= 2) {
@@ -3256,28 +3386,28 @@ sir_beacon_ie_ese_bcn_report(struct mac_context *mac,
 		eseBcnReportMandatoryIe.fhParamPresent = 1;
 		convert_fh_params(mac, &eseBcnReportMandatoryIe.fhParamSet,
 				  &pBies->FHParamSet);
-		numBytes += 1 + 1 + SIR_MAC_FH_PARAM_SET_EID_MAX;
+		numBytes += 1 + 1 + WLAN_FH_PARAM_IE_MAX_LEN;
 	}
 
 	if (pBies->DSParams.present) {
 		eseBcnReportMandatoryIe.dsParamsPresent = 1;
 		eseBcnReportMandatoryIe.dsParamSet.channelNumber =
 			pBies->DSParams.curr_channel;
-		numBytes += 1 + 1 + SIR_MAC_DS_PARAM_SET_EID_MAX;
+		numBytes += 1 + 1 + WLAN_DS_PARAM_IE_MAX_LEN;
 	}
 
 	if (pBies->CFParams.present) {
 		eseBcnReportMandatoryIe.cfPresent = 1;
 		convert_cf_params(mac, &eseBcnReportMandatoryIe.cfParamSet,
 				  &pBies->CFParams);
-		numBytes += 1 + 1 + SIR_MAC_CF_PARAM_SET_EID_MAX;
+		numBytes += 1 + 1 + WLAN_CF_PARAM_IE_MAX_LEN;
 	}
 
 	if (pBies->IBSSParams.present) {
 		eseBcnReportMandatoryIe.ibssParamPresent = 1;
 		eseBcnReportMandatoryIe.ibssParamSet.atim =
 			pBies->IBSSParams.atim;
-		numBytes += 1 + 1 + SIR_MAC_IBSS_PARAM_SET_EID_MAX;
+		numBytes += 1 + 1 + WLAN_IBSS_IE_MAX_LEN;
 	}
 
 	if (pBies->TIM.present) {
@@ -3294,7 +3424,7 @@ sir_beacon_ie_ese_bcn_report(struct mac_context *mac,
 		qdf_mem_copy(&eseBcnReportMandatoryIe.rmEnabledCapabilities,
 			     &pBies->RRMEnabledCap,
 			     sizeof(tDot11fIERRMEnabledCap));
-		numBytes += 1 + 1 + SIR_MAC_RM_ENABLED_CAPABILITY_EID_MAX;
+		numBytes += 1 + 1 + WLAN_RM_CAPABILITY_IE_MAX_LEN;
 	}
 
 	*outIeBuf = qdf_mem_malloc(numBytes);
@@ -3314,7 +3444,7 @@ sir_beacon_ie_ese_bcn_report(struct mac_context *mac,
 			retStatus = QDF_STATUS_E_FAILURE;
 			goto err_bcnrep;
 		}
-		*pos = SIR_MAC_SSID_EID;
+		*pos = WLAN_ELEMID_SSID;
 		pos++;
 		*pos = eseBcnReportMandatoryIe.ssId.length;
 		pos++;
@@ -3334,8 +3464,8 @@ sir_beacon_ie_ese_bcn_report(struct mac_context *mac,
 			goto err_bcnrep;
 		}
 		if (eseBcnReportMandatoryIe.supportedRates.numRates <=
-			SIR_MAC_RATESET_EID_MAX) {
-			*pos = SIR_MAC_RATESET_EID;
+			WLAN_SUPPORTED_RATES_IE_MAX_LEN) {
+			*pos = WLAN_ELEMID_RATES;
 			pos++;
 			*pos = eseBcnReportMandatoryIe.supportedRates.numRates;
 			pos++;
@@ -3352,72 +3482,72 @@ sir_beacon_ie_ese_bcn_report(struct mac_context *mac,
 
 	/* Fill FH Parameter set IE */
 	if (eseBcnReportMandatoryIe.fhParamPresent) {
-		if (freeBytes < (1 + 1 + SIR_MAC_FH_PARAM_SET_EID_MAX)) {
+		if (freeBytes < (1 + 1 + WLAN_FH_PARAM_IE_MAX_LEN)) {
 			pe_err("Insufficient memory to copy FHIE");
 			retStatus = QDF_STATUS_E_FAILURE;
 			goto err_bcnrep;
 		}
-		*pos = SIR_MAC_FH_PARAM_SET_EID;
+		*pos = WLAN_ELEMID_FHPARMS;
 		pos++;
-		*pos = SIR_MAC_FH_PARAM_SET_EID_MAX;
+		*pos = WLAN_FH_PARAM_IE_MAX_LEN;
 		pos++;
 		qdf_mem_copy(pos,
 			     (uint8_t *) &eseBcnReportMandatoryIe.fhParamSet,
-			     SIR_MAC_FH_PARAM_SET_EID_MAX);
-		pos += SIR_MAC_FH_PARAM_SET_EID_MAX;
-		freeBytes -= (1 + 1 + SIR_MAC_FH_PARAM_SET_EID_MAX);
+			     WLAN_FH_PARAM_IE_MAX_LEN);
+		pos += WLAN_FH_PARAM_IE_MAX_LEN;
+		freeBytes -= (1 + 1 + WLAN_FH_PARAM_IE_MAX_LEN);
 	}
 
 	/* Fill DS Parameter set IE */
 	if (eseBcnReportMandatoryIe.dsParamsPresent) {
-		if (freeBytes < (1 + 1 + SIR_MAC_DS_PARAM_SET_EID_MAX)) {
+		if (freeBytes < (1 + 1 + WLAN_DS_PARAM_IE_MAX_LEN)) {
 			pe_err("Insufficient memory to copy DS IE");
 			retStatus = QDF_STATUS_E_FAILURE;
 			goto err_bcnrep;
 		}
-		*pos = SIR_MAC_DS_PARAM_SET_EID;
+		*pos = WLAN_ELEMID_DSPARMS;
 		pos++;
-		*pos = SIR_MAC_DS_PARAM_SET_EID_MAX;
+		*pos = WLAN_DS_PARAM_IE_MAX_LEN;
 		pos++;
 		*pos = eseBcnReportMandatoryIe.dsParamSet.channelNumber;
-		pos += SIR_MAC_DS_PARAM_SET_EID_MAX;
-		freeBytes -= (1 + 1 + SIR_MAC_DS_PARAM_SET_EID_MAX);
+		pos += WLAN_DS_PARAM_IE_MAX_LEN;
+		freeBytes -= (1 + 1 + WLAN_DS_PARAM_IE_MAX_LEN);
 	}
 
 	/* Fill CF Parameter set */
 	if (eseBcnReportMandatoryIe.cfPresent) {
-		if (freeBytes < (1 + 1 + SIR_MAC_CF_PARAM_SET_EID_MAX)) {
+		if (freeBytes < (1 + 1 + WLAN_CF_PARAM_IE_MAX_LEN)) {
 			pe_err("Insufficient memory to copy CF IE");
 			retStatus = QDF_STATUS_E_FAILURE;
 			goto err_bcnrep;
 		}
-		*pos = SIR_MAC_CF_PARAM_SET_EID;
+		*pos = WLAN_ELEMID_CFPARMS;
 		pos++;
-		*pos = SIR_MAC_CF_PARAM_SET_EID_MAX;
+		*pos = WLAN_CF_PARAM_IE_MAX_LEN;
 		pos++;
 		qdf_mem_copy(pos,
 			     (uint8_t *) &eseBcnReportMandatoryIe.cfParamSet,
-			     SIR_MAC_CF_PARAM_SET_EID_MAX);
-		pos += SIR_MAC_CF_PARAM_SET_EID_MAX;
-		freeBytes -= (1 + 1 + SIR_MAC_CF_PARAM_SET_EID_MAX);
+			     WLAN_CF_PARAM_IE_MAX_LEN);
+		pos += WLAN_CF_PARAM_IE_MAX_LEN;
+		freeBytes -= (1 + 1 + WLAN_CF_PARAM_IE_MAX_LEN);
 	}
 
 	/* Fill IBSS Parameter set IE */
 	if (eseBcnReportMandatoryIe.ibssParamPresent) {
-		if (freeBytes < (1 + 1 + SIR_MAC_IBSS_PARAM_SET_EID_MAX)) {
+		if (freeBytes < (1 + 1 + WLAN_IBSS_IE_MAX_LEN)) {
 			pe_err("Insufficient memory to copy IBSS IE");
 			retStatus = QDF_STATUS_E_FAILURE;
 			goto err_bcnrep;
 		}
-		*pos = SIR_MAC_IBSS_PARAM_SET_EID;
+		*pos = WLAN_ELEMID_IBSSPARMS;
 		pos++;
-		*pos = SIR_MAC_IBSS_PARAM_SET_EID_MAX;
+		*pos = WLAN_IBSS_IE_MAX_LEN;
 		pos++;
 		qdf_mem_copy(pos,
 			     (uint8_t *) &eseBcnReportMandatoryIe.ibssParamSet.
-			     atim, SIR_MAC_IBSS_PARAM_SET_EID_MAX);
-		pos += SIR_MAC_IBSS_PARAM_SET_EID_MAX;
-		freeBytes -= (1 + 1 + SIR_MAC_IBSS_PARAM_SET_EID_MAX);
+			     atim, WLAN_IBSS_IE_MAX_LEN);
+		pos += WLAN_IBSS_IE_MAX_LEN;
+		freeBytes -= (1 + 1 + WLAN_IBSS_IE_MAX_LEN);
 	}
 
 	/* Fill TIM IE */
@@ -3427,7 +3557,7 @@ sir_beacon_ie_ese_bcn_report(struct mac_context *mac,
 			retStatus = QDF_STATUS_E_FAILURE;
 			goto err_bcnrep;
 		}
-		*pos = SIR_MAC_TIM_EID;
+		*pos = WLAN_ELEMID_TIM;
 		pos++;
 		*pos = SIR_MAC_TIM_EID_MIN;
 		pos++;
@@ -3440,20 +3570,20 @@ sir_beacon_ie_ese_bcn_report(struct mac_context *mac,
 
 	/* Fill RM Capability IE */
 	if (eseBcnReportMandatoryIe.rrmPresent) {
-		if (freeBytes < (1 + 1 + SIR_MAC_RM_ENABLED_CAPABILITY_EID_MAX)) {
+		if (freeBytes < (1 + 1 + WLAN_RM_CAPABILITY_IE_MAX_LEN)) {
 			pe_err("Insufficient memory to copy RRM IE");
 			retStatus = QDF_STATUS_E_FAILURE;
 			goto err_bcnrep;
 		}
-		*pos = SIR_MAC_RM_ENABLED_CAPABILITY_EID;
+		*pos = WLAN_ELEMID_RRM;
 		pos++;
-		*pos = SIR_MAC_RM_ENABLED_CAPABILITY_EID_MAX;
+		*pos = WLAN_RM_CAPABILITY_IE_MAX_LEN;
 		pos++;
 		qdf_mem_copy(pos,
 			     (uint8_t *) &eseBcnReportMandatoryIe.
 			     rmEnabledCapabilities,
-			     SIR_MAC_RM_ENABLED_CAPABILITY_EID_MAX);
-		freeBytes -= (1 + 1 + SIR_MAC_RM_ENABLED_CAPABILITY_EID_MAX);
+			     WLAN_RM_CAPABILITY_IE_MAX_LEN);
+		freeBytes -= (1 + 1 + WLAN_RM_CAPABILITY_IE_MAX_LEN);
 	}
 
 	if (freeBytes != 0) {
@@ -4167,6 +4297,69 @@ sir_convert_beacon_frame2_struct(struct mac_context *mac,
 } /* End sir_convert_beacon_frame2_struct. */
 
 #ifdef WLAN_FEATURE_FILS_SK
+
+/* update_ftie_in_fils_conf() - API to update fils info from auth
+ * response packet from AP
+ * @auth: auth packet pointer received from AP
+ * @auth_frame: data structure needs to be updated
+ *
+ * Return: None
+ */
+static void
+update_ftie_in_fils_conf(tDot11fAuthentication *auth,
+			 tpSirMacAuthFrameBody auth_frame)
+{
+	/**
+	 * Copy the FTIE sent by the AP in the auth request frame.
+	 * This is required for FT-FILS connection.
+	 * This FTIE will be sent in Assoc request frame without
+	 * any modification.
+	 */
+	if (auth->FTInfo.present) {
+		pe_debug("FT-FILS: r0kh_len:%d r1kh_present:%d",
+			 auth->FTInfo.R0KH_ID.num_PMK_R0_ID,
+			 auth->FTInfo.R1KH_ID.present);
+
+		auth_frame->ft_ie.present = 1;
+		if (auth->FTInfo.R1KH_ID.present) {
+			qdf_mem_copy(auth_frame->ft_ie.r1kh_id,
+				     auth->FTInfo.R1KH_ID.PMK_R1_ID,
+				     FT_R1KH_ID_LEN);
+		}
+
+		if (auth->FTInfo.R0KH_ID.present) {
+			qdf_mem_copy(auth_frame->ft_ie.r0kh_id,
+				     auth->FTInfo.R0KH_ID.PMK_R0_ID,
+				     auth->FTInfo.R0KH_ID.num_PMK_R0_ID);
+			auth_frame->ft_ie.r0kh_id_len =
+					auth->FTInfo.R0KH_ID.num_PMK_R0_ID;
+		}
+
+		if (auth_frame->ft_ie.gtk_ie.present) {
+			pe_debug("FT-FILS: GTK present");
+			qdf_mem_copy(&auth_frame->ft_ie.gtk_ie,
+				     &auth->FTInfo.GTK,
+				     sizeof(struct mac_ft_gtk_ie));
+		}
+
+		if (auth_frame->ft_ie.igtk_ie.present) {
+			pe_debug("FT-FILS: IGTK present");
+			qdf_mem_copy(&auth_frame->ft_ie.igtk_ie,
+				     &auth->FTInfo.IGTK,
+				     sizeof(struct mac_ft_igtk_ie));
+		}
+
+		qdf_mem_copy(auth_frame->ft_ie.anonce, auth->FTInfo.Anonce,
+			     FT_NONCE_LEN);
+		qdf_mem_copy(auth_frame->ft_ie.snonce, auth->FTInfo.Snonce,
+			     FT_NONCE_LEN);
+
+		qdf_mem_copy(auth_frame->ft_ie.mic, auth->FTInfo.MIC,
+			     FT_MIC_LEN);
+		auth_frame->ft_ie.element_count = auth->FTInfo.IECount;
+	}
+}
+
 /* sir_update_auth_frame2_struct_fils_conf: API to update fils info from auth
  * packet type 2
  * @auth: auth packet pointer received from AP
@@ -4174,8 +4367,9 @@ sir_convert_beacon_frame2_struct(struct mac_context *mac,
  *
  * Return: None
  */
-static void sir_update_auth_frame2_struct_fils_conf(tDot11fAuthentication *auth,
-				tpSirMacAuthFrameBody auth_frame)
+static void
+sir_update_auth_frame2_struct_fils_conf(tDot11fAuthentication *auth,
+					tpSirMacAuthFrameBody auth_frame)
 {
 	if (auth->AuthAlgo.algo != SIR_FILS_SK_WITHOUT_PFS)
 		return;
@@ -4204,6 +4398,9 @@ static void sir_update_auth_frame2_struct_fils_conf(tDot11fAuthentication *auth,
 			auth->RSNOpaque.num_data);
 		auth_frame->rsn_ie.length = auth->RSNOpaque.num_data;
 	}
+
+	update_ftie_in_fils_conf(auth, auth_frame);
+
 }
 #else
 static void sir_update_auth_frame2_struct_fils_conf(tDot11fAuthentication *auth,
@@ -4241,7 +4438,7 @@ sir_convert_auth_frame2_struct(struct mac_context *mac,
 	pAuth->authStatusCode = auth.Status.status;
 
 	if (auth.ChallengeText.present) {
-		pAuth->type = SIR_MAC_CHALLENGE_TEXT_EID;
+		pAuth->type = WLAN_ELEMID_CHALLENGE;
 		pAuth->length = auth.ChallengeText.num_text;
 		qdf_mem_copy(pAuth->challengeText, auth.ChallengeText.text,
 			     auth.ChallengeText.num_text);
@@ -5517,13 +5714,54 @@ void populate_mdie(struct mac_context *mac,
 
 }
 
-void populate_ft_info(struct mac_context *mac, tDot11fIEFTInfo *pDot11f)
+#ifdef WLAN_FEATURE_FILS_SK
+void populate_fils_ft_info(struct mac_context *mac, tDot11fIEFTInfo *ft_info,
+			   struct pe_session *pe_session)
 {
-	pDot11f->present = 1;
-	pDot11f->IECount = 0;   /* TODO: put valid data during reassoc. */
-	/* All other info is zero. */
+	struct pe_fils_session *ft_fils_info = pe_session->fils_info;
 
+	if (!ft_fils_info)
+		return;
+
+	if (!ft_fils_info->ft_ie.present) {
+		ft_info->present = 0;
+		pe_err("FT IE doesn't exist");
+		return;
+	}
+
+	ft_info->IECount = ft_fils_info->ft_ie.element_count;
+
+	qdf_mem_copy(ft_info->MIC, ft_fils_info->ft_ie.mic,
+		     FT_MIC_LEN);
+
+	qdf_mem_copy(ft_info->Anonce, ft_fils_info->ft_ie.anonce,
+		     FT_NONCE_LEN);
+
+	qdf_mem_copy(ft_info->Snonce, ft_fils_info->ft_ie.snonce,
+		     FT_NONCE_LEN);
+
+	if (ft_fils_info->ft_ie.r0kh_id_len > 0) {
+		ft_info->R0KH_ID.present = 1;
+		qdf_mem_copy(ft_info->R0KH_ID.PMK_R0_ID,
+			     ft_fils_info->ft_ie.r0kh_id,
+			     ft_fils_info->ft_ie.r0kh_id_len);
+		ft_info->R0KH_ID.num_PMK_R0_ID =
+				ft_fils_info->ft_ie.r0kh_id_len;
+	}
+
+	ft_info->R1KH_ID.present = 1;
+	qdf_mem_copy(ft_info->R1KH_ID.PMK_R1_ID,
+		     ft_fils_info->ft_ie.r1kh_id,
+		     FT_R1KH_ID_LEN);
+
+	qdf_mem_copy(&ft_info->GTK, &ft_fils_info->ft_ie.gtk_ie,
+		     sizeof(struct mac_ft_gtk_ie));
+	qdf_mem_copy(&ft_info->IGTK, &ft_fils_info->ft_ie.igtk_ie,
+		     sizeof(struct mac_ft_igtk_ie));
+
+	ft_info->present = 1;
 }
+#endif
 
 void populate_dot11f_assoc_rsp_rates(struct mac_context *mac,
 				     tDot11fIESuppRates *pSupp,

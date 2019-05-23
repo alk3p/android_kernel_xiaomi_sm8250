@@ -222,6 +222,35 @@ int wlan_hdd_cfg80211_cancel_remain_on_channel(struct wiphy *wiphy,
 	return errno;
 }
 
+/**
+ * wlan_hdd_validate_and_override_offchan() - To validate and override offchan
+ * @adapter: hdd adapter of vdev
+ * @chan: channel info of mgmt to be sent
+ * @offchan: off channel flag to check and override
+ *
+ * This function is to validate the channel info against adapter current state
+ * and home channel, if off channel not needed, override offchan flag.
+ *
+ * Return: None
+ */
+static void
+wlan_hdd_validate_and_override_offchan(struct hdd_adapter *adapter,
+				       struct ieee80211_channel *chan,
+				       bool *offchan)
+{
+	uint8_t home_ch;
+
+	if (!offchan || !chan || !(*offchan))
+		return;
+
+	home_ch = hdd_get_adapter_home_channel(adapter);
+
+	if (ieee80211_frequency_to_channel(chan->center_freq) == home_ch) {
+		hdd_debug("override offchan to 0 at home channel %d", home_ch);
+		*offchan = false;
+	}
+}
+
 static int __wlan_hdd_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
 			      struct ieee80211_channel *chan, bool offchan,
 			      unsigned int wait,
@@ -277,6 +306,14 @@ static int __wlan_hdd_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
 		else
 			return -EINVAL;
 	}
+
+	hdd_debug("device_mode:%d type:%d sub_type:%d chan:%d",
+		  adapter->device_mode, type, sub_type,
+		  chan ? chan->center_freq : 0);
+	hdd_debug("wait:%d offchan:%d do_not_wait_ack:%d",
+		  wait, offchan, dont_wait_for_ack);
+
+	wlan_hdd_validate_and_override_offchan(adapter, chan, &offchan);
 
 	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_OS_IF,
 		   TRACE_CODE_HDD_SEND_MGMT_TX,
@@ -727,29 +764,12 @@ struct wireless_dev *__wlan_hdd_add_virtual_intf(struct wiphy *wiphy,
 		goto close_adapter;
 	}
 
-	/*
-	 * Once the support for session creation/deletion from
-	 * hdd_hostapd_open/hdd_host_stop is in place.
-	 * The support for starting adapter from here can be removed.
-	 */
-	if (mode == QDF_SAP_MODE || mode == QDF_P2P_GO_MODE) {
-		ret = hdd_start_adapter(adapter);
-		if (ret) {
-			hdd_err("Failed to start %s", name);
-			goto stop_modules;
-		}
-	}
-
 	if (hdd_ctx->rps)
 		hdd_send_rps_ind(adapter);
 
 	hdd_exit();
 
 	return adapter->dev->ieee80211_ptr;
-
-stop_modules:
-	if (!hdd_is_any_interface_open(hdd_ctx))
-		hdd_psoc_idle_timer_start(hdd_ctx);
 
 close_adapter:
 	hdd_close_adapter(hdd_ctx, adapter, true);
@@ -1010,7 +1030,7 @@ void __hdd_indicate_mgmt_frame(struct hdd_adapter *adapter,
 			 * we are dropping action frame
 			 */
 			hdd_err("adapter for action frame is NULL Macaddr = "
-				MAC_ADDRESS_STR, MAC_ADDR_ARRAY(dest_addr));
+				QDF_MAC_ADDR_STR, QDF_MAC_ADDR_ARRAY(dest_addr));
 			hdd_debug("Frame Type = %d Frame Length = %d subType = %d",
 				  frame_type, frm_len, sub_type);
 			/*
@@ -1319,6 +1339,8 @@ int wlan_hdd_set_mcc_p2p_quota(struct hdd_adapter *adapter,
 	int32_t ret = 0;
 	uint32_t concurrent_state;
 	struct hdd_context *hdd_ctx;
+	uint32_t sta_cli_bit_mask = QDF_STA_MASK | QDF_P2P_CLIENT_MASK;
+	uint32_t sta_go_bit_mask = QDF_STA_MASK | QDF_P2P_GO_MASK;
 
 	if (!adapter) {
 		hdd_err("Invalid adapter");
@@ -1336,9 +1358,8 @@ int wlan_hdd_set_mcc_p2p_quota(struct hdd_adapter *adapter,
 	 * Check if concurrency mode is active.
 	 * Need to modify this code to support MCC modes other than STA/P2P
 	 */
-	if ((concurrent_state ==
-	     (QDF_STA_MASK | QDF_P2P_CLIENT_MASK)) ||
-	    (concurrent_state == (QDF_STA_MASK | QDF_P2P_GO_MASK))) {
+	if (((concurrent_state & sta_cli_bit_mask) == sta_cli_bit_mask) ||
+	    ((concurrent_state & sta_go_bit_mask) == sta_go_bit_mask)) {
 		hdd_info("STA & P2P are both enabled");
 
 		/*
@@ -1354,7 +1375,6 @@ int wlan_hdd_set_mcc_p2p_quota(struct hdd_adapter *adapter,
 
 		set_value = set_first_connection_operating_channel(
 			hdd_ctx, set_value, adapter->device_mode);
-
 
 		set_value = set_second_connection_operating_channel(
 			hdd_ctx, set_value, adapter->vdev_id);
@@ -1378,6 +1398,8 @@ void wlan_hdd_set_mcc_latency(struct hdd_adapter *adapter, int set_value)
 {
 	uint32_t concurrent_state;
 	struct hdd_context *hdd_ctx;
+	uint32_t sta_cli_bit_mask = QDF_STA_MASK | QDF_P2P_CLIENT_MASK;
+	uint32_t sta_go_bit_mask = QDF_STA_MASK | QDF_P2P_GO_MASK;
 
 	if (!adapter) {
 		hdd_err("Invalid adapter");
@@ -1396,9 +1418,8 @@ void wlan_hdd_set_mcc_latency(struct hdd_adapter *adapter, int set_value)
 	 * Check if concurrency mode is active.
 	 * Need to modify this code to support MCC modes other than STA/P2P
 	 */
-	if ((concurrent_state ==
-	     (QDF_STA_MASK | QDF_P2P_CLIENT_MASK)) ||
-	    (concurrent_state == (QDF_STA_MASK | QDF_P2P_GO_MASK))) {
+	if (((concurrent_state & sta_cli_bit_mask) == sta_cli_bit_mask) ||
+	    ((concurrent_state & sta_go_bit_mask) == sta_go_bit_mask)) {
 		hdd_info("STA & P2P are both enabled");
 		/*
 		 * The channel number and latency are formatted in

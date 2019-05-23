@@ -423,7 +423,7 @@ wlan_hdd_cfg80211_extscan_cached_results_ind(struct hdd_context *hdd_ctx,
 			ap->ts += hdd_ctx->ext_scan_start_since_boot;
 			hdd_debug("Timestamp %llu "
 				"Ssid: %s "
-				"Bssid (" MAC_ADDRESS_STR ") "
+				"Bssid (" QDF_MAC_ADDR_STR ") "
 				"Channel %u "
 				"Rssi %d "
 				"RTT %u "
@@ -433,7 +433,7 @@ wlan_hdd_cfg80211_extscan_cached_results_ind(struct hdd_context *hdd_ctx,
 				"Ie length %d",
 				ap->ts,
 				ap->ssid,
-				MAC_ADDR_ARRAY(ap->bssid.bytes),
+				QDF_MAC_ADDR_ARRAY(ap->bssid.bytes),
 				ap->channel,
 				ap->rssi,
 				ap->rtt,
@@ -587,7 +587,7 @@ wlan_hdd_cfg80211_extscan_hotlist_match_ind(struct hdd_context *hdd_ctx,
 
 		hdd_debug("[i=%d] Timestamp %llu "
 		       "Ssid: %s "
-		       "Bssid (" MAC_ADDRESS_STR ") "
+		       "Bssid (" QDF_MAC_ADDR_STR ") "
 		       "Channel %u "
 		       "Rssi %d "
 		       "RTT %u "
@@ -595,7 +595,7 @@ wlan_hdd_cfg80211_extscan_hotlist_match_ind(struct hdd_context *hdd_ctx,
 		       i,
 		       data->ap[i].ts,
 		       data->ap[i].ssid,
-		       MAC_ADDR_ARRAY(data->ap[i].bssid.bytes),
+		       QDF_MAC_ADDR_ARRAY(data->ap[i].bssid.bytes),
 		       data->ap[i].channel,
 		       data->ap[i].rssi,
 		       data->ap[i].rtt, data->ap[i].rtt_sd);
@@ -717,11 +717,11 @@ wlan_hdd_cfg80211_extscan_signif_wifi_change_results_ind(
 	ap_info = &data->ap[0];
 	for (i = 0; i < data->numResults; i++) {
 		hdd_debug("[i=%d] "
-		       "Bssid (" MAC_ADDRESS_STR ") "
+		       "Bssid (" QDF_MAC_ADDR_STR ") "
 		       "Channel %u "
 		       "numOfRssi %d",
 		       i,
-		       MAC_ADDR_ARRAY(ap_info->bssid.bytes),
+		       QDF_MAC_ADDR_ARRAY(ap_info->bssid.bytes),
 		       ap_info->channel, ap_info->numOfRssi);
 		rssi = &(ap_info)->rssi[0];
 		for (j = 0; j < ap_info->numOfRssi; j++)
@@ -854,7 +854,7 @@ wlan_hdd_cfg80211_extscan_full_scan_result_event(struct hdd_context *hdd_ctx,
 	hdd_debug("Req Id %u More Data %u", data->requestId,
 		  data->moreData);
 	hdd_debug("AP Info: Timestamp %llu Ssid: %s "
-	       "Bssid (" MAC_ADDRESS_STR ") "
+	       "Bssid (" QDF_MAC_ADDR_STR ") "
 	       "Channel %u "
 	       "Rssi %d "
 	       "RTT %u "
@@ -864,7 +864,7 @@ wlan_hdd_cfg80211_extscan_full_scan_result_event(struct hdd_context *hdd_ctx,
 	       "IE Length %d",
 	       data->ap.ts,
 	       data->ap.ssid,
-	       MAC_ADDR_ARRAY(data->ap.bssid.bytes),
+	       QDF_MAC_ADDR_ARRAY(data->ap.bssid.bytes),
 	       data->ap.channel,
 	       data->ap.rssi,
 	       data->ap.rtt,
@@ -1131,7 +1131,7 @@ wlan_hdd_cfg80211_extscan_epno_match_found(struct hdd_context *hdd_ctx,
 	for (i = 0; i < data->num_results; i++) {
 		data->ap[i].channel = cds_chan_to_freq(data->ap[i].channel);
 		hdd_debug("AP Info: Timestamp %llu) Ssid: %s "
-					"Bssid (" MAC_ADDRESS_STR ") "
+					"Bssid (" QDF_MAC_ADDR_STR ") "
 					"Channel %u "
 					"Rssi %d "
 					"RTT %u "
@@ -1141,7 +1141,7 @@ wlan_hdd_cfg80211_extscan_epno_match_found(struct hdd_context *hdd_ctx,
 					"IE Length %d",
 					data->ap[i].ts,
 					data->ap[i].ssid,
-					MAC_ADDR_ARRAY(data->ap[i].bssid.bytes),
+					QDF_MAC_ADDR_ARRAY(data->ap[i].bssid.bytes),
 					data->ap[i].channel,
 					data->ap[i].rssi,
 					data->ap[i].rtt,
@@ -1237,7 +1237,7 @@ wlan_hdd_cfg80211_passpoint_match_found(void *ctx,
 		data->request_id, data->id, data->anqp_len, num_matches);
 	for (i = 0; i < num_matches; i++) {
 		hdd_debug("AP Info: Timestamp %llu Ssid: %s "
-					"Bssid (" MAC_ADDRESS_STR ") "
+					"Bssid (" QDF_MAC_ADDR_STR ") "
 					"Channel %u "
 					"Rssi %d "
 					"RTT %u "
@@ -1247,7 +1247,7 @@ wlan_hdd_cfg80211_passpoint_match_found(void *ctx,
 					"IE Length %d",
 					data->ap.ts,
 					data->ap.ssid,
-					MAC_ADDR_ARRAY(data->ap.bssid.bytes),
+					QDF_MAC_ADDR_ARRAY(data->ap.bssid.bytes),
 					data->ap.channel,
 					data->ap.rssi,
 					data->ap.rtt,
@@ -1880,7 +1880,8 @@ static int hdd_parse_ap_rssi_threshold(struct nlattr *attr,
 		return -EINVAL;
 	}
 	nla_memcpy(ap->bssid.bytes, tb[id], QDF_MAC_ADDR_SIZE);
-	hdd_debug("BSSID: " MAC_ADDRESS_STR, MAC_ADDR_ARRAY(ap->bssid.bytes));
+	hdd_debug("BSSID: " QDF_MAC_ADDR_STR,
+		  QDF_MAC_ADDR_ARRAY(ap->bssid.bytes));
 
 	/* Parse and fetch low RSSI */
 	id = QCA_WLAN_VENDOR_ATTR_EXTSCAN_AP_THRESHOLD_PARAM_RSSI_LOW;

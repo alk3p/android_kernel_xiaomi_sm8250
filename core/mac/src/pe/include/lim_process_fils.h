@@ -83,12 +83,14 @@ QDF_STATUS lim_create_fils_rik(uint8_t *rrk, uint8_t rrk_len,
 /**
  * lim_update_fils_config()- This API updates fils session info to csr config
  * from join request.
+ * @mac_ctx: pointer to mac context
  * @session: PE session
  * @sme_join_req: pointer to join request
  *
  * Return: None
  */
-void lim_update_fils_config(struct pe_session *session,
+void lim_update_fils_config(struct mac_context *mac_ctx,
+			    struct pe_session *session,
 			    struct join_req *sme_join_req);
 
 /**
@@ -132,6 +134,22 @@ static inline void lim_increase_fils_sequence_number(struct pe_session *session_
 void populate_fils_connect_params(struct mac_context *mac_ctx,
 				  struct pe_session *session,
 				  struct join_rsp *sme_join_rsp);
+
+/**
+ * lim_update_fils_hlp_data() - Update the hlp data from association
+ * response frame to PE session.
+ * @hlp_frm_src_mac: SRC mac address in HLP IE from assoc frame
+ * @hlp_frm_dst_mac: DST mac address in HLP IE from assoc frame
+ * @frm_hlp_len: HLP data length
+ * @frm_hlp_data: Pointer to hlp data
+ * @pe_session: Pointer to pe_session
+ *
+ * Return: None
+ */
+void lim_update_fils_hlp_data(struct qdf_mac_addr *hlp_frm_src_mac,
+			      struct qdf_mac_addr *hlp_frm_dest_mac,
+			      uint16_t frm_hlp_len, uint8_t *frm_hlp_data,
+			      struct pe_session *pe_session);
 
 /**
  * aead_encrypt_assoc_req() - Encrypt FILS IE's in assoc request
@@ -233,7 +251,8 @@ static inline bool lim_is_valid_fils_auth_frame(struct mac_context *mac_ctx,
 }
 
 static inline
-void lim_update_fils_config(struct pe_session *session,
+void lim_update_fils_config(struct mac_context *mac_ctx,
+			    struct pe_session *session,
 			    struct join_req *sme_join_req)
 { }
 
@@ -252,6 +271,13 @@ static inline void populate_fils_connect_params(struct mac_context *mac_ctx,
 						struct pe_session *session,
 						struct join_rsp *sme_join_rsp)
 { }
+
+static inline
+void lim_update_fils_hlp_data(struct qdf_mac_addr *hlp_frm_src_mac,
+			      struct qdf_mac_addr *hlp_frm_dest_mac,
+			      uint16_t frm_hlp_len, uint8_t *frm_hlp_data,
+			      struct pe_session *pe_session)
+{}
 
 static inline QDF_STATUS aead_encrypt_assoc_req(struct mac_context *mac_ctx,
 						struct pe_session *pe_session,

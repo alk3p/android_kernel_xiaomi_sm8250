@@ -599,7 +599,7 @@ typedef QDF_STATUS (*wma_tx_ota_comp_callback)(void *context, qdf_nbuf_t buf,
 				      uint32_t status, void *params);
 
 /* generic callback for updating parameters from target to HDD */
-typedef void (*wma_tgt_cfg_cb)(hdd_handle_t handle, struct wma_tgt_cfg *cfg);
+typedef int (*wma_tgt_cfg_cb)(hdd_handle_t handle, struct wma_tgt_cfg *cfg);
 
 /**
  * struct wma_cli_set_cmd_t - set command parameters
@@ -726,7 +726,9 @@ QDF_STATUS wma_register_roaming_callbacks(
 		QDF_STATUS (*pe_roam_synch_cb)(struct mac_context *mac,
 			struct roam_offload_synch_ind *roam_synch_data,
 			struct bss_description *bss_desc_ptr,
-			enum sir_roam_op_code reason));
+			enum sir_roam_op_code reason),
+		QDF_STATUS (*pe_disconnect_cb) (struct mac_context *mac,
+						uint8_t vdev_id));
 #else
 static inline QDF_STATUS wma_register_roaming_callbacks(
 		QDF_STATUS (*csr_roam_synch_cb)(struct mac_context *mac,
@@ -736,7 +738,9 @@ static inline QDF_STATUS wma_register_roaming_callbacks(
 		QDF_STATUS (*pe_roam_synch_cb)(struct mac_context *mac,
 			struct roam_offload_synch_ind *roam_synch_data,
 			struct bss_description *bss_desc_ptr,
-			enum sir_roam_op_code reason))
+			enum sir_roam_op_code reason),
+		QDF_STATUS (*pe_disconnect_cb) (struct mac_context *mac,
+						uint8_t vdev_id))
 {
 	return QDF_STATUS_E_NOSUPPORT;
 }

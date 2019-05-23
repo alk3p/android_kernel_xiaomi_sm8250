@@ -30,6 +30,7 @@
 #include "osdep.h"
 #include "cdp_txrx_mob_def.h"
 #include "wlan_pmo_common_public_struct.h"
+#include "qca_vendor.h"
 
 /**
  * enum cfg_sub_20_channel_width: ini values for su 20 mhz channel width
@@ -83,10 +84,8 @@ struct cds_config_info {
 	uint8_t reorder_offload;
 	uint8_t uc_offload_enabled;
 	bool enable_rxthread;
-#ifdef QCA_LL_TX_FLOW_CONTROL_V2
 	uint32_t tx_flow_stop_queue_th;
 	uint32_t tx_flow_start_queue_offset;
-#endif
 	uint8_t enable_dp_rx_threads;
 #ifdef WLAN_FEATURE_LPSS
 	bool is_lpass_enabled;
@@ -95,7 +94,7 @@ struct cds_config_info {
 	uint8_t max_msdus_per_rxinorderind;
 	bool self_recovery_enabled;
 	bool fw_timeout_crash;
-	struct ol_tx_sched_wrr_ac_specs_t ac_specs[TX_WMM_AC_NUM];
+	struct ol_tx_sched_wrr_ac_specs_t ac_specs[QCA_WLAN_AC_ALL];
 	uint8_t ito_repeat_count;
 	bool force_target_assert_enabled;
 	uint8_t bandcapability;

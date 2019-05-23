@@ -534,6 +534,16 @@ QDF_STATUS wlan_mlme_get_sap_get_peer_info(struct wlan_objmgr_psoc *psoc,
 					   bool *value);
 
 /**
+ * wlan_mlme_set_sap_get_peer_info() - set the sap get peer info
+ * @psoc: pointer to psoc object
+ * @value: value to overwrite the sap get peer info
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS wlan_mlme_set_sap_get_peer_info(struct wlan_objmgr_psoc *psoc,
+					   bool value);
+
+/**
  * wlan_mlme_is_sap_bcast_deauth_enabled() - get the enable/disable value
  *                                           for broadcast deauth in sap
  * @psoc: pointer to psoc object
@@ -771,6 +781,14 @@ QDF_STATUS wlan_mlme_get_oce_sta_enabled_info(struct wlan_objmgr_psoc *psoc,
  */
 QDF_STATUS wlan_mlme_get_oce_sap_enabled_info(struct wlan_objmgr_psoc *psoc,
 					      bool *value);
+
+/**
+ * wlan_mlme_update_oce_flags() - Update the oce flags to FW
+ * @pdev: pointer to pdev object
+ *
+ * Return: void
+ */
+void wlan_mlme_update_oce_flags(struct wlan_objmgr_pdev *pdev);
 
 #ifdef WLAN_FEATURE_11AX
 /**

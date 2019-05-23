@@ -61,6 +61,10 @@
 #if defined(WLAN_OPEN_SOURCE) && defined(CONFIG_HAS_WAKELOCK)
 #include <linux/wakelock.h>
 #endif
+#ifdef WLAN_FEATURE_TSF_PTP
+#include <linux/ptp_classify.h>
+#include <linux/ptp_clock_kernel.h>
+#endif
 #include <wlan_hdd_ftm.h>
 #include "wlan_hdd_tdls.h"
 #include "wlan_hdd_tsf.h"
@@ -99,7 +103,7 @@
 #include "wma_sar_public_structs.h"
 #include "wlan_mlme_ucfg_api.h"
 
-#ifdef MSM_PLATFORM
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 #include "qdf_periodic_work.h"
 #endif
 
@@ -242,9 +246,7 @@ enum hdd_driver_flags {
 /* Maximum time(ms) to wait for external acs response */
 #define WLAN_VENDOR_ACS_WAIT_TIME 1000
 
-#define MAC_ADDR_ARRAY(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
-/** Mac Address string **/
-#define MAC_ADDRESS_STR "%02x:%02x:%02x:%02x:%02x:%02x"
+/* Mac Address string length */
 #define MAC_ADDRESS_STR_LEN 18  /* Including null terminator */
 /* Max and min IEs length in bytes */
 #define MAX_GENIE_LEN (512)
@@ -637,7 +639,6 @@ enum wapi_auth_mode {
 
 #define WPA_GET_LE16(a) ((u16) (((a)[1] << 8) | (a)[0]))
 #define WPA_GET_BE24(a) ((u32) ((a[0] << 16) | (a[1] << 8) | a[2]))
-#define WLAN_EID_WAPI 68
 #define WAPI_PSK_AKM_SUITE  0x02721400
 #define WAPI_CERT_AKM_SUITE 0x01721400
 
@@ -895,6 +896,13 @@ enum dhcp_nego_status {
  * @capability: Capability information of current station
  * @support_mode: Max supported mode of a station currently
  * connected to sap
+ * @rx_retry_cnt: Number of rx retries received from current station
+ *                Currently this feature is not supported from FW
+ * @rx_mc_bc_cnt: Multicast broadcast packet count received from
+ *                current station
+ * MSB of rx_mc_bc_cnt indicates whether FW supports rx_mc_bc_cnt
+ * feature or not, if first bit is 1 it indicates that FW supports this
+ * feature, if it is 0 it indicates FW doesn't support this feature
  */
 struct hdd_station_info {
 	bool in_use;
@@ -940,6 +948,8 @@ struct hdd_station_info {
 	enum dhcp_nego_status dhcp_nego_status;
 	uint16_t capability;
 	uint8_t support_mode;
+	uint32_t rx_retry_cnt;
+	uint32_t rx_mc_bc_cnt;
 };
 
 /**
@@ -961,7 +971,6 @@ struct hdd_station_info {
  * @vendor_acs_timer: Timer for ACS
  * @vendor_acs_timer_initialized: Is @vendor_acs_timer initialized?
  * @bss_stop_reason: Reason why the BSS was stopped
- * @txrx_stats: TX RX statistics from firmware
  * @acs_in_progress: In progress acs flag for an adapter
  */
 struct hdd_ap_ctx {
@@ -982,7 +991,6 @@ struct hdd_ap_ctx {
 	qdf_mc_timer_t vendor_acs_timer;
 	bool vendor_acs_timer_initialized;
 	enum bss_stop_reason bss_stop_reason;
-	struct hdd_fw_txrx_stats txrx_stats;
 	qdf_atomic_t acs_in_progress;
 };
 
@@ -1007,7 +1015,7 @@ struct hdd_multicast_addr_list {
 	uint8_t addr[WLAN_HDD_MAX_MC_ADDR_LIST][ETH_ALEN];
 };
 
-#define WLAN_HDD_MAX_HISTORY_ENTRY		10
+#define WLAN_HDD_MAX_HISTORY_ENTRY 25
 
 /**
  * struct hdd_netif_queue_stats - netif queue operation statistics
@@ -1026,12 +1034,14 @@ struct hdd_netif_queue_stats {
  * @netif_action: action type
  * @netif_reason: reason type
  * @pause_map: pause map
+ * @tx_q_state: state of the netdev TX queues
  */
 struct hdd_netif_queue_history {
 	qdf_time_t time;
 	uint16_t netif_action;
 	uint16_t netif_reason;
 	uint32_t pause_map;
+	unsigned long tx_q_state[NUM_TX_QUEUES];
 };
 
 /**
@@ -1252,12 +1262,14 @@ struct hdd_adapter {
 	struct work_struct scan_block_work;
 	qdf_list_t blocked_scan_request_q;
 	qdf_mutex_t blocked_scan_request_q_lock;
-#ifdef MSM_PLATFORM
+
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 	unsigned long prev_rx_packets;
 	unsigned long prev_tx_packets;
 	uint64_t prev_fwd_tx_packets;
 	uint64_t prev_fwd_rx_packets;
-#endif
+#endif /*WLAN_FEATURE_DP_BUS_BANDWIDTH*/
+
 #if  defined(QCA_LL_LEGACY_TX_FLOW_CONTROL) || \
 				defined(QCA_HL_NETDEV_FLOW_CONTROL)
 	qdf_mc_timer_t tx_flow_control_timer;
@@ -1587,6 +1599,7 @@ struct hdd_dynamic_mac {
  * @g_event_flags: a bitmap of hdd_driver_flags
  * @psoc_idle_timeout_work: delayed work for psoc idle shutdown
  * @dynamic_nss_chains_support: Per vdev dynamic nss chains update capability
+ * @sar_cmd_params: SAR command params to be configured to the FW
  */
 struct hdd_context {
 	struct wlan_objmgr_psoc *psoc;
@@ -1654,7 +1667,7 @@ struct hdd_context {
 	/* Flag keeps track of wiphy suspend/resume */
 	bool is_wiphy_suspended;
 
-#ifdef MSM_PLATFORM
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 	struct qdf_periodic_work bus_bw_work;
 	int cur_vote_level;
 	spinlock_t bus_bw_lock;
@@ -1663,7 +1676,7 @@ struct hdd_context {
 	uint64_t prev_rx_offload_pkts;
 	int cur_tx_level;
 	uint64_t prev_tx;
-#endif
+#endif /*WLAN_FEATURE_DP_BUS_BANDWIDTH*/
 
 	struct completion ready_to_suspend;
 	/* defining the solution type */
@@ -1808,6 +1821,10 @@ struct hdd_context {
 	/* the context that is capturing tsf */
 	struct hdd_adapter *cap_tsf_context;
 #endif
+#ifdef WLAN_FEATURE_TSF_PTP
+	struct ptp_clock_info ptp_cinfo;
+	struct ptp_clock *ptp_clock;
+#endif
 	uint8_t bt_a2dp_active:1;
 	uint8_t bt_vo_active:1;
 	enum band_info curr_band;
@@ -1857,6 +1874,8 @@ struct hdd_context {
 	uint32_t num_derived_addr;
 	unsigned long provisioned_intf_addr_mask;
 	unsigned long derived_intf_addr_mask;
+
+	struct sar_limit_cmd_params *sar_cmd_params;
 };
 
 /**
@@ -2016,6 +2035,17 @@ struct hdd_adapter *hdd_get_adapter_by_vdev(struct hdd_context *hdd_ctx,
 struct hdd_adapter *hdd_get_adapter_by_macaddr(struct hdd_context *hdd_ctx,
 					       tSirMacAddr mac_addr);
 
+/**
+ * hdd_get_adapter_home_channel() - return home channel of adapter
+ * @adapter: hdd adapter of vdev
+ *
+ * This function returns operation channel of station/p2p-cli if
+ * connected, returns opration channel of sap/p2p-go if started.
+ *
+ * Return: home channel if connected/started or invalid channel 0
+ */
+uint8_t hdd_get_adapter_home_channel(struct hdd_adapter *adapter);
+
 /*
  * hdd_get_adapter_by_rand_macaddr() - find Random mac adapter
  * @hdd_ctx: hdd context
@@ -2173,7 +2203,8 @@ bool wlan_hdd_validate_modules_state(struct hdd_context *hdd_ctx);
 
 QDF_STATUS __wlan_hdd_validate_mac_address(struct qdf_mac_addr *mac_addr,
 					   const char *func);
-#ifdef MSM_PLATFORM
+
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 /**
  * hdd_bus_bw_compute_timer_start() - start the bandwidth timer
  * @hdd_ctx: the global hdd context
@@ -2234,7 +2265,6 @@ void hdd_bus_bandwidth_deinit(struct hdd_context *hdd_ctx);
 
 #define GET_CUR_RX_LVL(config) ((config)->cur_rx_level)
 #define GET_BW_COMPUTE_INTV(config) ((config)->bus_bw_compute_interval)
-
 #else
 
 static inline
@@ -2271,7 +2301,7 @@ void hdd_bus_bandwidth_deinit(struct hdd_context *hdd_ctx)
 #define GET_CUR_RX_LVL(config) 0
 #define GET_BW_COMPUTE_INTV(config) 0
 
-#endif
+#endif /*WLAN_FEATURE_DP_BUS_BANDWIDTH*/
 
 int hdd_qdf_trace_enable(QDF_MODULE_ID module_id, uint32_t bitmask);
 
@@ -3539,7 +3569,7 @@ void hdd_update_dynamic_mac(struct hdd_context *hdd_ctx,
 			    struct qdf_mac_addr *curr_mac_addr,
 			    struct qdf_mac_addr *new_mac_addr);
 
-#ifdef MSM_PLATFORM
+#ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 /**
  * wlan_hdd_send_tcp_param_update_event() - Send vendor event to update
  * TCP parameter through Wi-Fi HAL
@@ -3587,8 +3617,7 @@ void wlan_hdd_send_tcp_param_update_event(struct hdd_context *hdd_ctx,
 					  uint8_t dir)
 {
 }
-
-#endif /* MSM_PLATFORM */
+#endif /*WLAN_FEATURE_DP_BUS_BANDWIDTH*/
 
 #ifdef WLAN_FEATURE_MOTION_DETECTION
 /**

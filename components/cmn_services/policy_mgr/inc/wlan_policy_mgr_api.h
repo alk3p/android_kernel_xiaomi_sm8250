@@ -625,6 +625,20 @@ bool policy_mgr_allow_concurrency(struct wlan_objmgr_psoc *psoc,
 		uint8_t channel, enum hw_mode_bandwidth bw);
 
 /**
+ * policy_mgr_nan_sap_pre_enable_conc_check() - Check if NAN+SAP SCC is
+ *                                              allowed in given ch
+ * @psoc: PSOC object information
+ * @mode: Connection mode
+ * @ch: channel to check
+ *
+ * Return: True if allowed else false
+ */
+bool
+policy_mgr_nan_sap_pre_enable_conc_check(struct wlan_objmgr_psoc *psoc,
+					 enum policy_mgr_con_mode mode,
+					 uint8_t ch);
+
+/**
  * policy_mgr_allow_concurrency_csa() - Check for allowed concurrency
  * combination when channel switch
  * @psoc:	PSOC object information
@@ -1591,6 +1605,20 @@ bool policy_mgr_is_sap_mandatory_channel_set(struct wlan_objmgr_psoc *psoc);
  */
 bool policy_mgr_list_has_24GHz_channel(uint8_t *channel_list,
 		uint32_t list_len);
+
+/**
+ * policy_mgr_get_valid_chans_from_range() - get valid channel from given range
+ * @psoc: PSOC object information
+ * @ch_list: Pointer to the channel list
+ * @ch_cnt: Pointer to the length of the channel list
+ * @mode: Device mode
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS policy_mgr_get_valid_chans_from_range(struct wlan_objmgr_psoc *psoc,
+						 uint8_t *ch_list,
+						 uint32_t *ch_cnt,
+						 enum policy_mgr_con_mode mode);
 
 /**
  * policy_mgr_get_valid_chans() - Get the valid channel list
@@ -2781,6 +2809,17 @@ bool policy_mgr_allow_sap_go_concurrency(struct wlan_objmgr_psoc *psoc,
 					 uint32_t vdev_id);
 
 /**
+ * policy_mgr_allow_multiple_sta_connections() - API to get FW support
+ * @psoc: Pointer to soc
+ *
+ * This function checks FW support for simultaneous connections on
+ * concurrent STA interfaces.
+ *
+ *  Return: true if supports else false.
+ */
+bool policy_mgr_allow_multiple_sta_connections(struct wlan_objmgr_psoc *psoc);
+
+/**
  * policy_mgr_dual_beacon_on_single_mac_scc_capable() - get capability that
  * whether support dual beacon on same channel on single MAC
  * @psoc: pointer to soc
@@ -2834,6 +2873,24 @@ void policy_mgr_update_user_config_sap_chan(
 			struct wlan_objmgr_psoc *psoc, uint32_t channel);
 
 /**
+ * policy_mgr_nan_sap_post_enable_conc_check() - Do concurrency operations
+ *                                               post nan/sap enable
+ * @psoc: poniter to psoc
+ *
+ * Return: void
+ **/
+void policy_mgr_nan_sap_post_enable_conc_check(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * policy_mgr_nan_sap_post_disable_conc_check() - Do concurrency related
+ *                                                operation post nan/sap disable
+ * @psoc: poniter to psoc
+ *
+ * Return: void
+ **/
+void policy_mgr_nan_sap_post_disable_conc_check(struct wlan_objmgr_psoc *psoc);
+
+/**
  * policy_mgr_is_sap_restart_required_after_sta_disconnect() - is sap restart
  * required
  * after sta disconnection
@@ -2859,6 +2916,17 @@ bool policy_mgr_is_sap_restart_required_after_sta_disconnect(
  * Return: true or false
  */
 bool policy_mgr_is_sta_sap_scc(struct wlan_objmgr_psoc *psoc, uint8_t sap_ch);
+
+/**
+ * policy_mgr_nan_sap_scc_on_unsafe_ch_chk() - check whether SAP is doing SCC
+ *                                             with NAN
+ * @psoc: poniter to psoc
+ * @sap_ch: operating channel of SAP interface
+ *
+ * Return: true or false
+ */
+bool policy_mgr_nan_sap_scc_on_unsafe_ch_chk(struct wlan_objmgr_psoc *psoc,
+					     uint8_t sap_ch);
 
 /**
  * policy_mgr_get_hw_mode_from_idx() - Get HW mode based on index

@@ -151,6 +151,22 @@ static void hdd_hif_init_driver_state_callbacks(void *data,
 }
 
 /**
+ * hdd_hif_set_attribute() - API to set CE attribute if memory is limited
+ * @hif_ctx: hif context
+ *
+ * Return: None
+ */
+#ifdef QCS403_MEM_OPTIMIZE
+static void hdd_hif_set_attribute(struct hif_opaque_softc *hif_ctx)
+{
+	hif_set_attribute(hif_ctx, HIF_LOWDESC_CE_NO_PKTLOG_CFG);
+}
+#else
+static void hdd_hif_set_attribute(struct hif_opaque_softc *hif_ctx)
+{}
+#endif
+
+/**
  * hdd_init_cds_hif_context() - API to set CDS HIF Context
  * @hif: HIF Context
  *
@@ -236,6 +252,8 @@ int hdd_hif_open(struct device *dev, void *bdev, const struct hif_bus_id *bid,
 		hdd_err("Failed to set global HIF CDS Context err: %d", ret);
 		goto err_hif_close;
 	}
+
+	hdd_hif_set_attribute(hif_ctx);
 
 	status = hif_enable(hif_ctx, dev, bdev, bid, bus_type,
 			    (reinit == true) ?  HIF_ENABLE_TYPE_REINIT :
@@ -675,7 +693,8 @@ static void hdd_psoc_shutdown_notify(struct hdd_context *hdd_ctx)
 	if (ucfg_ipa_is_enabled()) {
 		ucfg_ipa_uc_force_pipe_shutdown(hdd_ctx->pdev);
 
-		if (pld_is_fw_rejuvenate(hdd_ctx->parent_dev))
+		if (pld_is_fw_rejuvenate(hdd_ctx->parent_dev) ||
+		    pld_is_pdr(hdd_ctx->parent_dev))
 			ucfg_ipa_fw_rejuvenate_send_msg(hdd_ctx->pdev);
 	}
 

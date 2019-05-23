@@ -1195,6 +1195,73 @@ struct dhcp_server {
 			0, \
 			"Enable/Disable unit test framework")
 
+/*
+ * <ini>
+ * gDisableChannel - Used to disable channels specified
+ *
+ * @Min: 0
+ * @Max: 1
+ * Default: 0
+ *
+ * This ini is used to disable the channels given in the command
+ * SET_DISABLE_CHANNEL_LIST and to restore the channels when the
+ * command is given with channel list as 0
+ * Usage: External
+ *
+ * </ini>
+ */
+#define CFG_ENABLE_DISABLE_CHANNEL  CFG_INI_BOOL( \
+			"gDisableChannel", \
+			0, \
+			"Enable/Disable to disable channels specified")
+
+/*
+ * <ini>
+ * gSarVersion - Used to specify SAR version
+ *
+ * @Min: 1
+ * @Max: 2
+ * Default: 1
+ *
+ * This ini is used to specify the SAR feature version.
+ * If value of this ini is set to 2, SAR version 2 will
+ * be used.
+ * Usage: External
+ *
+ * </ini>
+ */
+#define CFG_SAR_VERSION  CFG_INI_UINT( \
+			"gSarVersion", \
+			1, \
+			2, \
+			1, \
+			CFG_VALUE_OR_DEFAULT, \
+			"Specify the SAR version")
+
+/*
+ * <ini>
+ * gDisableWow - Used to disable wow feature
+ *
+ * @Min: 0
+ * @Max: 1
+ * Default: 0
+ *
+ * This ini is used to disable wow feature for all modes
+ * that means hlos platform suspend(cfg80211 suspend) will
+ * be rejected by wifi kernel driver.
+ *
+ * Usage: External
+ *
+ * </ini>
+ */
+#define CFG_WOW_DISABLE  CFG_INI_UINT( \
+			"gDisableWow", \
+			0, \
+			1, \
+			0, \
+			CFG_VALUE_OR_DEFAULT, \
+			"Disable wow feature")
+
 #define CFG_HDD_ALL \
 	CFG_ENABLE_PACKET_LOG_ALL \
 	CFG_ENABLE_RUNTIME_PM_ALL \
@@ -1229,5 +1296,8 @@ struct dhcp_server {
 	CFG(CFG_PRIVATE_WEXT_CONTROL) \
 	CFG(CFG_PROVISION_INTERFACE_POOL) \
 	CFG(CFG_TIMER_MULTIPLIER) \
-	CFG(CFG_HDD_DOT11_MODE)
+	CFG(CFG_HDD_DOT11_MODE) \
+	CFG(CFG_ENABLE_DISABLE_CHANNEL) \
+	CFG(CFG_SAR_VERSION) \
+	CFG(CFG_WOW_DISABLE)
 #endif

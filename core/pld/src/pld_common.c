@@ -1615,14 +1615,15 @@ int pld_is_qmi_disable(struct device *dev)
  *
  * This API will be called to check if WLAN FW is down or not.
  *
- *  Return: 1 FW is down
- *          0 FW is not down
+ *  Return: 0 FW is not down
+ *          Otherwise FW is down
  *          Always return 0 for unsupported bus type
  */
 int pld_is_fw_down(struct device *dev)
 {
 	int ret = 0;
 	enum pld_bus_type type = pld_get_bus_type(dev);
+	struct device *ifdev;
 
 	switch (type) {
 	case PLD_BUS_TYPE_SNOC:
@@ -1632,7 +1633,10 @@ int pld_is_fw_down(struct device *dev)
 		ret = pld_pcie_is_fw_down(dev);
 		break;
 	case PLD_BUS_TYPE_SDIO:
+		break;
 	case PLD_BUS_TYPE_USB:
+		ifdev = pld_get_if_dev(dev);
+		ret = pld_usb_is_fw_down(ifdev);
 		break;
 	default:
 		pr_err("Invalid device type %d\n", type);
@@ -1686,6 +1690,7 @@ int pld_collect_rddm(struct device *dev)
 		return pld_pcie_collect_rddm(dev);
 	case PLD_BUS_TYPE_SNOC:
 	case PLD_BUS_TYPE_SDIO:
+	case PLD_BUS_TYPE_USB:
 		return 0;
 	default:
 		pr_err("Invalid device type %d\n", type);
@@ -1710,6 +1715,21 @@ bool pld_is_fw_dump_skipped(struct device *dev)
 	switch (type) {
 	case PLD_BUS_TYPE_SDIO:
 		ret = pld_sdio_is_fw_dump_skipped();
+		break;
+	default:
+		break;
+	}
+	return ret;
+}
+
+int pld_is_pdr(struct device *dev)
+{
+	int ret = 0;
+	enum pld_bus_type type = pld_get_bus_type(dev);
+
+	switch (type) {
+	case PLD_BUS_TYPE_SNOC:
+		ret = pld_snoc_is_pdr();
 		break;
 	default:
 		break;
@@ -1774,5 +1794,45 @@ void pld_block_shutdown(struct device *dev, bool status)
 		break;
 	default:
 		break;
+	}
+}
+
+void pld_idle_shutdown(struct device *dev,
+		       void (*shutdown_cb)(struct device *dev))
+{
+	enum pld_bus_type type;
+
+	if (!shutdown_cb)
+		return;
+
+	type = pld_get_bus_type(dev);
+	switch (type) {
+		case PLD_BUS_TYPE_SNOC:
+			shutdown_cb(dev);
+			break;
+		case PLD_BUS_TYPE_PCIE:
+			break;
+		default:
+			break;
+	}
+}
+
+void pld_idle_restart(struct device *dev,
+		      void (*restart_cb)(struct device *dev))
+{
+	enum pld_bus_type type;
+
+	if (!restart_cb)
+		return;
+
+	type = pld_get_bus_type(dev);
+	switch (type) {
+		case PLD_BUS_TYPE_SNOC:
+			restart_cb(dev);
+			break;
+		case PLD_BUS_TYPE_PCIE:
+			break;
+		default:
+			break;
 	}
 }

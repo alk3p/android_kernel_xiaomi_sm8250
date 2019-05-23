@@ -2156,6 +2156,7 @@ QDF_STATUS wma_create_peer(tp_wma_handle wma, struct cdp_pdev *pdev,
 		WMA_LOGD("%s: LFR3: Created peer %pK with peer_addr %pM vdev_id %d, peer_count - %d",
 			 __func__, peer, peer_addr, vdev_id,
 			 wma->interfaces[vdev_id].peer_count);
+		cdp_peer_setup(dp_soc, vdev, peer);
 		return QDF_STATUS_SUCCESS;
 	}
 	param.peer_addr = peer_addr;
@@ -2490,13 +2491,14 @@ void wma_send_vdev_down(tp_wma_handle wma, struct wma_target_req *req)
 	}
 
 	vdev_id = req->vdev_id;
-
-	if (wma_send_vdev_down_to_fw(wma, vdev_id) != QDF_STATUS_SUCCESS) {
-		WMA_LOGE("Failed to send vdev down cmd: vdev %d", vdev_id);
-	} else {
-		wma_check_and_find_mcc_ap(wma, vdev_id);
+	if (req->msg_type != WMA_DELETE_BSS_HO_FAIL_REQ) {
+		if (wma_send_vdev_down_to_fw(wma, vdev_id) !=
+		    QDF_STATUS_SUCCESS)
+			WMA_LOGE("Failed to send vdev down cmd: vdev %d",
+				 vdev_id);
+		else
+			wma_check_and_find_mcc_ap(wma, vdev_id);
 	}
-
 	wlan_vdev_mlme_sm_deliver_evt(iface->vdev,
 				      WLAN_VDEV_SM_EV_DOWN_COMPLETE,
 				      sizeof(*req), req);
@@ -2539,6 +2541,7 @@ static void wma_handle_set_link_down_rsp(tp_wma_handle wma,
 void wma_send_vdev_down(tp_wma_handle wma, struct wma_target_req *req)
 {
 	uint8_t vdev_id;
+	tpDeleteBssParams params = (tpDeleteBssParams)req->user_data;
 
 	if (!req) {
 		WMA_LOGE("%s req is NULL", __func__);
@@ -2546,6 +2549,13 @@ void wma_send_vdev_down(tp_wma_handle wma, struct wma_target_req *req)
 	}
 
 	vdev_id = req->vdev_id;
+
+	if (req->msg_type == WMA_DELETE_BSS_HO_FAIL_REQ) {
+		params->status = QDF_STATUS_SUCCESS;
+		wma_send_msg_high_priority(wma, WMA_DELETE_BSS_HO_FAIL_RSP,
+					   (void *)params, 0);
+		return;
+	}
 
 	if (wma_send_vdev_down_to_fw(wma, vdev_id) != QDF_STATUS_SUCCESS) {
 		WMA_LOGE("Failed to send vdev down cmd: vdev %d", vdev_id);
@@ -2643,7 +2653,47 @@ __wma_handle_vdev_stop_rsp(wmi_vdev_stopped_event_fixed_param *resp_event)
 	}
 
 	qdf_mc_timer_stop(&req_msg->event_timeout);
-	if (req_msg->msg_type == WMA_DELETE_BSS_REQ) {
+	if (req_msg->msg_type == WMA_DELETE_BSS_HO_FAIL_REQ) {
+		tpDeleteBssParams params =
+			(tpDeleteBssParams)req_msg->user_data;
+
+		peer = cdp_peer_find_by_addr(soc, pdev,
+					     params->bssid, &peer_id);
+		if (!peer) {
+			WMA_LOGE("%s: Failed to find peer %pM", __func__,
+				 params->bssid);
+			status = QDF_STATUS_E_FAILURE;
+			goto free_req_msg;
+		}
+
+		if (!iface->peer_count) {
+			WMA_LOGE("%s: Can't remove peer with peer_addr %pM vdevid %d peer_count %d",
+				 __func__, params->bssid, params->smesessionId,
+				 iface->peer_count);
+			goto free_req_msg;
+		}
+
+		if (peer) {
+			WMA_LOGD("%s: vdev %pK is peer_addr %pM to vdev_id %d, peer_count - %d",
+				 __func__, peer, params->bssid,
+				 params->smesessionId, iface->peer_count);
+			if (cdp_cfg_get_peer_unmap_conf_support(soc))
+				cdp_peer_delete_sync(soc, peer,
+						     wma_peer_unmap_conf_cb,
+						     1 << CDP_PEER_DELETE_NO_SPECIAL);
+			else
+				cdp_peer_delete(soc, peer,
+						1 << CDP_PEER_DELETE_NO_SPECIAL);
+			wma_remove_objmgr_peer(wma, params->smesessionId,
+					       params->bssid);
+		}
+		iface->peer_count--;
+
+		WMA_LOGI("%s: Removed peer %pK with peer_addr %pM vdevid %d peer_count %d",
+			 __func__, peer, params->bssid,  params->smesessionId,
+			 iface->peer_count);
+		wma_send_vdev_down_bss(wma, req_msg);
+	} else if (req_msg->msg_type == WMA_DELETE_BSS_REQ) {
 		tpDeleteBssParams params =
 			(tpDeleteBssParams) req_msg->user_data;
 
@@ -2817,6 +2867,7 @@ struct cdp_vdev *wma_vdev_attach(tp_wma_handle wma_handle,
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 	struct wlan_objmgr_peer *obj_peer;
 	struct wlan_objmgr_vdev *vdev;
+	uint32_t retry;
 
 	qdf_mem_zero(&tx_rx_aggregation_size, sizeof(tx_rx_aggregation_size));
 	WMA_LOGD("mac %pM, vdev_id %hu, type %d, sub_type %d, nss 2g %d, 5g %d",
@@ -2926,6 +2977,8 @@ struct cdp_vdev *wma_vdev_attach(tp_wma_handle wma_handle,
 				self_sta_req->tx_aggr_sw_retry_threshold_vi;
 	tx_sw_retry_threshold.tx_aggr_sw_retry_threshold_vo =
 				self_sta_req->tx_aggr_sw_retry_threshold_vo;
+	tx_sw_retry_threshold.tx_aggr_sw_retry_threshold =
+				self_sta_req->tx_aggr_sw_retry_threshold;
 
 	tx_sw_retry_threshold.tx_non_aggr_sw_retry_threshold_be =
 				self_sta_req->tx_non_aggr_sw_retry_threshold_be;
@@ -2935,6 +2988,8 @@ struct cdp_vdev *wma_vdev_attach(tp_wma_handle wma_handle,
 				self_sta_req->tx_non_aggr_sw_retry_threshold_vi;
 	tx_sw_retry_threshold.tx_non_aggr_sw_retry_threshold_vo =
 				self_sta_req->tx_non_aggr_sw_retry_threshold_vo;
+	tx_sw_retry_threshold.tx_non_aggr_sw_retry_threshold =
+				self_sta_req->tx_non_aggr_sw_retry_threshold;
 
 	tx_sw_retry_threshold.vdev_id = self_sta_req->session_id;
 
@@ -2958,8 +3013,25 @@ struct cdp_vdev *wma_vdev_attach(tp_wma_handle wma_handle,
 			wma_set_sta_sa_query_param(wma_handle, vdev_id);
 		}
 
-		ret = wma_set_sw_retry_threshold(wma_handle,
-						 &tx_sw_retry_threshold);
+		vdev_id = tx_sw_retry_threshold.vdev_id;
+		retry = tx_sw_retry_threshold.tx_aggr_sw_retry_threshold;
+		if (retry) {
+			ret = wma_set_sw_retry_threshold(vdev_id, retry,
+					WMI_PDEV_PARAM_AGG_SW_RETRY_TH);
+			if (QDF_IS_STATUS_ERROR(ret))
+				WMA_LOGE("failed set agg retry threshold");
+		}
+
+		retry = tx_sw_retry_threshold.tx_non_aggr_sw_retry_threshold;
+		if (retry) {
+			ret = wma_set_sw_retry_threshold(vdev_id, retry,
+					WMI_PDEV_PARAM_NON_AGG_SW_RETRY_TH);
+			if (QDF_IS_STATUS_ERROR(ret))
+				WMA_LOGE("failed set non-agg retry threshold");
+		}
+
+		ret = wma_set_sw_retry_threshold_per_ac(wma_handle,
+						&tx_sw_retry_threshold);
 		if (QDF_IS_STATUS_ERROR(ret))
 			WMA_LOGE("failed to set retry threshold(err=%d)", ret);
 		break;
@@ -4483,8 +4555,8 @@ static void wma_add_bss_ap_mode(tp_wma_handle wma, tpAddBssParams add_bss)
 
 	vdev = wma_find_vdev_by_addr(wma, add_bss->bssId, &vdev_id);
 	if (!vdev) {
-		WMA_LOGE("%s: Failed to get vdev handle:"MAC_ADDRESS_STR,
-			__func__, MAC_ADDR_ARRAY(add_bss->bssId));
+		wma_err("Failed to get vdev handle:"QDF_MAC_ADDR_STR,
+			QDF_MAC_ADDR_ARRAY(add_bss->bssId));
 
 		goto send_fail_resp;
 	}
@@ -6146,27 +6218,17 @@ void wma_delete_sta(tp_wma_handle wma, tpDeleteStaParams del_sta)
 void wma_delete_bss_ho_fail(tp_wma_handle wma, tpDeleteBssParams params)
 {
 	struct cdp_pdev *pdev;
-	void *peer = NULL;
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
-	uint8_t peer_id;
 	struct cdp_vdev *txrx_vdev = NULL;
 	struct wma_txrx_node *iface;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
+	struct wma_target_req *msg;
+	wmi_vdev_stopped_event_fixed_param resp_event;
 
 	pdev = cds_get_context(QDF_MODULE_ID_TXRX);
 
 	if (!pdev) {
 		WMA_LOGE("%s:Unable to get TXRX context", __func__);
-		goto fail_del_bss_ho_fail;
-	}
-
-	peer = cdp_peer_find_by_addr(soc,
-			pdev,
-			params->bssid, &peer_id);
-	if (!peer) {
-		WMA_LOGE("%s: Failed to find peer %pM", __func__,
-			 params->bssid);
-		status = QDF_STATUS_E_FAILURE;
 		goto fail_del_bss_ho_fail;
 	}
 
@@ -6228,33 +6290,28 @@ void wma_delete_bss_ho_fail(tp_wma_handle wma, tpDeleteBssParams params)
 			__func__, iface->type, iface->sub_type);
 	wma_vdev_set_mlme_state_stop(wma, params->smesessionId);
 	params->status = QDF_STATUS_SUCCESS;
-	if (!iface->peer_count) {
-		WMA_LOGE("%s: Can't remove peer with peer_addr %pM vdevid %d peer_count %d",
-			__func__, params->bssid,  params->smesessionId,
-			iface->peer_count);
+
+	msg = wma_fill_vdev_req(wma, params->smesessionId,
+				WMA_DELETE_BSS_HO_FAIL_REQ,
+				WMA_TARGET_REQ_TYPE_VDEV_STOP, params,
+				WMA_VDEV_STOP_REQUEST_TIMEOUT);
+	if (!msg) {
+		WMA_LOGE("%s: Failed to fill vdev request for vdev_id %d",
+			 __func__, params->smesessionId);
+		status = QDF_STATUS_E_NOMEM;
 		goto fail_del_bss_ho_fail;
 	}
 
-	if (peer) {
-		WMA_LOGD("%s: vdev %pK is detaching peer:%pK peer_addr %pM to vdev_id %d, peer_count - %d",
-			 __func__, txrx_vdev, peer, params->bssid,
-			 params->smesessionId, iface->peer_count);
-		if (cdp_cfg_get_peer_unmap_conf_support(soc))
-			cdp_peer_delete_sync(
-				soc, peer,
-				wma_peer_unmap_conf_cb,
-				1 << CDP_PEER_DELETE_NO_SPECIAL);
-		else
-			cdp_peer_delete(soc, peer,
-					1 << CDP_PEER_DELETE_NO_SPECIAL);
-		wma_remove_objmgr_peer(wma, params->smesessionId,
-							params->bssid);
+	/* Try to use the vdev stop response path */
+	resp_event.vdev_id = params->smesessionId;
+	status = wma_handle_vdev_stop_rsp(wma, &resp_event);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		WMA_LOGE("%s: Failed to handle vdev stop rsp for vdev_id %d",
+			 __func__, params->smesessionId);
+		goto fail_del_bss_ho_fail;
 	}
-	iface->peer_count--;
 
-	WMA_LOGI("%s: Removed peer %pK with peer_addr %pM vdevid %d peer_count %d",
-		 __func__, peer, params->bssid,  params->smesessionId,
-		 iface->peer_count);
+	return;
 fail_del_bss_ho_fail:
 	params->status = status;
 	wma_send_msg_high_priority(wma, WMA_DELETE_BSS_HO_FAIL_RSP,

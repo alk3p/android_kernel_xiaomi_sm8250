@@ -280,7 +280,7 @@ int wlan_hdd_ipv6_changed(struct notifier_block *nb,
  * Return: 0 on success, error number otherwise.
  */
 static int hdd_fill_ipv6_uc_addr(struct inet6_dev *idev,
-				uint8_t ipv6_uc_addr[][SIR_MAC_IPV6_ADDR_LEN],
+				uint8_t ipv6_uc_addr[][QDF_IPV6_ADDR_SIZE],
 				uint8_t *ipv6addr_type,
 				enum pmo_ns_addr_scope *scope_array,
 				uint32_t *count)
@@ -333,7 +333,7 @@ static int hdd_fill_ipv6_uc_addr(struct inet6_dev *idev,
  * Return: 0 on success, error number otherwise.
  */
 static int hdd_fill_ipv6_ac_addr(struct inet6_dev *idev,
-				uint8_t ipv6_ac_addr[][SIR_MAC_IPV6_ADDR_LEN],
+				uint8_t ipv6_ac_addr[][QDF_IPV6_ADDR_SIZE],
 				uint8_t *ipv6addr_type,
 				enum pmo_ns_addr_scope *scope_array,
 				uint32_t *count)
@@ -1367,6 +1367,27 @@ static void hdd_is_interface_down_during_ssr(struct hdd_context *hdd_ctx)
 	hdd_exit();
 }
 
+/**
+ * hdd_restore_sar_config - Restore the saved SAR config after SSR
+ * @hdd_ctx: HDD context
+ *
+ * Restore the SAR config that was lost during SSR.
+ *
+ * Return: None
+ */
+static void hdd_restore_sar_config(struct hdd_context *hdd_ctx)
+{
+	QDF_STATUS status;
+
+	if (!hdd_ctx->sar_cmd_params)
+		return;
+
+	status = sme_set_sar_power_limits(hdd_ctx->mac_handle,
+					  hdd_ctx->sar_cmd_params);
+	if (QDF_IS_STATUS_ERROR(status))
+		hdd_err("Unable to configured SAR after SSR");
+}
+
 QDF_STATUS hdd_wlan_re_init(void)
 {
 	struct hdd_context *hdd_ctx = NULL;
@@ -1417,6 +1438,8 @@ QDF_STATUS hdd_wlan_re_init(void)
 	/* set chip power save failure detected callback */
 	sme_set_chip_pwr_save_fail_cb(hdd_ctx->mac_handle,
 				      hdd_chip_pwr_save_fail_detected_cb);
+
+	hdd_restore_sar_config(hdd_ctx);
 
 	hdd_send_default_scan_ies(hdd_ctx);
 	hdd_info("WLAN host driver reinitiation completed!");
@@ -1601,6 +1624,11 @@ static int __wlan_hdd_cfg80211_resume_wlan(struct wiphy *wiphy)
 		goto exit_with_code;
 	}
 
+	if (hdd_ctx->config->is_wow_disabled) {
+		hdd_err("wow is disabled");
+		return -EINVAL;
+	}
+
 	if (hdd_ctx->driver_status != DRIVER_MODULES_ENABLED) {
 		hdd_debug("Driver is not enabled; Skipping resume");
 		exit_code = 0;
@@ -1698,6 +1726,10 @@ static int __wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 	if (0 != rc)
 		return rc;
 
+	if (hdd_ctx->config->is_wow_disabled) {
+		hdd_err("wow is disabled");
+		return -EINVAL;
+	}
 
 	if (hdd_ctx->driver_status != DRIVER_MODULES_ENABLED) {
 		hdd_debug("Driver Modules not Enabled ");
@@ -1733,7 +1765,7 @@ static int __wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 				return -EOPNOTSUPP;
 			}
 		} else if (QDF_P2P_GO_MODE == adapter->device_mode) {
-			if (!!ucfg_pmo_get_enable_sap_suspend(
+			if (!ucfg_pmo_get_enable_sap_suspend(
 				   hdd_ctx->psoc)) {
 				/* return -EOPNOTSUPP if GO does not support
 				 * suspend

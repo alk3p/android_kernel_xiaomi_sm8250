@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -103,6 +103,8 @@ void target_if_pmo_register_tx_ops(struct wlan_pmo_tx_ops *pmo_tx_ops)
 		target_if_pmo_psoc_get_pending_cmnds;
 	pmo_tx_ops->update_target_suspend_flag =
 		target_if_pmo_update_target_suspend_flag;
+	pmo_tx_ops->is_target_suspended =
+		target_if_pmo_is_target_suspended;
 	pmo_tx_ops->psoc_send_wow_enable_req =
 		target_if_pmo_psoc_send_wow_enable_req;
 	pmo_tx_ops->psoc_send_supend_req =
@@ -119,6 +121,8 @@ void target_if_pmo_register_tx_ops(struct wlan_pmo_tx_ops *pmo_tx_ops)
 		target_if_pmo_psoc_send_d0wow_enable_req;
 	pmo_tx_ops->psoc_send_d0wow_disable_req =
 		target_if_pmo_psoc_send_d0wow_disable_req;
+	pmo_tx_ops->psoc_send_idle_roam_suspend_mode =
+		target_if_pmo_psoc_send_idle_monitor_cmd;
 	tgt_if_pmo_reg_pkt_filter_ops(pmo_tx_ops);
 }
 

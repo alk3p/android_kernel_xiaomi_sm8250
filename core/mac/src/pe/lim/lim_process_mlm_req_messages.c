@@ -337,11 +337,11 @@ lim_mlm_add_bss(struct mac_context *mac_ctx,
 		mlm_start_req->cfParamSet.cfpDurRemaining;
 
 	addbss_param->rateSet.numRates = mlm_start_req->rateSet.numRates;
-	if (addbss_param->rateSet.numRates > SIR_MAC_RATESET_EID_MAX) {
+	if (addbss_param->rateSet.numRates > WLAN_SUPPORTED_RATES_IE_MAX_LEN) {
 		pe_warn("num of sup rates %d exceeding the limit %d, resetting",
 			addbss_param->rateSet.numRates,
-			SIR_MAC_RATESET_EID_MAX);
-		addbss_param->rateSet.numRates = SIR_MAC_RATESET_EID_MAX;
+			WLAN_SUPPORTED_RATES_IE_MAX_LEN);
+		addbss_param->rateSet.numRates = WLAN_SUPPORTED_RATES_IE_MAX_LEN;
 	}
 	qdf_mem_copy(addbss_param->rateSet.rate, mlm_start_req->rateSet.rate,
 		     addbss_param->rateSet.numRates);
@@ -891,11 +891,11 @@ static QDF_STATUS lim_process_mlm_auth_req_sae(struct mac_context *mac_ctx,
 		session->ssId.ssId,
 		session->ssId.length);
 
-	pe_debug("vdev_id %d ssid %.*s "MAC_ADDRESS_STR"",
+	pe_debug("vdev_id %d ssid %.*s "QDF_MAC_ADDR_STR,
 		sae_info->vdev_id,
 		sae_info->ssid.length,
 		sae_info->ssid.ssId,
-		MAC_ADDR_ARRAY(sae_info->peer_mac_addr.bytes));
+		QDF_MAC_ADDR_ARRAY(sae_info->peer_mac_addr.bytes));
 
 	msg.type = eWNI_SME_TRIGGER_SAE;
 	msg.bodyptr = sae_info;
@@ -970,10 +970,10 @@ static void lim_process_mlm_auth_req(struct mac_context *mac_ctx, uint32_t *msg)
 	}
 
 	pe_debug("Process Auth Req sessionID %d Systemrole %d"
-		       "mlmstate %d from: " MAC_ADDRESS_STR
+		       "mlmstate %d from: " QDF_MAC_ADDR_STR
 		       " with authtype %d", session_id,
 		GET_LIM_SYSTEM_ROLE(session), session->limMlmState,
-		MAC_ADDR_ARRAY(mac_ctx->lim.gpLimMlmAuthReq->peerMacAddr),
+		QDF_MAC_ADDR_ARRAY(mac_ctx->lim.gpLimMlmAuthReq->peerMacAddr),
 		mac_ctx->lim.gpLimMlmAuthReq->authType);
 
 	sir_copy_mac_addr(curr_bssid, session->bssId);
@@ -996,8 +996,8 @@ static void lim_process_mlm_auth_req(struct mac_context *mac_ctx, uint32_t *msg)
 	 */
 	if (lim_is_preauth_ctx_exists(mac_ctx, session, &preauth_node)) {
 		pe_debug("Already have pre-auth context with peer: "
-		    MAC_ADDRESS_STR,
-		    MAC_ADDR_ARRAY(mac_ctx->lim.gpLimMlmAuthReq->peerMacAddr));
+		    QDF_MAC_ADDR_STR,
+		    QDF_MAC_ADDR_ARRAY(mac_ctx->lim.gpLimMlmAuthReq->peerMacAddr));
 		mlm_auth_cnf.resultCode = (tSirResultCodes)
 						eSIR_MAC_SUCCESS_STATUS;
 		goto end;
@@ -1154,9 +1154,9 @@ static void lim_process_mlm_assoc_req(struct mac_context *mac_ctx, uint32_t *msg
 		 * Return Assoc confirm with Invalid parameters code.
 		 */
 		pe_warn("received unexpected MLM_ASSOC_CNF in state %X for role=%d, MAC addr= "
-			   MAC_ADDRESS_STR, session_entry->limMlmState,
+			   QDF_MAC_ADDR_STR, session_entry->limMlmState,
 			GET_LIM_SYSTEM_ROLE(session_entry),
-			MAC_ADDR_ARRAY(mlm_assoc_req->peerMacAddr));
+			QDF_MAC_ADDR_ARRAY(mlm_assoc_req->peerMacAddr));
 		lim_print_mlm_state(mac_ctx, LOGW, session_entry->limMlmState);
 		mlm_assoc_cnf.resultCode = eSIR_SME_INVALID_PARAMETERS;
 		mlm_assoc_cnf.protStatusCode = eSIR_MAC_UNSPEC_FAILURE_STATUS;
@@ -1252,10 +1252,10 @@ lim_process_mlm_disassoc_req_ntf(struct mac_context *mac_ctx,
 	}
 
 	pe_debug("Process DisAssoc Req on sessionID %d Systemrole %d"
-		   "mlmstate %d from: " MAC_ADDRESS_STR,
+		   "mlmstate %d from: " QDF_MAC_ADDR_STR,
 		mlm_disassocreq->sessionId, GET_LIM_SYSTEM_ROLE(session),
 		session->limMlmState,
-		MAC_ADDR_ARRAY(mlm_disassocreq->peer_macaddr.bytes));
+		QDF_MAC_ADDR_ARRAY(mlm_disassocreq->peer_macaddr.bytes));
 
 	qdf_mem_copy(curr_bssid.bytes, session->bssId, QDF_MAC_ADDR_SIZE);
 
@@ -1278,9 +1278,9 @@ lim_process_mlm_disassoc_req_ntf(struct mac_context *mac_ctx,
 				return;
 			}
 
-			pe_debug("send disassoc rsp with ret code %d for" MAC_ADDRESS_STR,
+			pe_debug("send disassoc rsp with ret code %d for" QDF_MAC_ADDR_STR,
 				eSIR_SME_DEAUTH_STATUS,
-				MAC_ADDR_ARRAY(
+				QDF_MAC_ADDR_ARRAY(
 					mlm_disassocreq->peer_macaddr.bytes));
 
 			sme_disassoc_rsp->messageType = eWNI_SME_DISASSOC_RSP;
@@ -1334,8 +1334,8 @@ lim_process_mlm_disassoc_req_ntf(struct mac_context *mac_ctx,
 		 * Received LIM_MLM_DISASSOC_REQ for STA that does not
 		 * have context or in some transit state.
 		 */
-		pe_warn("Invalid MLM_DISASSOC_REQ, Addr= " MAC_ADDRESS_STR,
-			MAC_ADDR_ARRAY(mlm_disassocreq->peer_macaddr.bytes));
+		pe_warn("Invalid MLM_DISASSOC_REQ, Addr= " QDF_MAC_ADDR_STR,
+			QDF_MAC_ADDR_ARRAY(mlm_disassocreq->peer_macaddr.bytes));
 		if (stads)
 			pe_err("Sta MlmState: %d", stads->mlmStaContext.mlmState);
 
@@ -1541,9 +1541,9 @@ lim_process_mlm_disassoc_req(struct mac_context *mac_ctx, uint32_t *msg_buf)
 	}
 
 	mlm_disassoc_req = (tLimMlmDisassocReq *) msg_buf;
-	pe_debug("Process disassoc req, sessionID %d from: "MAC_ADDRESS_STR,
+	pe_debug("Process disassoc req, sessionID %d from: "QDF_MAC_ADDR_STR,
 		mlm_disassoc_req->sessionId,
-		MAC_ADDR_ARRAY(mlm_disassoc_req->peer_macaddr.bytes));
+		QDF_MAC_ADDR_ARRAY(mlm_disassoc_req->peer_macaddr.bytes));
 
 	lim_process_mlm_disassoc_req_ntf(mac_ctx, QDF_STATUS_SUCCESS,
 					 (uint32_t *) msg_buf);
@@ -1588,11 +1588,11 @@ lim_process_mlm_deauth_req_ntf(struct mac_context *mac_ctx,
 		return;
 	}
 	pe_debug("Process Deauth Req on sessionID %d Systemrole %d"
-		       "mlmstate %d from: " MAC_ADDRESS_STR,
+		       "mlmstate %d from: " QDF_MAC_ADDR_STR,
 		mlm_deauth_req->sessionId,
 		GET_LIM_SYSTEM_ROLE(session),
 		session->limMlmState,
-		MAC_ADDR_ARRAY(mlm_deauth_req->peer_macaddr.bytes));
+		QDF_MAC_ADDR_ARRAY(mlm_deauth_req->peer_macaddr.bytes));
 	sir_copy_mac_addr(curr_bssId, session->bssId);
 
 	switch (GET_LIM_SYSTEM_ROLE(session)) {
@@ -1611,11 +1611,11 @@ lim_process_mlm_deauth_req_ntf(struct mac_context *mac_ctx,
 			if (qdf_mem_cmp(mlm_deauth_req->peer_macaddr.bytes,
 					curr_bssId, QDF_MAC_ADDR_SIZE)) {
 				pe_err("received MLM_DEAUTH_REQ with invalid BSS id "
-					   "Peer MAC: "MAC_ADDRESS_STR
-					   " CFG BSSID Addr : "MAC_ADDRESS_STR,
-					MAC_ADDR_ARRAY(
+					   "Peer MAC: "QDF_MAC_ADDR_STR
+					   " CFG BSSID Addr : "QDF_MAC_ADDR_STR,
+					QDF_MAC_ADDR_ARRAY(
 						mlm_deauth_req->peer_macaddr.bytes),
-					MAC_ADDR_ARRAY(curr_bssId));
+					QDF_MAC_ADDR_ARRAY(curr_bssId));
 				/*
 				 * Deauthentication response to host triggered
 				 * deauthentication
@@ -1627,9 +1627,9 @@ lim_process_mlm_deauth_req_ntf(struct mac_context *mac_ctx,
 					return;
 				}
 
-				pe_debug("send deauth rsp with ret code %d for" MAC_ADDRESS_STR,
+				pe_debug("send deauth rsp with ret code %d for" QDF_MAC_ADDR_STR,
 					eSIR_SME_DEAUTH_STATUS,
-					MAC_ADDR_ARRAY(
+					QDF_MAC_ADDR_ARRAY(
 					  mlm_deauth_req->peer_macaddr.bytes));
 
 				sme_deauth_rsp->messageType =
@@ -1673,9 +1673,9 @@ lim_process_mlm_deauth_req_ntf(struct mac_context *mac_ctx,
 			break;
 		default:
 			pe_warn("received MLM_DEAUTH_REQ with in state %d for peer "
-				   MAC_ADDRESS_STR,
+				   QDF_MAC_ADDR_STR,
 				session->limMlmState,
-				MAC_ADDR_ARRAY(
+				QDF_MAC_ADDR_ARRAY(
 					mlm_deauth_req->peer_macaddr.bytes));
 			lim_print_mlm_state(mac_ctx, LOGW,
 					    session->limMlmState);
@@ -1724,9 +1724,9 @@ lim_process_mlm_deauth_req_ntf(struct mac_context *mac_ctx,
 			 */
 			pe_warn("received MLM_DEAUTH_REQ in mlme state %d for STA that "
 				   "does not have context, Addr="
-				   MAC_ADDRESS_STR,
+				   QDF_MAC_ADDR_STR,
 				session->limMlmState,
-				MAC_ADDR_ARRAY(
+				QDF_MAC_ADDR_ARRAY(
 					mlm_deauth_req->peer_macaddr.bytes));
 			mlm_deauth_cnf.resultCode =
 				eSIR_SME_STA_NOT_AUTHENTICATED;
@@ -1750,8 +1750,8 @@ lim_process_mlm_deauth_req_ntf(struct mac_context *mac_ctx,
 		 * received MLM_DEAUTH_REQ for STA that either has no context or
 		 * in some transit state
 		 */
-		pe_warn("Invalid MLM_DEAUTH_REQ, Addr="MAC_ADDRESS_STR,
-			MAC_ADDR_ARRAY(mlm_deauth_req->peer_macaddr.bytes));
+		pe_warn("Invalid MLM_DEAUTH_REQ, Addr="QDF_MAC_ADDR_STR,
+			QDF_MAC_ADDR_ARRAY(mlm_deauth_req->peer_macaddr.bytes));
 		/* Prepare and Send LIM_MLM_DEAUTH_CNF */
 		mlm_deauth_cnf.resultCode = eSIR_SME_INVALID_PARAMETERS;
 		goto end;
@@ -1833,9 +1833,9 @@ void lim_process_mlm_deauth_req(struct mac_context *mac_ctx, uint32_t *msg_buf)
 
 	mlm_deauth_req = (tLimMlmDeauthReq *) msg_buf;
 	pe_debug("Process Deauth Req on sessionID %d from: "
-		   MAC_ADDRESS_STR,
+		   QDF_MAC_ADDR_STR,
 		mlm_deauth_req->sessionId,
-		MAC_ADDR_ARRAY(mlm_deauth_req->peer_macaddr.bytes));
+		QDF_MAC_ADDR_ARRAY(mlm_deauth_req->peer_macaddr.bytes));
 
 	session = pe_find_session_by_session_id(mac_ctx,
 				mlm_deauth_req->sessionId);
@@ -1917,8 +1917,8 @@ lim_process_mlm_set_keys_req(struct mac_context *mac_ctx, uint32_t *msg_buf)
 		    (!qdf_is_macaddr_equal(&mlm_set_keys_req->peer_macaddr,
 					   &curr_bssid))) {
 			pe_debug("Received MLM_SETKEYS_REQ with invalid BSSID"
-				MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(mlm_set_keys_req->
+				QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(mlm_set_keys_req->
 						peer_macaddr.bytes));
 			/*
 			 * Prepare and Send LIM_MLM_SETKEYS_CNF with error code
@@ -1985,8 +1985,8 @@ lim_process_mlm_set_keys_req(struct mac_context *mac_ctx, uint32_t *msg_buf)
 			 * have context or in some transit state.
 			 */
 			pe_debug("Invalid MLM_SETKEYS_REQ, Addr = "
-				   MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(mlm_set_keys_req->
+				   QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(mlm_set_keys_req->
 						peer_macaddr.bytes));
 			/* Prepare and Send LIM_MLM_SETKEYS_CNF */
 			mlm_set_keys_cnf.resultCode =
@@ -2079,8 +2079,9 @@ void lim_process_join_failure_timeout(struct mac_context *mac_ctx)
 					eLIM_PERIODIC_JOIN_PROBE_REQ_TIMER);
 		/* Issue MLM join confirm with timeout reason code */
 		pe_err("Join Failure Timeout, In eLIM_MLM_WT_JOIN_BEACON_STATE session:%d "
-			   MAC_ADDRESS_STR,
-			session->peSessionId, MAC_ADDR_ARRAY(session->bssId));
+			   QDF_MAC_ADDR_STR,
+			session->peSessionId,
+			QDF_MAC_ADDR_ARRAY(session->bssId));
 
 		mlm_join_cnf.resultCode = eSIR_SME_JOIN_TIMEOUT_RESULT_CODE;
 		mlm_join_cnf.protStatusCode = eSIR_MAC_UNSPEC_FAILURE_STATUS;
@@ -2318,14 +2319,14 @@ lim_process_auth_rsp_timeout(struct mac_context *mac_ctx, uint32_t auth_idx)
 	if (LIM_IS_AP_ROLE(session) || LIM_IS_IBSS_ROLE(session)) {
 		if (auth_node->mlmState != eLIM_MLM_WT_AUTH_FRAME3_STATE) {
 			pe_err("received AUTH rsp timeout in unexpected "
-				   "state for MAC address: " MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(auth_node->peerMacAddr));
+				   "state for MAC address: " QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(auth_node->peerMacAddr));
 		} else {
 			auth_node->mlmState = eLIM_MLM_AUTH_RSP_TIMEOUT_STATE;
 			auth_node->fTimerStarted = 0;
 			pe_debug("AUTH rsp timedout for MAC address "
-				   MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(auth_node->peerMacAddr));
+				   QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(auth_node->peerMacAddr));
 			/* Change timer to reactivate it in future */
 			lim_deactivate_and_change_per_sta_id_timer(mac_ctx,
 				eLIM_AUTH_RSP_TIMER, auth_node->authNodeIdx);
@@ -2382,9 +2383,9 @@ void lim_process_assoc_failure_timeout(struct mac_context *mac_ctx,
 	 * By sending deauth try to clear the session created on peer device.
 	 */
 	pe_debug("Sessionid: %d try sending deauth on channel %d to BSSID: "
-		MAC_ADDRESS_STR, session->peSessionId,
+		QDF_MAC_ADDR_STR, session->peSessionId,
 		session->currentOperChannel,
-		MAC_ADDR_ARRAY(session->bssId));
+		QDF_MAC_ADDR_ARRAY(session->bssId));
 	lim_send_deauth_mgmt_frame(mac_ctx, eSIR_MAC_UNSPEC_FAILURE_REASON,
 		session->bssId, session, false);
 
@@ -2421,8 +2422,8 @@ void lim_process_assoc_failure_timeout(struct mac_context *mac_ctx,
 		}
 		/* To remove the preauth node in case of fail to associate */
 		if (lim_search_pre_auth_list(mac_ctx, session->bssId)) {
-			pe_debug("delete pre auth node for "MAC_ADDRESS_STR,
-				MAC_ADDR_ARRAY(session->bssId));
+			pe_debug("delete pre auth node for "QDF_MAC_ADDR_STR,
+				QDF_MAC_ADDR_ARRAY(session->bssId));
 			lim_delete_pre_auth_node(mac_ctx,
 						 session->bssId);
 		}

@@ -1079,6 +1079,7 @@ ucfg_mlme_set_roaming_offload(struct wlan_objmgr_psoc *psoc,
 	return QDF_STATUS_SUCCESS;
 }
 #endif
+
 /**
  * ucfg_mlme_get_first_scan_bucket_threshold() - Get first scan bucket thre
  * @psoc: pointer to psoc object
@@ -1089,6 +1090,18 @@ ucfg_mlme_set_roaming_offload(struct wlan_objmgr_psoc *psoc,
 QDF_STATUS
 ucfg_mlme_get_first_scan_bucket_threshold(struct wlan_objmgr_psoc *psoc,
 					  uint8_t *val);
+
+/**
+ * ucfg_mlme_set_fw_supported_roaming_akm() - update the supported roaming
+ * akm suites advertised by the firmware via wmi service capability
+ * @psoc: pointer to psoc object
+ * @val:  bitmap value based on firmware capabilities
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+ucfg_mlme_set_fw_supported_roaming_akm(struct wlan_objmgr_psoc *psoc,
+				       uint32_t val);
 
 /**
  * ucfg_mlme_is_mawc_enabled() - MAWC enabled or not
@@ -1142,6 +1155,27 @@ ucfg_mlme_set_fast_transition_enabled(struct wlan_objmgr_psoc *psoc,
 QDF_STATUS
 ucfg_mlme_is_roam_scan_offload_enabled(struct wlan_objmgr_psoc *psoc,
 				       bool *val);
+
+#ifdef WLAN_ADAPTIVE_11R
+/**
+ * ucfg_mlme_set_tgt_adaptive_11r_cap() - Set adaptive 11r target service
+ * capability
+ * @psoc: pointer to psoc object
+ * @val:  Target capability of adaptive 11r
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+ucfg_mlme_set_tgt_adaptive_11r_cap(struct wlan_objmgr_psoc *psoc,
+				   bool val);
+#else
+static inline QDF_STATUS
+ucfg_mlme_set_tgt_adaptive_11r_cap(struct wlan_objmgr_psoc *psoc,
+				   bool val)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
 
 /**
  * ucfg_mlme_set_roam_scan_offload_enabled() - Set roam scan offload enable
@@ -1395,6 +1429,22 @@ QDF_STATUS ucfg_mlme_get_sap_get_peer_info(struct wlan_objmgr_psoc *psoc,
 					   bool *value)
 {
 	return wlan_mlme_get_sap_get_peer_info(psoc, value);
+}
+
+/**
+ * ucfg_mlme_set_sap_get_peer_info() - set the sap get peer info
+ * @psoc: pointer to psoc object
+ * @value: value to overwrite the sap get peer info
+ *
+ * Inline UCFG API to be used by HDD/OSIF callers
+ *
+ * Return: QDF Status
+ */
+static inline
+QDF_STATUS ucfg_mlme_set_sap_get_peer_info(struct wlan_objmgr_psoc *psoc,
+					   bool value)
+{
+	return wlan_mlme_set_sap_get_peer_info(psoc, value);
 }
 
 /**
@@ -1755,6 +1805,22 @@ QDF_STATUS ucfg_mlme_get_oce_sap_enabled_info(struct wlan_objmgr_psoc *psoc,
 					      bool *value)
 {
 	return wlan_mlme_get_oce_sap_enabled_info(psoc, value);
+}
+
+/**
+ * ucfg_mlme_update_oce_flags: Update the OCE flags
+ *
+ * @pdev: pointer to pdev object
+ *
+ * Inline UCFG API to be used by HDD/OSIF callers to update the
+ * OCE feature flags
+ *
+ * Return: void
+ */
+static inline
+void ucfg_mlme_update_oce_flags(struct wlan_objmgr_pdev *pdev)
+{
+	wlan_mlme_update_oce_flags(pdev);
 }
 
 /**
