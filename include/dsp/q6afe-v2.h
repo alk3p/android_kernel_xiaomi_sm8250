@@ -43,6 +43,9 @@
 #define AFE_API_VERSION_V3		3
 /* for VAD and Island mode */
 #define AFE_API_VERSION_V4		4
+/* for VAD enable */
+#define AFE_API_VERSION_V6		6
+
 
 typedef int (*routing_cb)(int port);
 
@@ -432,7 +435,8 @@ int afe_set_aanc_noise_level(int val);
 int afe_port_group_set_param(u16 group_id,
 	union afe_port_group_config *afe_group_config);
 int afe_port_group_enable(u16 group_id,
-	union afe_port_group_config *afe_group_config, u16 enable);
+	union afe_port_group_config *afe_group_config, u16 enable,
+	struct afe_param_id_tdm_lane_cfg *lane_cfg);
 int afe_unmap_rtac_block(uint32_t *mem_map_handle);
 int afe_map_rtac_block(struct rtac_cal_block_data *cal_block);
 int afe_send_slot_mapping_cfg(
@@ -451,6 +455,7 @@ int afe_get_sp_rx_tmax_xmax_logging_data(
 		u16 port_id);
 int afe_cal_init_hwdep(void *card);
 int afe_send_port_island_mode(u16 port_id);
+int afe_send_port_vad_cfg_params(u16 port_id);
 int afe_send_cmd_wakeup_register(void *handle, bool enable);
 void afe_register_wakeup_irq_callback(
 	void (*afe_cb_wakeup_irq)(void *handle));

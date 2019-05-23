@@ -91,6 +91,11 @@ enum {
 	APTX_AD_44_1 = 1
 };
 
+enum {
+	AFE_MATCHED_PORT_DISABLE,
+	AFE_MATCHED_PORT_ENABLE
+};
+
 struct wlock {
 	struct wakeup_source ws;
 };
@@ -345,6 +350,14 @@ static void doa_tracking_mon_afe_cb_handler(uint32_t opcode, uint32_t *payload,
 	size_t expected_size =
 		sizeof(u32) + sizeof(struct doa_tracking_mon_param);
 
+	if (payload[0]) {
+		atomic_set(&this_afe.status, payload[0]);
+		atomic_set(&this_afe.state, 0);
+		pr_err("%s: doa_tracking_mon_resp status: %d payload size %d\n",
+			__func__, payload[0], payload_size);
+		return;
+	}
+
 	switch (opcode) {
 	case AFE_PORT_CMDRSP_GET_PARAM_V2:
 		expected_size += sizeof(struct param_hdr_v1);
@@ -378,13 +391,7 @@ static void doa_tracking_mon_afe_cb_handler(uint32_t opcode, uint32_t *payload,
 		return;
 	}
 
-	if (!this_afe.doa_tracking_mon_resp.status) {
-		atomic_set(&this_afe.state, 0);
-	} else {
-		pr_debug("%s: doa_tracking_mon_resp status: %d\n", __func__,
-			 this_afe.doa_tracking_mon_resp.status);
-		atomic_set(&this_afe.state, -1);
-	}
+	atomic_set(&this_afe.state, 0);
 }
 
 static int32_t sp_make_afe_callback(uint32_t opcode, uint32_t *payload,
@@ -1459,7 +1466,8 @@ done:
 }
 
 static int q6afe_svc_set_params(int index, struct mem_mapping_hdr *mem_hdr,
-				u8 *packed_param_data, u32 packed_data_size)
+				u8 *packed_param_data, u32 packed_data_size,
+				bool is_iid_supported)
 {
 	int ret;
 
@@ -1469,7 +1477,7 @@ static int q6afe_svc_set_params(int index, struct mem_mapping_hdr *mem_hdr,
 		return ret;
 	}
 
-	if (q6common_is_instance_id_supported())
+	if (is_iid_supported)
 		return q6afe_svc_set_params_v2(index, mem_hdr,
 					       packed_param_data,
 					       packed_data_size);
@@ -1487,13 +1495,15 @@ static int q6afe_svc_pack_and_set_param_in_band(int index,
 	u32 packed_data_size =
 		sizeof(struct param_hdr_v3) + param_hdr.param_size;
 	int ret = 0;
+	bool is_iid_supported = q6common_is_instance_id_supported();
 
 	packed_param_data = kzalloc(packed_data_size, GFP_KERNEL);
 	if (!packed_param_data)
 		return -ENOMEM;
 
-	ret = q6common_pack_pp_params(packed_param_data, &param_hdr, param_data,
-				      &packed_data_size);
+	ret = q6common_pack_pp_params_v2(packed_param_data, &param_hdr,
+					param_data, &packed_data_size,
+					is_iid_supported);
 	if (ret) {
 		pr_err("%s: Failed to pack parameter header and data, error %d\n",
 		       __func__, ret);
@@ -1501,7 +1511,7 @@ static int q6afe_svc_pack_and_set_param_in_band(int index,
 	}
 
 	ret = q6afe_svc_set_params(index, NULL, packed_param_data,
-				   packed_data_size);
+				   packed_data_size, is_iid_supported);
 
 done:
 	kfree(packed_param_data);
@@ -2248,6 +2258,13 @@ int afe_send_port_island_mode(u16 port_id)
 	u32 island_mode = 0;
 	int ret = 0;
 
+	if (!(q6core_get_avcs_api_version_per_service(
+		APRV2_IDS_SERVICE_ID_ADSP_AFE_V) >= AFE_API_VERSION_V4)) {
+		pr_debug("%s: AFE port[%d] API version is invalid!\n",
+				__func__, port_id);
+		return 0;
+	}
+
 	memset(&island_cfg, 0, sizeof(island_cfg));
 	memset(&param_info, 0, sizeof(param_info));
 
@@ -2296,66 +2313,105 @@ static int afe_get_vad_preroll_cfg(u16 port_id, u32 *preroll_cfg)
 	return ret;
 }
 
-static int afe_send_port_vad_cfg_params(u16 port_id)
+int afe_send_port_vad_cfg_params(u16 port_id)
 {
 	struct afe_param_id_vad_cfg_t vad_cfg;
+	struct afe_mod_enable_param vad_enable;
 	struct param_hdr_v3 param_info;
 	u32 pre_roll_cfg = 0;
 	struct firmware_cal *hwdep_cal = NULL;
 	int ret = 0;
+	uint16_t port_index = 0;
 
-	memset(&vad_cfg, 0, sizeof(vad_cfg));
-	memset(&param_info, 0, sizeof(param_info));
-
-	ret = afe_get_vad_preroll_cfg(port_id, &pre_roll_cfg);
-	if (ret) {
-		pr_err("%s: AFE port[%d] get preroll cfg is invalid!\n",
-				__func__, port_id);
-		return ret;
-	}
-	param_info.module_id = AFE_MODULE_VAD;
-	param_info.instance_id = INSTANCE_ID_0;
-	param_info.param_id = AFE_PARAM_ID_VAD_CFG;
-	param_info.param_size = sizeof(vad_cfg);
-
-	vad_cfg.vad_cfg_minor_version = AFE_API_VERSION_VAD_CFG;
-	vad_cfg.pre_roll_in_ms = pre_roll_cfg;
-
-	ret = q6afe_pack_and_set_param_in_band(port_id,
-					       q6audio_get_port_index(port_id),
-					       param_info, (u8 *) &vad_cfg);
-	if (ret) {
-		pr_err("%s: AFE set vad cfg for port 0x%x failed %d\n",
-			__func__, port_id, ret);
-		return ret;
+	if (!(q6core_get_avcs_api_version_per_service(
+	APRV2_IDS_SERVICE_ID_ADSP_AFE_V) >= AFE_API_VERSION_V4)) {
+		pr_err("%s: AFE port[%d]: AFE API version doesn't support VAD config\n",
+		__func__, port_id);
+		return 0;
 	}
 
-	memset(&param_info, 0, sizeof(param_info));
+	port_index = afe_get_port_index(port_id);
 
-	hwdep_cal = q6afecal_get_fw_cal(this_afe.fw_data, Q6AFE_VAD_CORE_CAL);
-	if (!hwdep_cal) {
-		pr_err("%s: error in retrieving vad core calibration",
-			__func__);
-		return -EINVAL;
+	if (this_afe.vad_cfg[port_index].is_enable) {
+		memset(&vad_cfg, 0, sizeof(vad_cfg));
+		memset(&param_info, 0, sizeof(param_info));
+
+		ret = afe_get_vad_preroll_cfg(port_id, &pre_roll_cfg);
+		if (ret) {
+			pr_err("%s: AFE port[%d] get preroll cfg is invalid!\n",
+					__func__, port_id);
+			return ret;
+		}
+		param_info.module_id = AFE_MODULE_VAD;
+		param_info.instance_id = INSTANCE_ID_0;
+		param_info.param_id = AFE_PARAM_ID_VAD_CFG;
+		param_info.param_size = sizeof(vad_cfg);
+
+		vad_cfg.vad_cfg_minor_version = AFE_API_VERSION_VAD_CFG;
+		vad_cfg.pre_roll_in_ms = pre_roll_cfg;
+
+		ret = q6afe_pack_and_set_param_in_band(port_id,
+						q6audio_get_port_index(port_id),
+						param_info, (u8 *) &vad_cfg);
+		if (ret) {
+			pr_err("%s: AFE set vad cfg for port 0x%x failed %d\n",
+				__func__, port_id, ret);
+			return ret;
+		}
+
+		memset(&param_info, 0, sizeof(param_info));
+
+		hwdep_cal = q6afecal_get_fw_cal(this_afe.fw_data,
+						Q6AFE_VAD_CORE_CAL);
+		if (!hwdep_cal) {
+			pr_err("%s: error in retrieving vad core calibration",
+				__func__);
+			return -EINVAL;
+		}
+
+		param_info.module_id = AFE_MODULE_VAD;
+		param_info.instance_id = INSTANCE_ID_0;
+		param_info.param_id = AFE_PARAM_ID_VAD_CORE_CFG;
+		param_info.param_size = hwdep_cal->size;
+
+		ret = q6afe_pack_and_set_param_in_band(port_id,
+						q6audio_get_port_index(port_id),
+						param_info,
+						(u8 *) hwdep_cal->data);
+		if (ret) {
+			pr_err("%s: AFE set vad cfg for port 0x%x failed %d\n",
+				__func__, port_id, ret);
+			return ret;
+		}
 	}
 
-	param_info.module_id = AFE_MODULE_VAD;
-	param_info.instance_id = INSTANCE_ID_0;
-	param_info.param_id = AFE_PARAM_ID_VAD_CORE_CFG;
-	param_info.param_size = hwdep_cal->size;
+	if (q6core_get_avcs_api_version_per_service(
+		APRV2_IDS_SERVICE_ID_ADSP_AFE_V) >= AFE_API_VERSION_V6) {
+		memset(&vad_enable, 0, sizeof(vad_enable));
+		memset(&param_info, 0, sizeof(param_info));
+		param_info.module_id = AFE_MODULE_VAD;
+		param_info.instance_id = INSTANCE_ID_0;
+		param_info.param_id = AFE_PARAM_ID_ENABLE;
+		param_info.param_size = sizeof(vad_enable);
 
-	ret = q6afe_pack_and_set_param_in_band(port_id,
-					q6audio_get_port_index(port_id),
-					param_info, (u8 *) hwdep_cal->data);
-	if (ret) {
-		pr_err("%s: AFE set vad cfg for port 0x%x failed %d\n",
-			__func__, port_id, ret);
-		return ret;
+		port_index = afe_get_port_index(port_id);
+		vad_enable.enable = this_afe.vad_cfg[port_index].is_enable;
+
+		ret = q6afe_pack_and_set_param_in_band(port_id,
+						q6audio_get_port_index(port_id),
+						param_info, (u8 *) &vad_enable);
+		if (ret) {
+			pr_err("%s: AFE set vad enable for port 0x%x failed %d\n",
+				__func__, port_id, ret);
+			return ret;
+		}
 	}
+
 	pr_debug("%s: AFE set preroll cfg %d vad core cfg  port 0x%x ret %d\n",
 			__func__, pre_roll_cfg, port_id, ret);
 	return ret;
 }
+EXPORT_SYMBOL(afe_send_port_vad_cfg_params);
 
 static int remap_cal_data(struct cal_block_data *cal_block, int cal_index)
 {
@@ -2588,6 +2644,7 @@ static int afe_send_codec_reg_config(
 	struct param_hdr_v3 param_hdr;
 	int idx = 0;
 	int ret = -EINVAL;
+	bool is_iid_supported = q6common_is_instance_id_supported();
 
 	memset(&param_hdr, 0, sizeof(param_hdr));
 	max_single_param = sizeof(struct param_hdr_v3) +
@@ -2610,10 +2667,10 @@ static int afe_send_codec_reg_config(
 
 		while (packed_data_size + max_single_param < max_data_size &&
 		       idx < cdc_reg_cfg->num_registers) {
-			ret = q6common_pack_pp_params(
+			ret = q6common_pack_pp_params_v2(
 				packed_param_data + packed_data_size,
 				&param_hdr, (u8 *) &cdc_reg_cfg->reg_data[idx],
-				&single_param_size);
+				&single_param_size, is_iid_supported);
 			if (ret) {
 				pr_err("%s: Failed to pack parameters with error %d\n",
 				       __func__, ret);
@@ -2624,7 +2681,8 @@ static int afe_send_codec_reg_config(
 		}
 
 		ret = q6afe_svc_set_params(IDX_GLOBAL_CFG, NULL,
-					   packed_param_data, packed_data_size);
+					   packed_param_data, packed_data_size,
+					   is_iid_supported);
 		if (ret) {
 			pr_err("%s: AFE_PARAM_ID_CDC_REG_CFG failed %d\n",
 				__func__, ret);
@@ -3390,19 +3448,6 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 
 	port_index = afe_get_port_index(port_id);
 
-	if (q6core_get_avcs_api_version_per_service(
-		APRV2_IDS_SERVICE_ID_ADSP_AFE_V) >= AFE_API_VERSION_V4) {
-		/* send VAD configuration if enabled */
-		if (this_afe.vad_cfg[port_index].is_enable) {
-			ret = afe_send_port_vad_cfg_params(port_id);
-			if (ret) {
-				pr_err("%s: afe send VAD config failed %d\n",
-					__func__, ret);
-				goto fail_cmd;
-			}
-		}
-	}
-
 	/* Also send the topology id here: */
 	if (!(this_afe.afe_cal_mode[port_index] == AFE_CAL_MODE_NONE)) {
 		/* One time call: only for first time */
@@ -3654,6 +3699,8 @@ static int q6afe_send_dec_config(u16 port_id,
 	struct avs_dec_congestion_buffer_param_t dec_buffer_id_param;
 	struct afe_enc_dec_imc_info_param_t imc_info_param;
 	struct afe_port_media_type_t media_type;
+	struct afe_matched_port_t matched_port_param;
+	struct asm_aptx_ad_speech_mode_cfg_t speech_codec_init_param;
 	struct param_hdr_v3 param_hdr;
 	int ret;
 	u32 dec_fmt;
@@ -3662,6 +3709,8 @@ static int q6afe_send_dec_config(u16 port_id,
 	memset(&dec_media_fmt, 0, sizeof(dec_media_fmt));
 	memset(&imc_info_param, 0, sizeof(imc_info_param));
 	memset(&media_type, 0, sizeof(media_type));
+	memset(&matched_port_param, 0, sizeof(matched_port_param));
+	memset(&speech_codec_init_param, 0, sizeof(speech_codec_init_param));
 	memset(&param_hdr, 0, sizeof(param_hdr));
 
 	param_hdr.module_id = AFE_MODULE_ID_DECODER;
@@ -3780,6 +3829,9 @@ static int q6afe_send_dec_config(u16 port_id,
 			break;
 		}
 		/* fall through for abr enabled case */
+	case ASM_MEDIA_FMT_APTX_AD_SPEECH:
+		media_type.sample_rate = AFE_PORT_SAMPLE_RATE_32K;
+		break;
 	default:
 		media_type.sample_rate =
 			afe_config.slim_sch.sample_rate;
@@ -3806,7 +3858,8 @@ static int q6afe_send_dec_config(u16 port_id,
 	}
 
 	if (format != ASM_MEDIA_FMT_SBC && format != ASM_MEDIA_FMT_AAC_V2 &&
-		format != ASM_MEDIA_FMT_APTX_ADAPTIVE) {
+		format != ASM_MEDIA_FMT_APTX_ADAPTIVE &&
+		format != ASM_MEDIA_FMT_APTX_AD_SPEECH) {
 		pr_debug("%s:Unsuppported dec format. Ignore AFE config %u\n",
 				__func__, format);
 		goto exit;
@@ -3816,6 +3869,24 @@ static int q6afe_send_dec_config(u16 port_id,
 		cfg->abr_dec_cfg.is_abr_enabled) {
 		pr_debug("%s: Ignore AFE config for abr case\n", __func__);
 		goto exit;
+	}
+	if (format == ASM_MEDIA_FMT_APTX_AD_SPEECH) {
+		pr_debug("%s: sending AFE_PARAM_ID_RATE_MATCHED_PORT to DSP payload\n",
+			__func__);
+		param_hdr.param_id = AFE_PARAM_ID_RATE_MATCHED_PORT;
+		param_hdr.param_size =
+			sizeof(struct afe_matched_port_t);
+		matched_port_param.minor_version = AFE_API_VERSION_PORT_MEDIA_TYPE;
+		matched_port_param.enable = AFE_MATCHED_PORT_ENABLE;
+		ret = q6afe_pack_and_set_param_in_band(port_id,
+						q6audio_get_port_index(port_id),
+						param_hdr,
+						(u8 *) &matched_port_param);
+		if (ret) {
+			pr_err("%s: AFE_PARAM_ID_RATE_MATCHED_PORT for port 0x%x failed %d\n",
+				__func__, port_id, ret);
+			goto exit;
+		}
 	}
 
 	pr_debug("%s: sending AFE_DECODER_PARAM_ID_DEC_MEDIA_FMT to DSP payload\n",
@@ -3853,6 +3924,26 @@ static int q6afe_send_dec_config(u16 port_id,
 			goto exit;
 		}
 		break;
+	case ASM_MEDIA_FMT_APTX_AD_SPEECH:
+		param_hdr.param_size =
+				sizeof(struct asm_aptx_ad_speech_dec_cfg_t);
+
+		pr_debug("%s: send AVS_DECODER_PARAM_ID_APTX_AD_SPEECH_DEC_INIT to DSP payload\n",
+			 __func__);
+		param_hdr.param_id =
+				AVS_DECODER_PARAM_ID_APTX_AD_SPEECH_DEC_INIT;
+		speech_codec_init_param =
+				cfg->data.aptx_ad_speech_config.speech_mode;
+		ret = q6afe_pack_and_set_param_in_band(port_id,
+					q6audio_get_port_index(port_id),
+					param_hdr,
+					(u8 *) &speech_codec_init_param);
+		if (ret) {
+			pr_err("%s: AVS_DECODER_PARAM_ID_APTX_ADAPTIVE_SPEECH_DEC_INIT for port 0x%x failed %d\n",
+				__func__, port_id, ret);
+			goto exit;
+		}
+		break;
 	default:
 		pr_debug("%s:No need to send DEC_MEDIA_FMT to DSP payload\n",
 			 __func__);
@@ -3879,6 +3970,8 @@ static int q6afe_send_enc_config(u16 port_id,
 	struct asm_aac_frame_size_control_t frame_ctl_param;
 	struct afe_port_media_type_t media_type;
 	struct aptx_channel_mode_param_t channel_mode_param;
+	struct afe_matched_port_t matched_port_param;
+	struct asm_aptx_ad_speech_mode_cfg_t speech_codec_init_param;
 	struct param_hdr_v3 param_hdr;
 	int ret;
 
@@ -3893,12 +3986,15 @@ static int q6afe_send_enc_config(u16 port_id,
 	memset(&imc_info_param, 0, sizeof(imc_info_param));
 	memset(&frame_ctl_param, 0, sizeof(frame_ctl_param));
 	memset(&media_type, 0, sizeof(media_type));
+	memset(&matched_port_param, 0, sizeof(matched_port_param));
+	memset(&speech_codec_init_param, 0, sizeof(speech_codec_init_param));
 	memset(&param_hdr, 0, sizeof(param_hdr));
 
 	if (format != ASM_MEDIA_FMT_SBC && format != ASM_MEDIA_FMT_AAC_V2 &&
 		format != ASM_MEDIA_FMT_APTX && format != ASM_MEDIA_FMT_APTX_HD &&
 		format != ASM_MEDIA_FMT_CELT && format != ASM_MEDIA_FMT_LDAC &&
-		format != ASM_MEDIA_FMT_APTX_ADAPTIVE) {
+		format != ASM_MEDIA_FMT_APTX_ADAPTIVE &&
+		format != ASM_MEDIA_FMT_APTX_AD_SPEECH) {
 		pr_err("%s:Unsuppported enc format. Ignore AFE config\n",
 				__func__);
 		return 0;
@@ -3933,6 +4029,9 @@ static int q6afe_send_enc_config(u16 port_id,
 		enc_blk_param.enc_cfg_blk_size =
 				sizeof(enc_blk_param.enc_blk_config)
 				- sizeof(struct asm_aac_frame_size_control_t);
+	} else if (format == ASM_MEDIA_FMT_APTX_AD_SPEECH) {
+		param_hdr.param_size = sizeof(struct afe_enc_aptx_ad_speech_cfg_blk_param_t);
+		enc_blk_param.enc_cfg_blk_size = sizeof(struct asm_custom_enc_cfg_t);
 	} else {
 		param_hdr.param_size = sizeof(struct afe_enc_cfg_blk_param_t);
 		enc_blk_param.enc_cfg_blk_size =
@@ -4014,6 +4113,24 @@ static int q6afe_send_enc_config(u16 port_id,
 			goto exit;
 		}
 	}
+	if (format == ASM_MEDIA_FMT_APTX_AD_SPEECH) {
+		pr_debug("%s: sending AVS_DECODER_PARAM_ID_APTX_AD_SPEECH_ENC_INIT to DSP\n",
+			__func__);
+		param_hdr.param_id = AVS_DECODER_PARAM_ID_APTX_AD_SPEECH_ENC_INIT;
+		param_hdr.param_size =
+			sizeof(struct asm_aptx_ad_speech_dec_cfg_t);
+		speech_codec_init_param = cfg->aptx_ad_speech_config.speech_mode;
+		ret = q6afe_pack_and_set_param_in_band(port_id,
+					q6audio_get_port_index(port_id),
+					param_hdr,
+					(u8 *) &speech_codec_init_param);
+		if (ret) {
+			pr_err("%s: AFE_ID_APTX_ADAPTIVE_ENC_INIT for port 0x%x failed %d\n",
+				__func__, port_id, ret);
+			goto exit;
+		}
+	}
+
 	pr_debug("%s:sending AFE_ENCODER_PARAM_ID_PACKETIZER to DSP\n",
 		 __func__);
 	param_hdr.param_id = AFE_ENCODER_PARAM_ID_PACKETIZER_ID;
@@ -4029,19 +4146,21 @@ static int q6afe_send_enc_config(u16 port_id,
 		goto exit;
 	}
 
-	pr_debug("%s:sending AFE_ENCODER_PARAM_ID_ENABLE_SCRAMBLING mode= %d to DSP payload\n",
-		  __func__, scrambler_mode);
-	param_hdr.param_id = AFE_ENCODER_PARAM_ID_ENABLE_SCRAMBLING;
-	param_hdr.param_size = sizeof(struct avs_enc_set_scrambler_param_t);
-	enc_set_scrambler_param.enable_scrambler = scrambler_mode;
-	ret = q6afe_pack_and_set_param_in_band(port_id,
-					       q6audio_get_port_index(port_id),
-					       param_hdr,
-					       (u8 *) &enc_set_scrambler_param);
-	if (ret) {
-		pr_err("%s: AFE_ENCODER_PARAM_ID_ENABLE_SCRAMBLING for port 0x%x failed %d\n",
-			__func__, port_id, ret);
-		goto exit;
+	if (format != ASM_MEDIA_FMT_APTX_AD_SPEECH) {
+		pr_debug("%s:sending AFE_ENCODER_PARAM_ID_ENABLE_SCRAMBLING mode= %d to DSP payload\n",
+			  __func__, scrambler_mode);
+		param_hdr.param_id = AFE_ENCODER_PARAM_ID_ENABLE_SCRAMBLING;
+		param_hdr.param_size = sizeof(struct avs_enc_set_scrambler_param_t);
+		enc_set_scrambler_param.enable_scrambler = scrambler_mode;
+		ret = q6afe_pack_and_set_param_in_band(port_id,
+						       q6audio_get_port_index(port_id),
+						       param_hdr,
+						       (u8 *) &enc_set_scrambler_param);
+		if (ret) {
+			pr_err("%s: AFE_ENCODER_PARAM_ID_ENABLE_SCRAMBLING for port 0x%x failed %d\n",
+				__func__, port_id, ret);
+			goto exit;
+		}
 	}
 
 	if (format == ASM_MEDIA_FMT_APTX) {
@@ -4063,22 +4182,25 @@ static int q6afe_send_enc_config(u16 port_id,
 
 	if ((format == ASM_MEDIA_FMT_LDAC &&
 	     cfg->ldac_config.abr_config.is_abr_enabled) ||
-	     format == ASM_MEDIA_FMT_APTX_ADAPTIVE) {
-		pr_debug("%s:sending AFE_ENCODER_PARAM_ID_BIT_RATE_LEVEL_MAP to DSP payload",
-			__func__);
-		param_hdr.param_id = AFE_ENCODER_PARAM_ID_BIT_RATE_LEVEL_MAP;
-		param_hdr.param_size =
-			sizeof(struct afe_enc_level_to_bitrate_map_param_t);
-		map_param.mapping_table =
-			cfg->ldac_config.abr_config.mapping_info;
-		ret = q6afe_pack_and_set_param_in_band(port_id,
-						q6audio_get_port_index(port_id),
-						param_hdr,
-						(u8 *) &map_param);
-		if (ret) {
-			pr_err("%s: AFE_ENCODER_PARAM_ID_BIT_RATE_LEVEL_MAP for port 0x%x failed %d\n",
-				__func__, port_id, ret);
-			goto exit;
+	     format == ASM_MEDIA_FMT_APTX_ADAPTIVE ||
+	     format == ASM_MEDIA_FMT_APTX_AD_SPEECH) {
+		if (format != ASM_MEDIA_FMT_APTX_AD_SPEECH) {
+			pr_debug("%s:sending AFE_ENCODER_PARAM_ID_BIT_RATE_LEVEL_MAP to DSP payload",
+				__func__);
+			param_hdr.param_id = AFE_ENCODER_PARAM_ID_BIT_RATE_LEVEL_MAP;
+			param_hdr.param_size =
+				sizeof(struct afe_enc_level_to_bitrate_map_param_t);
+			map_param.mapping_table =
+				cfg->ldac_config.abr_config.mapping_info;
+			ret = q6afe_pack_and_set_param_in_band(port_id,
+							q6audio_get_port_index(port_id),
+							param_hdr,
+							(u8 *) &map_param);
+			if (ret) {
+				pr_err("%s: AFE_ENCODER_PARAM_ID_BIT_RATE_LEVEL_MAP for port 0x%x failed %d\n",
+					__func__, port_id, ret);
+				goto exit;
+			}
 		}
 
 		pr_debug("%s: sending AFE_ENCDEC_PARAM_ID_DEC_TO_ENC_COMMUNICATION to DSP payload",
@@ -4090,6 +4212,9 @@ static int q6afe_send_enc_config(u16 port_id,
 		if (format == ASM_MEDIA_FMT_APTX_ADAPTIVE)
 			imc_info_param.imc_info =
 			cfg->aptx_ad_config.abr_cfg.imc_info;
+		else if (format == ASM_MEDIA_FMT_APTX_AD_SPEECH)
+			imc_info_param.imc_info =
+			cfg->aptx_ad_speech_config.imc_info;
 		else
 			imc_info_param.imc_info =
 			cfg->ldac_config.abr_config.imc_info;
@@ -4115,6 +4240,9 @@ static int q6afe_send_enc_config(u16 port_id,
 	else if (format == ASM_MEDIA_FMT_APTX_ADAPTIVE)
 		media_type.sample_rate =
 			cfg->aptx_ad_config.custom_cfg.sample_rate;
+	else if (format == ASM_MEDIA_FMT_APTX_AD_SPEECH)
+		media_type.sample_rate =
+			cfg->aptx_ad_speech_config.custom_cfg.sample_rate;
 	else
 		media_type.sample_rate =
 			afe_config.slim_sch.sample_rate;
@@ -4138,6 +4266,25 @@ static int q6afe_send_enc_config(u16 port_id,
 		pr_err("%s: AFE_API_VERSION_PORT_MEDIA_TYPE for port 0x%x failed %d\n",
 			__func__, port_id, ret);
 		goto exit;
+	}
+
+	if (format == ASM_MEDIA_FMT_APTX_AD_SPEECH) {
+		pr_debug("%s: sending AFE_PARAM_ID_RATE_MATCHED_PORT to DSP payload",
+			__func__);
+		param_hdr.param_id = AFE_PARAM_ID_RATE_MATCHED_PORT;
+		param_hdr.param_size =
+			sizeof(struct afe_matched_port_t);
+		matched_port_param.minor_version = AFE_API_VERSION_PORT_MEDIA_TYPE;
+		matched_port_param.enable = AFE_MATCHED_PORT_ENABLE;
+		ret = q6afe_pack_and_set_param_in_band(port_id,
+						q6audio_get_port_index(port_id),
+						param_hdr,
+						(u8 *) &matched_port_param);
+		if (ret) {
+			pr_err("%s: AFE_PARAM_ID_RATE_MATCHED_PORT for port 0x%x failed %d\n",
+				__func__, port_id, ret);
+			goto exit;
+		}
 	}
 
 exit:
@@ -4250,19 +4397,6 @@ static int __afe_port_start(u16 port_id, union afe_port_config *afe_config,
 
 	mutex_lock(&this_afe.afe_cmd_lock);
 	port_index = afe_get_port_index(port_id);
-
-	if (q6core_get_avcs_api_version_per_service(
-		APRV2_IDS_SERVICE_ID_ADSP_AFE_V) >= AFE_API_VERSION_V4) {
-		/* send VAD configuration if is enabled */
-		if (this_afe.vad_cfg[port_index].is_enable) {
-			ret = afe_send_port_vad_cfg_params(port_id);
-			if (ret) {
-				pr_err("%s: afe send VAD config failed %d\n",
-					__func__, ret);
-				goto fail_cmd;
-			}
-		}
-	}
 
 	/* Also send the topology id here: */
 	if (!(this_afe.afe_cal_mode[port_index] == AFE_CAL_MODE_NONE)) {
@@ -5423,18 +5557,67 @@ int afe_port_group_set_param(u16 group_id,
 }
 
 /**
+ * afe_port_tdm_lane_config -
+ * to configure group TDM lane mask with specified configuration
+ *
+ * @group_id: AFE group id number
+ * @lane_cfg: TDM lane mask configutation
+ *
+ * Returns 0 on success or error value on failure.
+ */
+static int afe_port_tdm_lane_config(u16 group_id,
+	struct afe_param_id_tdm_lane_cfg *lane_cfg)
+{
+	struct param_hdr_v3 param_hdr;
+	int ret = 0;
+
+	if (lane_cfg == NULL ||
+		lane_cfg->lane_mask == AFE_LANE_MASK_INVALID) {
+		pr_debug("%s: lane cfg not supported for group id: 0x%x\n",
+			__func__, group_id);
+		return ret;
+	}
+
+	pr_debug("%s: group id: 0x%x lane mask 0x%x\n", __func__,
+		group_id, lane_cfg->lane_mask);
+
+	memset(&param_hdr, 0, sizeof(param_hdr));
+
+	ret = afe_q6_interface_prepare();
+	if (ret != 0) {
+		pr_err("%s: Q6 interface prepare failed %d\n", __func__, ret);
+		return ret;
+	}
+
+	param_hdr.module_id = AFE_MODULE_GROUP_DEVICE;
+	param_hdr.instance_id = INSTANCE_ID_0;
+	param_hdr.param_id = AFE_PARAM_ID_TDM_LANE_CONFIG;
+	param_hdr.param_size = sizeof(struct afe_param_id_tdm_lane_cfg);
+
+	ret = q6afe_svc_pack_and_set_param_in_band(IDX_GLOBAL_CFG, param_hdr,
+						   (u8 *)lane_cfg);
+	if (ret)
+		pr_err("%s: AFE_PARAM_ID_TDM_LANE_CONFIG failed %d\n",
+			__func__, ret);
+
+	return ret;
+}
+
+/**
  * afe_port_group_enable -
  *         command to enable AFE port group
  *
  * @group_id: group ID for AFE port group
  * @afe_group_config: config for AFE group
  * @enable: flag to indicate enable or disable
+ * @lane_cfg: TDM lane mask configutation
  *
  * Returns 0 on success or error on failure
  */
 int afe_port_group_enable(u16 group_id,
 	union afe_port_group_config *afe_group_config,
-	u16 enable)
+	u16 enable,
+	struct afe_param_id_tdm_lane_cfg *lane_cfg)
 {
 	struct afe_group_device_enable group_enable;
 	struct param_hdr_v3 param_hdr;
@@ -5456,6 +5639,12 @@ int afe_port_group_enable(u16 group_id,
 		ret = afe_port_group_set_param(group_id, afe_group_config);
 		if (ret < 0) {
 			pr_err("%s: afe send failed %d\n", __func__, ret);
+			return ret;
+		}
+		ret = afe_port_tdm_lane_config(group_id, lane_cfg);
+		if (ret < 0) {
+			pr_err("%s: afe send lane config failed %d\n",
+				__func__, ret);
 			return ret;
 		}
 	}
@@ -7389,7 +7578,7 @@ int afe_set_lpass_clk_cfg(int index, struct afe_clk_set *cfg)
 
 	ret = afe_q6_interface_prepare();
 	if (ret != 0) {
-		pr_err("%s: Q6 interface prepare failed %d\n", __func__, ret);
+		pr_err_ratelimited("%s: Q6 interface prepare failed %d\n", __func__, ret);
 		return ret;
 	}
 
@@ -7410,7 +7599,7 @@ int afe_set_lpass_clk_cfg(int index, struct afe_clk_set *cfg)
 	ret = q6afe_svc_pack_and_set_param_in_band(index, param_hdr,
 						   (u8 *) cfg);
 	if (ret < 0)
-		pr_err("%s: AFE clk cfg failed with ret %d\n",
+		pr_err_ratelimited("%s: AFE clk cfg failed with ret %d\n",
 		       __func__, ret);
 
 	mutex_unlock(&this_afe.afe_cmd_lock);
@@ -8998,4 +9187,3 @@ done:
 	return ret;
 }
 EXPORT_SYMBOL(afe_unvote_lpass_core_hw);
-

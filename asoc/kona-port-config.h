@@ -3,8 +3,8 @@
  * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  */
 
-#ifndef _SM8250_PORT_CONFIG
-#define _SM8250_PORT_CONFIG
+#ifndef _KONA_PORT_CONFIG
+#define _KONA_PORT_CONFIG
 
 #include <soc/swr-common.h>
 
@@ -29,7 +29,7 @@ static struct port_params rx_frame_params_default[SWR_MSTR_PORT_LEN] = {
 	{3,  0,  0,  0xFF, 0xFF, 1,    0xFF, 0xFF, 1},
 	{31, 0,  0,  3,    6,    7,    0,    0xFF, 0},
 	{31, 11, 11, 0xFF, 0xFF, 4,    1,    0xFF, 0},
-	{3,  1,  0,  0xFF, 0xFF, 0xFF, 0xFF, 1,    0},
+	{7,  1,  0,  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0},
 	{0,  0,  0,  0xFF, 0xFF, 0xFF, 0xFF, 0,    0},
 };
 
@@ -57,4 +57,4 @@ static struct swr_mstr_port_map sm_port_map[] = {
 	{WSA_MACRO, SWR_UC0, wsa_frame_params_default},
 };
 
-#endif /* _SM8250_PORT_CONFIG */
+#endif /* _KONA_PORT_CONFIG */

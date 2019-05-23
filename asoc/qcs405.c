@@ -440,6 +440,12 @@ static struct dev_config aux_pcm_tx_cfg[] = {
 	[SEN_AUX_PCM]  = {SAMPLING_RATE_8KHZ, SNDRV_PCM_FORMAT_S16_LE, 1},
 };
 
+static struct dev_config afe_lb_tx_cfg = {
+	.sample_rate = SAMPLING_RATE_48KHZ,
+	.bit_format = SNDRV_PCM_FORMAT_S16_LE,
+	.channels = 2,
+};
+
 static int msm_vi_feed_tx_ch = 2;
 static const char *const slim_rx_ch_text[] = {"One", "Two"};
 static const char *const slim_tx_ch_text[] = {"One", "Two", "Three", "Four",
@@ -602,6 +608,10 @@ static SOC_ENUM_SINGLE_EXT_DECL(spdif_rx_chs, spdif_ch_text);
 static SOC_ENUM_SINGLE_EXT_DECL(spdif_tx_chs, spdif_ch_text);
 static SOC_ENUM_SINGLE_EXT_DECL(spdif_rx_format, spdif_bit_format_text);
 static SOC_ENUM_SINGLE_EXT_DECL(spdif_tx_format, spdif_bit_format_text);
+static SOC_ENUM_SINGLE_EXT_DECL(afe_lb_tx_chs, cdc_dma_tx_ch_text);
+static SOC_ENUM_SINGLE_EXT_DECL(afe_lb_tx_format, bit_format_text);
+static SOC_ENUM_SINGLE_EXT_DECL(afe_lb_tx_sample_rate,
+				cdc_dma_sample_rate_text);
 
 static struct platform_device *spdev;
 
@@ -677,6 +687,60 @@ static struct afe_clk_set mi2s_clk[MI2S_MAX] = {
 };
 
 static struct mi2s_conf mi2s_intf_conf[MI2S_MAX];
+
+static int msm_island_vad_get_portid_from_beid(int32_t be_id, int *port_id)
+{
+	*port_id = 0xFFFF;
+
+	switch (be_id) {
+	case MSM_BACKEND_DAI_VA_CDC_DMA_TX_0:
+		*port_id = AFE_PORT_ID_VA_CODEC_DMA_TX_0;
+		break;
+	case MSM_BACKEND_DAI_QUINARY_MI2S_TX:
+		*port_id = AFE_PORT_ID_QUINARY_MI2S_TX;
+		break;
+	case MSM_BACKEND_DAI_QUIN_TDM_TX_0:
+		*port_id = AFE_PORT_ID_QUINARY_TDM_TX;
+		break;
+	case MSM_BACKEND_DAI_QUIN_AUXPCM_TX:
+		*port_id = AFE_PORT_ID_QUINARY_PCM_TX;
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static int qcs405_send_island_vad_config(int32_t be_id)
+{
+	int rc = 0;
+	int port_id = 0xFFFF;
+
+	rc = msm_island_vad_get_portid_from_beid(be_id, &port_id);
+	if (rc) {
+		pr_debug("%s: Invalid island interface\n", __func__);
+	} else {
+		/*
+		 * send island mode config
+		 * This should be the first configuration
+		 */
+		rc = afe_send_port_island_mode(port_id);
+		if (rc) {
+			pr_err("%s: afe send island mode failed %d\n",
+				__func__, rc);
+			return rc;
+		}
+
+		rc = afe_send_port_vad_cfg_params(port_id);
+		if (rc) {
+			pr_err("%s: afe send vad config failed %d\n",
+				__func__, rc);
+			return rc;
+		}
+	}
+
+	return 0;
+}
 
 static int slim_get_sample_rate_val(int sample_rate)
 {
@@ -3390,6 +3454,184 @@ static int msm_spdif_tx_format_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int afe_lb_tx_ch_get(struct snd_kcontrol *kcontrol,
+			    struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s: afe_lb_tx_ch  = %d\n", __func__,
+		 afe_lb_tx_cfg.channels);
+	ucontrol->value.integer.value[0] = afe_lb_tx_cfg.channels - 1;
+	return 0;
+}
+
+static int afe_lb_tx_ch_put(struct snd_kcontrol *kcontrol,
+			    struct snd_ctl_elem_value *ucontrol)
+{
+	afe_lb_tx_cfg.channels = ucontrol->value.integer.value[0] + 1;
+
+	pr_debug("%s: afe_lb_tx_ch = %d\n", __func__, afe_lb_tx_cfg.channels);
+	return 0;
+}
+
+static int afe_lb_tx_sample_rate_get(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *ucontrol)
+{
+	int sample_rate_val;
+
+	switch (afe_lb_tx_cfg.sample_rate) {
+	case SAMPLING_RATE_384KHZ:
+		sample_rate_val = 12;
+		break;
+	case SAMPLING_RATE_352P8KHZ:
+		sample_rate_val = 11;
+		break;
+	case SAMPLING_RATE_192KHZ:
+		sample_rate_val = 10;
+		break;
+	case SAMPLING_RATE_176P4KHZ:
+		sample_rate_val = 9;
+		break;
+	case SAMPLING_RATE_96KHZ:
+		sample_rate_val = 8;
+		break;
+	case SAMPLING_RATE_88P2KHZ:
+		sample_rate_val = 7;
+		break;
+	case SAMPLING_RATE_48KHZ:
+		sample_rate_val = 6;
+		break;
+	case SAMPLING_RATE_44P1KHZ:
+		sample_rate_val = 5;
+		break;
+	case SAMPLING_RATE_32KHZ:
+		sample_rate_val = 4;
+		break;
+	case SAMPLING_RATE_22P05KHZ:
+		sample_rate_val = 3;
+		break;
+	case SAMPLING_RATE_16KHZ:
+		sample_rate_val = 2;
+		break;
+	case SAMPLING_RATE_11P025KHZ:
+		sample_rate_val = 1;
+		break;
+	case SAMPLING_RATE_8KHZ:
+		sample_rate_val = 0;
+		break;
+	default:
+		sample_rate_val = 6;
+		break;
+	}
+
+	ucontrol->value.integer.value[0] = sample_rate_val;
+	pr_debug("%s: afe_lb_tx_sample_rate = %d\n", __func__,
+		 afe_lb_tx_cfg.sample_rate);
+	return 0;
+}
+
+static int afe_lb_tx_sample_rate_put(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *ucontrol)
+{
+	switch (ucontrol->value.integer.value[0]) {
+	case 12:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_384KHZ;
+		break;
+	case 11:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_352P8KHZ;
+		break;
+	case 10:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_192KHZ;
+		break;
+	case 9:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_176P4KHZ;
+		break;
+	case 8:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_96KHZ;
+		break;
+	case 7:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_88P2KHZ;
+		break;
+	case 6:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_48KHZ;
+		break;
+	case 5:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_44P1KHZ;
+		break;
+	case 4:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_32KHZ;
+		break;
+	case 3:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_22P05KHZ;
+		break;
+	case 2:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_16KHZ;
+		break;
+	case 1:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_11P025KHZ;
+		break;
+	case 0:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_8KHZ;
+		break;
+	default:
+		afe_lb_tx_cfg.sample_rate = SAMPLING_RATE_48KHZ;
+		break;
+	}
+
+	pr_debug("%s: control value = %ld, afe_lb_tx_sample_rate = %d\n",
+		__func__, ucontrol->value.integer.value[0],
+		afe_lb_tx_cfg.sample_rate);
+	return 0;
+}
+
+static int afe_lb_tx_format_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	switch (afe_lb_tx_cfg.bit_format) {
+	case SNDRV_PCM_FORMAT_S32_LE:
+		ucontrol->value.integer.value[0] = 3;
+		break;
+	case SNDRV_PCM_FORMAT_S24_3LE:
+		ucontrol->value.integer.value[0] = 2;
+		break;
+	case SNDRV_PCM_FORMAT_S24_LE:
+		ucontrol->value.integer.value[0] = 1;
+		break;
+	case SNDRV_PCM_FORMAT_S16_LE:
+	default:
+		ucontrol->value.integer.value[0] = 0;
+		break;
+	}
+
+	pr_debug("%s: afe_lb_tx_format = %d, ucontrol value = %ld\n",
+		 __func__, afe_lb_tx_cfg.bit_format,
+		 ucontrol->value.integer.value[0]);
+	return 0;
+}
+
+static int afe_lb_tx_format_put(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	switch (ucontrol->value.integer.value[0]) {
+	case 3:
+		afe_lb_tx_cfg.bit_format = SNDRV_PCM_FORMAT_S32_LE;
+		break;
+	case 2:
+		afe_lb_tx_cfg.bit_format = SNDRV_PCM_FORMAT_S24_3LE;
+		break;
+	case 1:
+		afe_lb_tx_cfg.bit_format = SNDRV_PCM_FORMAT_S24_LE;
+		break;
+	case 0:
+	default:
+		afe_lb_tx_cfg.bit_format = SNDRV_PCM_FORMAT_S16_LE;
+		break;
+	}
+
+	pr_debug("%s: afe_lb_tx_format = %d, ucontrol value = %ld\n",
+		 __func__, afe_lb_tx_cfg.bit_format,
+		 ucontrol->value.integer.value[0]);
+	return 0;
+}
+
 static const struct snd_kcontrol_new msm_snd_sb_controls[] = {
 	SOC_ENUM_EXT("SLIM_0_RX Channels", slim_0_rx_chs,
 			slim_rx_ch_get, slim_rx_ch_put),
@@ -3772,6 +4014,13 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 			msm_spdif_rx_format_get, msm_spdif_rx_format_put),
 	SOC_ENUM_EXT("SEC_SPDIF_TX Format", spdif_tx_format,
 			msm_spdif_tx_format_get, msm_spdif_tx_format_put),
+	SOC_ENUM_EXT("AFE_LOOPBACK_TX Channels", afe_lb_tx_chs,
+			afe_lb_tx_ch_get, afe_lb_tx_ch_put),
+	SOC_ENUM_EXT("AFE_LOOPBACK_TX Format", afe_lb_tx_format,
+			afe_lb_tx_format_get, afe_lb_tx_format_put),
+	SOC_ENUM_EXT("AFE_LOOPBACK_TX SampleRate", afe_lb_tx_sample_rate,
+			afe_lb_tx_sample_rate_get,
+			afe_lb_tx_sample_rate_put),
 };
 
 static int msm_snd_enable_codec_ext_clk(struct snd_soc_component *component,
@@ -4046,29 +4295,6 @@ static int msm_slim_get_ch_from_beid(int32_t be_id)
 	}
 
 	return ch_id;
-}
-
-static int msm_vad_get_portid_from_beid(int32_t be_id, int *port_id)
-{
-	*port_id = 0xFFFF;
-
-	switch (be_id) {
-	case MSM_BACKEND_DAI_VA_CDC_DMA_TX_0:
-		*port_id = AFE_PORT_ID_VA_CODEC_DMA_TX_0;
-		break;
-	case MSM_BACKEND_DAI_QUINARY_MI2S_TX:
-		*port_id = AFE_PORT_ID_QUINARY_MI2S_TX;
-		break;
-	case MSM_BACKEND_DAI_QUIN_TDM_TX_0:
-		*port_id = AFE_PORT_ID_QUINARY_TDM_TX;
-		break;
-	case MSM_BACKEND_DAI_QUIN_AUXPCM_TX:
-		*port_id = AFE_PORT_ID_QUINARY_PCM_TX;
-		break;
-	default:
-		return -EINVAL;
-	}
-	return 0;
 }
 
 static int msm_cdc_dma_get_idx_from_beid(int32_t be_id)
@@ -4579,6 +4805,13 @@ static int msm_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 			spdif_tx_cfg[SEC_SPDIF_TX].channels;
 	break;
 
+	case MSM_BACKEND_DAI_AFE_LOOPBACK_TX:
+		param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
+				afe_lb_tx_cfg.bit_format);
+		rate->min = rate->max = afe_lb_tx_cfg.sample_rate;
+		channels->min = channels->max = afe_lb_tx_cfg.channels;
+		break;
+
 	default:
 		rate->min = rate->max = SAMPLING_RATE_48KHZ;
 		break;
@@ -5073,6 +5306,34 @@ err:
 	return ret;
 }
 
+static int msm_snd_auxpcm_startup(struct snd_pcm_substream *substream)
+{
+	int ret = 0;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai_link *dai_link = rtd->dai_link;
+
+	ret = qcs405_send_island_vad_config(dai_link->id);
+	if (ret) {
+		pr_err("%s: send island/vad cfg failed, err = %d\n",
+		__func__, ret);
+	}
+	return ret;
+}
+
+static int msm_snd_cdc_dma_startup(struct snd_pcm_substream *substream)
+{
+	int ret = 0;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai_link *dai_link = rtd->dai_link;
+
+	ret = qcs405_send_island_vad_config(dai_link->id);
+	if (ret) {
+		pr_err("%s: send island/vad cfg failed, err = %d\n",
+		__func__, ret);
+	}
+	return ret;
+}
+
 static int msm_snd_cdc_dma_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params)
 {
@@ -5499,6 +5760,7 @@ static int qcs405_tdm_snd_startup(struct snd_pcm_substream *substream)
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	struct snd_soc_card *card = rtd->card;
 	struct msm_asoc_mach_data *pdata = snd_soc_card_get_drvdata(card);
+	struct snd_soc_dai_link *dai_link = rtd->dai_link;
 	u32 tdm_mode = msm_get_tdm_mode(cpu_dai->id);
 
 	if (tdm_mode >= TDM_INTERFACE_MAX) {
@@ -5541,6 +5803,13 @@ static int qcs405_tdm_snd_startup(struct snd_pcm_substream *substream)
 				return ret;
 			}
 		}
+	}
+
+	ret = qcs405_send_island_vad_config(dai_link->id);
+	if (ret) {
+		pr_err("%s: send island/vad cfg failed, err = %d\n",
+		__func__, ret);
+		return ret;
 	}
 
 	return ret;
@@ -5612,7 +5881,7 @@ static int msm_mi2s_snd_startup(struct snd_pcm_substream *substream)
 	int ret = 0;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
-
+	struct snd_soc_dai_link *dai_link = rtd->dai_link;
 	int index = cpu_dai->id;
 	unsigned int fmt = SND_SOC_DAIFMT_CBS_CFS;
 	struct snd_soc_card *card = rtd->card;
@@ -5660,6 +5929,14 @@ static int msm_mi2s_snd_startup(struct snd_pcm_substream *substream)
 			msm_cdc_pinctrl_select_active_state(
 					pdata->mi2s_gpio_p[index]);
 	}
+
+	ret = qcs405_send_island_vad_config(dai_link->id);
+	if (ret) {
+		pr_err("%s: send island/vad cfg failed, err = %d\n",
+		__func__, ret);
+		return ret;
+	}
+
 clk_off:
 	if (ret < 0)
 		msm_mi2s_set_sclk(substream, false);
@@ -5835,7 +6112,11 @@ static struct snd_soc_ops msm_mi2s_be_ops = {
 	.shutdown = msm_mi2s_snd_shutdown,
 };
 
+static struct snd_soc_ops msm_auxpcm_be_ops = {
+	.startup = msm_snd_auxpcm_startup,
+};
 static struct snd_soc_ops msm_cdc_dma_be_ops = {
+	.startup = msm_snd_cdc_dma_startup,
 	.hw_params = msm_snd_cdc_dma_hw_params,
 };
 
@@ -7259,6 +7540,7 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.dpcm_playback = 1,
 		.id = MSM_BACKEND_DAI_AUXPCM_RX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_auxpcm_be_ops,
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
 	},
@@ -7273,6 +7555,7 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.dpcm_capture = 1,
 		.id = MSM_BACKEND_DAI_AUXPCM_TX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_auxpcm_be_ops,
 		.ignore_suspend = 1,
 	},
 	/* Secondary AUX PCM Backend DAI Links */
@@ -7287,6 +7570,7 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.dpcm_playback = 1,
 		.id = MSM_BACKEND_DAI_SEC_AUXPCM_RX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_auxpcm_be_ops,
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
 	},
@@ -7301,6 +7585,7 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.dpcm_capture = 1,
 		.id = MSM_BACKEND_DAI_SEC_AUXPCM_TX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_auxpcm_be_ops,
 		.ignore_suspend = 1,
 	},
 	/* Tertiary AUX PCM Backend DAI Links */
@@ -7315,6 +7600,7 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.dpcm_playback = 1,
 		.id = MSM_BACKEND_DAI_TERT_AUXPCM_RX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_auxpcm_be_ops,
 		.ignore_suspend = 1,
 	},
 	{
@@ -7328,6 +7614,7 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.dpcm_capture = 1,
 		.id = MSM_BACKEND_DAI_TERT_AUXPCM_TX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_auxpcm_be_ops,
 		.ignore_suspend = 1,
 	},
 	/* Quaternary AUX PCM Backend DAI Links */
@@ -7342,6 +7629,7 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.dpcm_playback = 1,
 		.id = MSM_BACKEND_DAI_QUAT_AUXPCM_RX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_auxpcm_be_ops,
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
 	},
@@ -7356,6 +7644,7 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.dpcm_capture = 1,
 		.id = MSM_BACKEND_DAI_QUAT_AUXPCM_TX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_auxpcm_be_ops,
 		.ignore_suspend = 1,
 	},
 	/* Quinary AUX PCM Backend DAI Links */
@@ -7370,6 +7659,7 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.dpcm_playback = 1,
 		.id = MSM_BACKEND_DAI_QUIN_AUXPCM_RX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_auxpcm_be_ops,
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
 	},
@@ -7384,6 +7674,7 @@ static struct snd_soc_dai_link msm_auxpcm_be_dai_links[] = {
 		.dpcm_capture = 1,
 		.id = MSM_BACKEND_DAI_QUIN_AUXPCM_TX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm_auxpcm_be_ops,
 		.ignore_suspend = 1,
 	},
 };
@@ -7541,6 +7832,7 @@ static struct snd_soc_dai_link msm_afe_rxtx_lb_be_dai_link[] = {
 		.no_pcm = 1,
 		.dpcm_capture = 1,
 		.id = MSM_BACKEND_DAI_AFE_LOOPBACK_TX,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
 	},
@@ -7594,7 +7886,7 @@ static int msm_snd_vad_cfg_put(struct snd_kcontrol *kcontrol,
 	pr_debug("%s: vad_enable=%d preroll_config=%d vad_intf=%d\n", __func__,
 		 vad_enable, preroll_config, vad_intf);
 
-	ret = msm_vad_get_portid_from_beid(vad_intf, &port_id);
+	ret = msm_island_vad_get_portid_from_beid(vad_intf, &port_id);
 	if (ret) {
 		pr_err("%s: Invalid vad interface\n", __func__);
 		goto done;

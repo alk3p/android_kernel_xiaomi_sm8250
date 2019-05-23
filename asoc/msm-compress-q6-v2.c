@@ -76,6 +76,10 @@ const DECLARE_TLV_DB_LINEAR(msm_compr_vol_gain, 0,
 
 #define SND_DEC_DDP_MAX_PARAMS 18
 
+#ifndef COMPRESSED_PERF_MODE_FLAG
+#define COMPRESSED_PERF_MODE_FLAG 0
+#endif
+
 struct msm_compr_gapless_state {
 	bool set_next_stream_id;
 	int32_t stream_opened[MAX_NUMBER_OF_STREAMS];
@@ -1779,6 +1783,11 @@ static int msm_compr_capture_open(struct snd_compr_stream *cstream)
 	atomic_set(&prtd->wait_on_close, 0);
 	atomic_set(&prtd->error, 0);
 
+	init_waitqueue_head(&prtd->eos_wait);
+	init_waitqueue_head(&prtd->drain_wait);
+	init_waitqueue_head(&prtd->close_wait);
+	init_waitqueue_head(&prtd->wait_for_stream_avail);
+
 	runtime->private_data = prtd;
 
 	return 0;
@@ -2035,6 +2044,11 @@ static int msm_compr_set_params(struct snd_compr_stream *cstream,
 				 __func__, params->codec.id);
 			return -EINVAL;
 		}
+	}
+
+	if (params->codec.flags & COMPRESSED_PERF_MODE_FLAG) {
+		pr_debug("%s: setting perf mode = %d", __func__, LOW_LATENCY_PCM_MODE);
+		prtd->audio_client->perf_mode = LOW_LATENCY_PCM_MODE;
 	}
 
 	switch (params->codec.id) {
@@ -3736,7 +3750,7 @@ static int msm_compr_channel_map_put(struct snd_kcontrol *kcontrol,
 
 	pr_debug("%s: fe_id- %llu\n", __func__, fe_id);
 
-	if (fe_id >= MSM_FRONTEND_DAI_MAX) {
+	if (fe_id >= MSM_FRONTEND_DAI_MM_SIZE) {
 		pr_err("%s Received out of bounds fe_id %llu\n",
 			__func__, fe_id);
 		rc = -EINVAL;
@@ -3778,7 +3792,7 @@ static int msm_compr_channel_map_get(struct snd_kcontrol *kcontrol,
 	int rc = 0, i;
 
 	pr_debug("%s: fe_id- %llu\n", __func__, fe_id);
-	if (fe_id >= MSM_FRONTEND_DAI_MAX) {
+	if (fe_id >= MSM_FRONTEND_DAI_MM_SIZE) {
 		pr_err("%s: Received out of bounds fe_id %llu\n",
 			__func__, fe_id);
 		rc = -EINVAL;
@@ -4724,6 +4738,16 @@ static int msm_compr_channel_mixer_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 	chmixer_pspd->output_channel = ucontrol->value.integer.value[3];
 	chmixer_pspd->port_idx = ucontrol->value.integer.value[4];
 
+	if (chmixer_pspd->input_channel <= 0 ||
+		chmixer_pspd->input_channel > PCM_FORMAT_MAX_NUM_CHANNEL_V8 ||
+		chmixer_pspd->output_channel <= 0 ||
+		chmixer_pspd->output_channel > PCM_FORMAT_MAX_NUM_CHANNEL_V8) {
+		pr_err("%s: Invalid channels, in %d, out %d\n",
+				__func__, chmixer_pspd->input_channel,
+				chmixer_pspd->output_channel);
+		return -EINVAL;
+	}
+
 	if (chmixer_pspd->enable) {
 		if (session_type == SESSION_TYPE_RX &&
 			!chmixer_pspd->override_in_ch_map) {
@@ -4732,11 +4756,6 @@ static int msm_compr_channel_mixer_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 					chmixer_pspd->in_ch_map[i] =
 						pdata->ch_map[fe_id]->channel_map[i];
 			} else {
-				if (chmixer_pspd->input_channel > PCM_FORMAT_MAX_NUM_CHANNEL_V8) {
-					pr_err("%s: Invalid channel count %d\n",
-						__func__, chmixer_pspd->input_channel);
-					return -EINVAL;
-				}
 				q6asm_map_channels(asm_ch_map,
 					chmixer_pspd->input_channel, false);
 				for (i = 0; i < PCM_FORMAT_MAX_NUM_CHANNEL_V8; i++)
@@ -4751,11 +4770,6 @@ static int msm_compr_channel_mixer_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 					chmixer_pspd->out_ch_map[i] =
 						pdata->ch_map[fe_id]->channel_map[i];
 			} else {
-				if (chmixer_pspd->output_channel > PCM_FORMAT_MAX_NUM_CHANNEL_V8) {
-					pr_err("%s: Invalid channel count %d\n",
-						__func__, chmixer_pspd->output_channel);
-					return -EINVAL;
-				}
 				q6asm_map_channels(asm_ch_map,
 					chmixer_pspd->output_channel, false);
 				for (i = 0; i < PCM_FORMAT_MAX_NUM_CHANNEL_V8; i++)
@@ -4777,13 +4791,8 @@ static int msm_compr_channel_mixer_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 	cstream = pdata->cstream[fe_id];
 	if (chmixer_pspd->enable && cstream && cstream->runtime) {
 		prtd = cstream->runtime->private_data;
-		if (!prtd) {
-			pr_err("%s invalid prtd\n", __func__);
-			ret = -EINVAL;
-			goto done;
-		}
 
-		if (prtd->audio_client) {
+		if (prtd && prtd->audio_client) {
 			stream_id = prtd->audio_client->session;
 			be_id = chmixer_pspd->port_idx;
 			ret = msm_pcm_routing_set_channel_mixer_runtime(be_id,
@@ -4796,7 +4805,6 @@ static int msm_compr_channel_mixer_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 	if (reset_override_in_ch_map)
 		chmixer_pspd->override_in_ch_map = false;
 
-done:
 	return ret;
 }
 

@@ -874,11 +874,14 @@ struct adm_cmd_set_pp_params_v5 {
 	 */
 } __packed;
 
+/* Maximum number of channels supported by MFC media fmt params */
+#define AUDPROC_MFC_OUT_CHANNELS_MAX 8
+
 struct audproc_mfc_param_media_fmt {
 	uint32_t sampling_rate;
 	uint16_t bits_per_sample;
 	uint16_t num_channels;
-	uint16_t channel_type[8];
+	uint16_t channel_type[AUDPROC_MFC_OUT_CHANNELS_MAX];
 } __packed;
 
 struct audproc_volume_ctrl_master_gain {
@@ -1353,6 +1356,8 @@ struct adm_cmd_connect_afe_port_v5 {
 #define RT_PROXY_PORT_001_TX	0x2001
 #define AFE_LOOPBACK_TX	0x6001
 #define DISPLAY_PORT_RX	0x6020
+
+#define AFE_LANE_MASK_INVALID 0
 
 #define AFE_PORT_INVALID 0xFFFF
 #define SLIMBUS_INVALID AFE_PORT_INVALID
@@ -2487,6 +2492,7 @@ struct afe_port_data_cmd_rt_proxy_port_read_v2 {
 #define AFE_MODULE_AUDIO_DEV_INTERFACE    0x0001020C
 #define AFE_PORT_SAMPLE_RATE_8K           8000
 #define AFE_PORT_SAMPLE_RATE_16K          16000
+#define AFE_PORT_SAMPLE_RATE_32K          32000
 #define AFE_PORT_SAMPLE_RATE_44_1K        44100
 #define AFE_PORT_SAMPLE_RATE_48K          48000
 #define AFE_PORT_SAMPLE_RATE_96K          96000
@@ -3910,6 +3916,14 @@ struct afe_id_aptx_adaptive_enc_init
 #define AFE_ENCDEC_PARAM_ID_DEC_TO_ENC_COMMUNICATION        0x0001323D
 
 /*
+ * This is needed to be used only for SWB voice call use case.
+ * This is needed to be issued for each direction (RX AFE and TX AFE)
+ * along with AFE_PARAM_ID_PORT_MEDIA_TYPE
+ * (Issuing AF_PARAM_ID_RATE_MATCHED_PORT param alone is not useful).
+ */
+#define AFE_PARAM_ID_RATE_MATCHED_PORT        0x000102BE
+
+/*
  * Purpose of IMC set up between encoder and decoder.
  * Communication instance and purpose together form the
  * actual key used for IMC registration.
@@ -4149,6 +4163,9 @@ struct asm_aac_enc_cfg_t {
 /* FMT ID for apt-X Adaptive */
 #define ASM_MEDIA_FMT_APTX_ADAPTIVE 0x00013204
 
+/* FMT ID for apt-X Adaptive speech */
+#define ASM_MEDIA_FMT_APTX_AD_SPEECH 0x00013208
+
 #define PCM_CHANNEL_L         1
 #define PCM_CHANNEL_R         2
 #define PCM_CHANNEL_C         3
@@ -4163,6 +4180,22 @@ struct asm_custom_enc_cfg_t {
 	 */
 	uint8_t     channel_mapping[8];
 	uint32_t    custom_size;
+} __packed;
+
+struct asm_aptx_ad_speech_mode_cfg_t
+{
+	uint32_t speech_mode;
+	/*
+	 * speech mode of codec.
+	 *
+	 * @values 0x0(swb), 0x4(sswb)
+	 */
+	 uint32_t swapping;
+	/*
+	 * byte swapping of codec.
+	 *
+	 * @values 0x1, enable swapping
+	 */
 } __packed;
 
 struct asm_aptx_v2_enc_cfg_ext_t {
@@ -4184,6 +4217,19 @@ struct asm_aptx_ad_enc_cfg_t
 	struct asm_custom_enc_cfg_t  custom_cfg;
 	struct afe_id_aptx_adaptive_enc_init aptx_ad_cfg;
 	struct afe_abr_enc_cfg_t abr_cfg;
+} __attribute__ ((packed));
+
+struct asm_aptx_ad_speech_enc_cfg_t
+{
+	struct asm_custom_enc_cfg_t  custom_cfg;
+	struct afe_imc_dec_enc_info imc_info;
+	struct asm_aptx_ad_speech_mode_cfg_t speech_mode;
+} __attribute__ ((packed));
+
+struct afe_matched_port_t
+{
+	uint32_t  minor_version;
+	uint32_t  enable;
 } __attribute__ ((packed));
 
 #define ASM_MEDIA_FMT_CELT 0x00013221
@@ -4462,6 +4508,10 @@ struct asm_aptx_ad_dec_cfg_t {
 	 */
 } __packed;
 
+struct asm_aptx_ad_speech_dec_cfg_t {
+	struct asm_aptx_ad_speech_mode_cfg_t speech_mode;
+};
+
 union afe_enc_config_data {
 	struct asm_sbc_enc_cfg_t sbc_config;
 	struct asm_aac_enc_cfg_t aac_config;
@@ -4470,6 +4520,7 @@ union afe_enc_config_data {
 	struct asm_aptx_enc_cfg_t  aptx_config;
 	struct asm_ldac_enc_cfg_t  ldac_config;
 	struct asm_aptx_ad_enc_cfg_t  aptx_ad_config;
+	struct asm_aptx_ad_speech_enc_cfg_t aptx_ad_speech_config;
 };
 
 struct afe_enc_config {
@@ -4484,6 +4535,7 @@ union afe_dec_config_data {
 	struct asm_aac_dec_cfg_v2_t aac_config;
 	struct asm_mp3_dec_cfg_t mp3_config;
 	struct asm_aptx_ad_dec_cfg_t aptx_ad_config;
+	struct asm_aptx_ad_speech_dec_cfg_t aptx_ad_speech_config;
 };
 
 struct afe_dec_config {
@@ -4498,6 +4550,14 @@ struct afe_enc_cfg_blk_param_t {
 	 *Size of the encoder configuration block that follows this member
 	 */
 	union afe_enc_config_data enc_blk_config;
+};
+
+struct afe_enc_aptx_ad_speech_cfg_blk_param_t {
+	uint32_t enc_cfg_blk_size;
+	/*
+	 * Size of the encoder configuration block that follows this member
+	 */
+	struct asm_custom_enc_cfg_t custom_cfg;
 };
 
 /*
@@ -4586,6 +4646,18 @@ struct avs_dec_congestion_buffer_param_t {
  * This parameter cannot be set at runtime.
  */
 #define AVS_DECODER_PARAM_ID_DEC_MEDIA_FMT 0x00013232
+
+/*
+ * ID of the parameter used by #AVS_MODULE_ID_DECODER to configure
+ * the decoder mode of adaptive speech and byte swap mode
+ */
+#define AVS_DECODER_PARAM_ID_APTX_AD_SPEECH_DEC_INIT 0x0001334D
+
+/*
+ * ID of the parameter used by #AVS_MODULE_ID_ENCODER to configure
+ * the encoder mode of adaptive speech and byte swap mode
+ */
+#define AVS_DECODER_PARAM_ID_APTX_AD_SPEECH_ENC_INIT 0x0001332B
 
 /* ID of the parameter used by #AFE_MODULE_AUDIO_DEV_INTERFACE to configure
  * the island mode for a given AFE port.
@@ -12429,5 +12501,36 @@ struct afe_param_id_vad_cfg_t {
 } __packed;
 
 #define AFE_PARAM_ID_VAD_CORE_CFG                              0x000102BB
+
+/**
+ * This parameter is should be used to configure the AFE TDM
+ * interface lane configuration.
+ * Regular TDM interface ports:
+ * This parameter ID must be used with module ID
+ * AFE_MODULE_AUDIO_DEV_INTERFACE and set using the AFE_PORT_CMD_SET_PARAM_V3
+ * command for the AFE TDM interface port IDs.
+ * Group device TDM interface ports:
+ * This parameter ID must be used with module ID AFE_MODULE_GROUP_DEVICE
+ * and set using the AFE_SVC_CMD_SET_PARAM_V2 command for the AFE TDM group IDs.
+ */
+#define AFE_PARAM_ID_TDM_LANE_CONFIG                           0x000102C1
+
+/* Payload of the AFE_PARAM_ID_TDM_LANE_CONFIG parameter used by
+ * AFE_MODULE_AUDIO_DEV_INTERFACE.
+ */
+struct afe_param_id_tdm_lane_cfg {
+	uint16_t port_id;
+	/** ID of the TDM interface.
+	 * For regular TDM interfaces value corresponds to valid port ID.
+	 * For group devices TDM interface value corresponds to valid group device ID.
+	 */
+
+	uint16_t lane_mask;
+	/** Position of the active lanes. Bits 0 to N correspond to lanes 0 to N.
+	 * 1 to 2^N-1 When a bit is set, the corresponding lane is active.
+	 * The number of active lanes can be inferred from the number of bits
+	 * set in the mask.
+	 */
+};
 
 #endif /*_APR_AUDIO_V2_H_ */

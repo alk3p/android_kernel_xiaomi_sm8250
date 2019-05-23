@@ -241,13 +241,15 @@ static int swrm_clk_request(struct swr_mstr_ctrl *swrm, bool enable)
 
 	mutex_lock(&swrm->clklock);
 	if (enable) {
-		if (!swrm->dev_up)
+		if (!swrm->dev_up) {
+			ret = -ENODEV;
 			goto exit;
+		}
 		swrm->clk_ref_count++;
 		if (swrm->clk_ref_count == 1) {
 			ret = swrm->clk(swrm->handle, true);
 			if (ret) {
-				dev_err(swrm->dev,
+				dev_err_ratelimited(swrm->dev,
 					"%s: clock enable req failed",
 					__func__);
 				--swrm->clk_ref_count;
@@ -1274,7 +1276,12 @@ static irqreturn_t swr_mstr_interrupt(int irq, void *dev)
 	}
 
 	mutex_lock(&swrm->reslock);
-	swrm_clk_request(swrm, true);
+	if (swrm_clk_request(swrm, true)) {
+		dev_err_ratelimited(swrm->dev, "%s:clk request failed\n",
+				__func__);
+		mutex_unlock(&swrm->reslock);
+		goto exit;
+	}
 	mutex_unlock(&swrm->reslock);
 
 	intr_sts = swr_master_read(swrm, SWRM_INTERRUPT_STATUS);
@@ -1420,6 +1427,7 @@ handle_irq:
 	mutex_lock(&swrm->reslock);
 	swrm_clk_request(swrm, false);
 	mutex_unlock(&swrm->reslock);
+exit:
 	swrm_unlock_sleep(swrm);
 	return ret;
 }
@@ -1441,8 +1449,15 @@ static irqreturn_t swr_mstr_interrupt_v2(int irq, void *dev)
 	}
 
 	mutex_lock(&swrm->reslock);
-	if (swrm->lpass_core_hw_vote)
-		clk_prepare_enable(swrm->lpass_core_hw_vote);
+	if (swrm->lpass_core_hw_vote) {
+		ret = clk_prepare_enable(swrm->lpass_core_hw_vote);
+		if (ret < 0) {
+			dev_err(dev, "%s:lpass core hw enable failed\n",
+				__func__);
+			ret = IRQ_NONE;
+			goto exit;
+		}
+	}
 	swrm_clk_request(swrm, true);
 	mutex_unlock(&swrm->reslock);
 
@@ -1612,6 +1627,7 @@ handle_irq:
 	swrm_clk_request(swrm, false);
 	if (swrm->lpass_core_hw_vote)
 		clk_disable_unprepare(swrm->lpass_core_hw_vote);
+exit:
 	mutex_unlock(&swrm->reslock);
 	swrm_unlock_sleep(swrm);
 	return ret;
@@ -2293,7 +2309,12 @@ static int swrm_runtime_resume(struct device *dev)
 			enable_bank_switch(swrm, 0, SWR_ROW_50, SWR_MIN_COL);
 			list_for_each_entry(swr_dev, &mstr->devices, dev_list) {
 				ret = swr_device_up(swr_dev);
-				if (ret) {
+				if (ret == -ENODEV) {
+					dev_dbg(dev,
+						"%s slave device up not implemented\n",
+						__func__);
+					ret = 0;
+				} else if (ret) {
 					dev_err(dev,
 						"%s: failed to wakeup swr dev %d\n",
 						__func__, swr_dev->dev_num);
@@ -2358,7 +2379,12 @@ static int swrm_runtime_suspend(struct device *dev)
 			swr_master_write(swrm, SWRM_COMP_CFG_ADDR, 0x00);
 			list_for_each_entry(swr_dev, &mstr->devices, dev_list) {
 				ret = swr_device_down(swr_dev);
-				if (ret) {
+				if (ret == -ENODEV) {
+					dev_dbg_ratelimited(dev,
+						"%s slave device down not implemented\n",
+						__func__);
+					ret = 0;
+				} else if (ret) {
 					dev_err(dev,
 						"%s: failed to shutdown swr dev %d\n",
 						__func__, swr_dev->dev_num);

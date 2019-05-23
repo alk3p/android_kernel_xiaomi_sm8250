@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
  */
 #include <linux/module.h>
 #include <linux/init.h>
@@ -22,6 +22,7 @@
 #include <linux/gpio.h>
 #include <linux/mfd/wcd9xxx/wcd9xxx_registers.h>
 #include <soc/swr-wcd.h>
+#include <soc/snd_event.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
@@ -151,6 +152,8 @@ MODULE_PARM_DESC(cpe_debug_mode, "boot cpe in debug mode");
 
 static char on_demand_supply_name[][MAX_ON_DEMAND_SUPPLY_NAME_LENGTH] = {
 	"cdc-vdd-mic-bias",
+	"cdc-vdd-tx-h",
+	"cdc-vdd-rx-h"
 };
 
 enum {
@@ -5634,6 +5637,9 @@ static int tasha_codec_enable_on_demand_supply(
 			snd_soc_dapm_to_component(w->dapm);
 	struct tasha_priv *tasha = snd_soc_component_get_drvdata(component);
 	struct on_demand_supply *supply;
+	struct wcd9xxx *wcd9xxx = tasha->wcd9xxx;
+	struct wcd9xxx_pdata *pdata = dev_get_platdata(component->dev->parent);
+	const char *supply_name;
 
 	if (w->shift >= ON_DEMAND_SUPPLIES_MAX) {
 		dev_err(component->dev, "%s: error index > MAX Demand supplies",
@@ -5646,6 +5652,7 @@ static int tasha_codec_enable_on_demand_supply(
 		__func__, on_demand_supply_name[w->shift], event);
 
 	supply = &tasha->on_demand_list[w->shift];
+	supply_name = on_demand_supply_name[w->shift];
 	WARN_ONCE(!supply->supply, "%s isn't defined\n",
 		on_demand_supply_name[w->shift]);
 	if (!supply->supply) {
@@ -5656,6 +5663,15 @@ static int tasha_codec_enable_on_demand_supply(
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		if (pdata->vote_regulator_on_demand) {
+			ret = wcd9xxx_vote_ondemand_regulator(wcd9xxx, pdata,
+							      supply_name,
+							      true);
+			if (ret)
+				dev_err(component->dev, "%s: Failed to vote %s\n",
+					__func__,
+					on_demand_supply_name[w->shift]);
+		}
 		ret = regulator_enable(supply->supply);
 		if (ret)
 			dev_err(component->dev, "%s: Failed to enable %s\n",
@@ -5668,6 +5684,15 @@ static int tasha_codec_enable_on_demand_supply(
 			dev_err(component->dev, "%s: Failed to disable %s\n",
 				__func__,
 				on_demand_supply_name[w->shift]);
+		if (pdata->vote_regulator_on_demand) {
+			ret = wcd9xxx_vote_ondemand_regulator(wcd9xxx, pdata,
+							      supply_name,
+							      false);
+			if (ret)
+				dev_err(component->dev, "%s: Failed to unvote %s\n",
+					__func__,
+					on_demand_supply_name[w->shift]);
+		}
 		break;
 	default:
 		break;
@@ -11130,7 +11155,14 @@ static const struct snd_soc_dapm_widget tasha_dapm_widgets[] = {
 	SND_SOC_DAPM_SUPPLY(DAPM_LDO_H_STANDALONE, SND_SOC_NOPM, 0, 0,
 			    tasha_codec_force_enable_ldo_h,
 			    SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
-
+	SND_SOC_DAPM_SUPPLY("tx regulator", SND_SOC_NOPM,
+			    ON_DEMAND_TX_SUPPLY, 0,
+			    tasha_codec_enable_on_demand_supply,
+			    SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_SUPPLY("rx regulator", SND_SOC_NOPM,
+			    ON_DEMAND_RX_SUPPLY, 0,
+			    tasha_codec_enable_on_demand_supply,
+			    SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 	SND_SOC_DAPM_MUX("ANC0 FB MUX", SND_SOC_NOPM, 0, 0, &anc0_fb_mux),
 	SND_SOC_DAPM_MUX("ANC1 FB MUX", SND_SOC_NOPM, 0, 0, &anc1_fb_mux),
 
@@ -13708,11 +13740,23 @@ static int tasha_device_down(struct wcd9xxx *wcd9xxx)
 
 	component = (struct snd_soc_component *)(wcd9xxx->ssr_priv);
 	priv = snd_soc_component_get_drvdata(component);
+	snd_event_notify(priv->dev->parent, SND_EVENT_DOWN);
 	wcd_cpe_ssr_event(priv->cpe_core, WCD_CPE_BUS_DOWN_EVENT);
-	for (i = 0; i < priv->nr; i++)
+
+	if (!priv->swr_ctrl_data)
+		return -EINVAL;
+
+	for (i = 0; i < priv->nr; i++) {
+		if (is_snd_event_fwk_enabled())
+			swrm_wcd_notify(
+				priv->swr_ctrl_data[i].swr_pdev,
+				SWR_DEVICE_SSR_DOWN, NULL);
 		swrm_wcd_notify(priv->swr_ctrl_data[i].swr_pdev,
 				SWR_DEVICE_DOWN, NULL);
-	snd_soc_card_change_online_state(component->card, 0);
+	}
+
+	if (!is_snd_event_fwk_enabled())
+		snd_soc_card_change_online_state(component->card, 0);
 	for (count = 0; count < NUM_CODEC_DAIS; count++)
 		priv->dai[count].bus_down_in_recovery = true;
 
@@ -13747,7 +13791,8 @@ static int tasha_post_reset_cb(struct wcd9xxx *wcd9xxx)
 	if (tasha->machine_codec_event_cb)
 		tasha->machine_codec_event_cb(component,
 				WCD9335_CODEC_EVENT_CODEC_UP);
-	snd_soc_card_change_online_state(component->card, 1);
+	if (!is_snd_event_fwk_enabled())
+		snd_soc_card_change_online_state(component->card, 1);
 
 	/* Class-H Init*/
 	wcd_clsh_init(&tasha->clsh_d);
@@ -13807,9 +13852,21 @@ static int tasha_post_reset_cb(struct wcd9xxx *wcd9xxx)
 		goto err;
 	}
 
+	if (!tasha->swr_ctrl_data) {
+		ret = -EINVAL;
+		goto err;
+	}
+
+	if (is_snd_event_fwk_enabled()) {
+		for (i = 0; i < tasha->nr; i++)
+			swrm_wcd_notify(
+				tasha->swr_ctrl_data[i].swr_pdev,
+				SWR_DEVICE_SSR_UP, NULL);
+	}
+
 	tasha_set_spkr_mode(component, tasha->spkr_mode);
 	wcd_cpe_ssr_event(tasha->cpe_core, WCD_CPE_BUS_UP_EVENT);
-
+	snd_event_notify(tasha->dev->parent, SND_EVENT_UP);
 err:
 	mutex_unlock(&tasha->codec_mutex);
 	return ret;
@@ -13834,6 +13891,28 @@ static struct regulator *tasha_codec_find_ondemand_regulator(
 		name);
 	return NULL;
 }
+
+static void tasha_ssr_disable(struct device *dev, void *data)
+{
+	struct wcd9xxx *wcd9xxx = dev_get_drvdata(dev);
+	struct tasha_priv *tasha;
+	struct snd_soc_component *component;
+	int count = 0;
+
+	if (!wcd9xxx) {
+		dev_dbg(dev, "%s: wcd9xxx pointer NULL.\n", __func__);
+		return;
+	}
+	component = (struct snd_soc_component *)(wcd9xxx->ssr_priv);
+	tasha = snd_soc_component_get_drvdata(component);
+
+	for (count = 0; count < NUM_CODEC_DAIS; count++)
+		tasha->dai[count].bus_down_in_recovery = true;
+}
+
+static const struct snd_event_ops tasha_ssr_ops = {
+	.disable = tasha_ssr_disable,
+};
 
 static int tasha_codec_probe(struct snd_soc_component *component)
 {
@@ -13899,12 +13978,14 @@ static int tasha_codec_probe(struct snd_soc_component *component)
 		goto err;
 	}
 
-	supply = tasha_codec_find_ondemand_regulator(component,
-		on_demand_supply_name[ON_DEMAND_MICBIAS]);
-	if (supply) {
-		tasha->on_demand_list[ON_DEMAND_MICBIAS].supply = supply;
-		tasha->on_demand_list[ON_DEMAND_MICBIAS].ondemand_supply_count =
-				0;
+	for (i = ON_DEMAND_MICBIAS; i < ON_DEMAND_SUPPLIES_MAX; i++) {
+		supply = tasha_codec_find_ondemand_regulator(component,
+			on_demand_supply_name[i]);
+		if (supply) {
+			tasha->on_demand_list[i].supply = supply;
+			tasha->on_demand_list[i].ondemand_supply_count =
+					0;
+		}
 	}
 
 	tasha->fw_data = devm_kzalloc(component->dev,
@@ -14654,6 +14735,14 @@ static int tasha_probe(struct platform_device *pdev)
 	tasha_update_reg_defaults(tasha);
 	schedule_work(&tasha->tasha_add_child_devices_work);
 	tasha_get_codec_ver(tasha);
+	ret = snd_event_client_register(pdev->dev.parent, &tasha_ssr_ops, NULL);
+	if (!ret) {
+		snd_event_notify(pdev->dev.parent, SND_EVENT_UP);
+	} else {
+		pr_err("%s: Registration with SND event fwk failed ret = %d\n",
+			   __func__, ret);
+		ret = 0;
+	}
 
 	dev_info(&pdev->dev, "%s: Tasha driver probe done\n", __func__);
 	return ret;
@@ -14682,6 +14771,7 @@ static int tasha_remove(struct platform_device *pdev)
 	if (!tasha)
 		return -EINVAL;
 
+	snd_event_client_deregister(pdev->dev.parent);
 	for (count = 0; count < tasha->child_count &&
 		count < WCD9335_CHILD_DEVICES_MAX; count++)
 		platform_device_unregister(tasha->pdev_child_devices[count]);
