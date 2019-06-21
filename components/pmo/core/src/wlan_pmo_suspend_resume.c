@@ -178,10 +178,9 @@ static void pmo_configure_vdev_suspend_params(
 	vdev_id = pmo_vdev_get_id(vdev);
 	if (!PMO_VDEV_IN_STA_MODE(opmode))
 		return;
-	ret = pmo_tgt_vdev_update_param_req(
-				vdev,
-				pmo_vdev_param_inactivity_time,
-				psoc_cfg->wow_data_inactivity_timeout);
+	ret = pmo_tgt_send_vdev_sta_ps_param(vdev,
+					pmo_sta_ps_param_inactivity_time,
+					psoc_cfg->wow_data_inactivity_timeout);
 	if (QDF_IS_STATUS_ERROR(ret)) {
 		pmo_debug("Failed to Set wow inactivity timeout vdevId %d",
 			  vdev_id);
@@ -197,9 +196,8 @@ static void pmo_configure_vdev_suspend_params(
 				  wow_inactivity_time) *
 					psoc_cfg->ito_repeat_count;
 	if (ito_repeat_count_value)
-		ret = pmo_tgt_vdev_update_param_req(
-					vdev,
-					pmo_vdev_param_ito_repeat_count,
+		ret = pmo_tgt_send_vdev_sta_ps_param(vdev,
+					pmo_sta_ps_param_ito_repeat_count,
 					psoc_cfg->wow_data_inactivity_timeout);
 	if (QDF_IS_STATUS_ERROR(ret)) {
 		pmo_err("Failed to Set ito repeat count vdevId %d",
@@ -224,10 +222,9 @@ static void pmo_configure_vdev_resume_params(
 	vdev_id = pmo_vdev_get_id(vdev);
 	if (!PMO_VDEV_IN_STA_MODE(opmode))
 		return;
-	ret = pmo_tgt_vdev_update_param_req(
-					vdev,
-					pmo_vdev_param_inactivity_time,
-					psoc_cfg->ps_data_inactivity_timeout);
+	ret = pmo_tgt_send_vdev_sta_ps_param(vdev,
+					 pmo_sta_ps_param_inactivity_time,
+					 psoc_cfg->ps_data_inactivity_timeout);
 	if (QDF_IS_STATUS_ERROR(ret)) {
 		pmo_debug("Failed to Set inactivity timeout vdevId %d",
 			  vdev_id);
@@ -745,6 +742,13 @@ pmo_core_enable_wow_in_fw(struct wlan_objmgr_psoc *psoc,
 		psoc_ctx->wow.wow_state = pmo_wow_state_unified_d0;
 	}
 
+	if (qdf_is_drv_connected()) {
+		pmo_info("drv wow is enabled");
+		param.flags |= WMI_WOW_FLAG_ENABLE_DRV_PCIE_L1SS_SLEEP;
+	} else {
+		pmo_info("non-drv wow is enabled");
+	}
+
 	status = pmo_tgt_psoc_send_wow_enable_req(psoc, &param);
 	if (status != QDF_STATUS_SUCCESS) {
 		pmo_err("Failed to enable wow in fw");
@@ -879,6 +883,7 @@ QDF_STATUS pmo_core_psoc_bus_runtime_suspend(struct wlan_objmgr_psoc *psoc,
 	void *txrx_pdev;
 	void *htc_ctx;
 	QDF_STATUS status;
+	int ret;
 	struct pmo_wow_enable_params wow_params = {0};
 
 	pmo_enter();
@@ -909,15 +914,21 @@ QDF_STATUS pmo_core_psoc_bus_runtime_suspend(struct wlan_objmgr_psoc *psoc,
 	wow_params.interface_pause = PMO_WOW_INTERFACE_PAUSE_ENABLE;
 	wow_params.resume_trigger = PMO_WOW_RESUME_TRIGGER_GPIO;
 
-	if (hif_pre_runtime_suspend(hif_ctx))
+	ret = hif_pre_runtime_suspend(hif_ctx);
+	if (ret) {
+		status = qdf_status_from_os_return(ret);
 		goto runtime_failure;
+	}
 
 	status = cdp_runtime_suspend(dp_soc, txrx_pdev);
 	if (status != QDF_STATUS_SUCCESS)
 		goto runtime_failure;
 
-	if (htc_runtime_suspend(htc_ctx))
+	ret = htc_runtime_suspend(htc_ctx);
+	if (ret) {
+		status = qdf_status_from_os_return(ret);
 		goto cdp_runtime_resume;
+	}
 
 	status = pmo_tgt_psoc_set_runtime_pm_inprogress(psoc, true);
 	if (status != QDF_STATUS_SUCCESS)
@@ -932,11 +943,19 @@ QDF_STATUS pmo_core_psoc_bus_runtime_suspend(struct wlan_objmgr_psoc *psoc,
 	if (status != QDF_STATUS_SUCCESS)
 		goto pmo_resume_configure;
 
-	if (hif_runtime_suspend(hif_ctx))
+	ret = hif_runtime_suspend(hif_ctx);
+	if (ret) {
+		status = qdf_status_from_os_return(ret);
 		goto pmo_bus_resume;
+	}
 
-	if (pld_cb && pld_cb())
-		goto resume_hif;
+	if (pld_cb) {
+		ret = pld_cb();
+		if (ret) {
+			status = qdf_status_from_os_return(ret);
+			goto resume_hif;
+		}
+	}
 
 	hif_process_runtime_suspend_success(hif_ctx);
 
@@ -1449,6 +1468,7 @@ QDF_STATUS pmo_core_config_modulated_dtim(struct wlan_objmgr_vdev *vdev,
 	uint32_t max_mod_dtim;
 	QDF_STATUS status;
 	uint8_t vdev_id;
+	uint32_t max_dtim;
 
 	pmo_enter();
 
@@ -1466,9 +1486,18 @@ QDF_STATUS pmo_core_config_modulated_dtim(struct wlan_objmgr_vdev *vdev,
 	if (!beacon_interval_mod)
 		beacon_interval_mod = 1;
 
-	max_mod_dtim = psoc_cfg->sta_max_li_mod_dtim /
-		(pmo_core_get_vdev_dtim_period(vdev)
+	max_dtim = (pmo_core_get_vdev_dtim_period(vdev)
 		 * beacon_interval_mod);
+
+	if (!max_dtim) {
+		pmo_err("Invalid dtim period");
+		pmo_vdev_put_ref(vdev);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	max_mod_dtim = psoc_cfg->sta_max_li_mod_dtim /
+		max_dtim;
+
 	if (!max_mod_dtim)
 		max_mod_dtim = 1;
 

@@ -390,6 +390,36 @@ static bool __lim_process_sme_sys_ready_ind(struct mac_context *mac,
 	return false;
 }
 
+#ifdef WLAN_BCN_RECV_FEATURE
+/**
+ * lim_register_bcn_report_send_cb() - Register bcn receive start
+ * indication handler callback
+ * @mac: Pointer to Global MAC structure
+ * @msg: A pointer to the SME message buffer
+ *
+ * Once driver gets QCA_NL80211_VENDOR_SUBCMD_BEACON_REPORTING vendor
+ * command with attribute for start only. LIM layer register a sme
+ * callback through this function.
+ *
+ * Return: None.
+ */
+static void lim_register_bcn_report_send_cb(struct mac_context *mac,
+					    struct scheduler_msg *msg)
+{
+	if (!msg) {
+		pe_err("Invalid message");
+		return;
+	}
+
+	mac->lim.sme_bcn_rcv_callback = msg->callback;
+}
+#else
+static inline
+void lim_register_bcn_report_send_cb(struct mac_context *mac,
+				     struct scheduler_msg *msg)
+{
+}
+#endif
 /**
  *lim_configure_ap_start_bss_session() - Configure the AP Start BSS in session.
  *@mac_ctx: Pointer to Global MAC structure
@@ -414,7 +444,7 @@ lim_configure_ap_start_bss_session(struct mac_context *mac_ctx,
 	session->dtimPeriod = (uint8_t) sme_start_bss_req->dtimPeriod;
 	/* Enable/disable UAPSD */
 	session->apUapsdEnable = sme_start_bss_req->apUapsdEnable;
-	if (session->pePersona == QDF_P2P_GO_MODE) {
+	if (session->opmode == QDF_P2P_GO_MODE) {
 		session->proxyProbeRspEn = 0;
 	} else {
 		/*
@@ -447,7 +477,6 @@ lim_configure_ap_start_bss_session(struct mac_context *mac_ctx,
  *
  * Return: QDF_STATUS
  */
-#ifdef CONFIG_VDEV_SM
 static QDF_STATUS
 lim_send_start_vdev_req(struct pe_session *session, tLimMlmStartReq *mlm_start_req)
 {
@@ -456,15 +485,6 @@ lim_send_start_vdev_req(struct pe_session *session, tLimMlmStartReq *mlm_start_r
 					     sizeof(*mlm_start_req),
 					     mlm_start_req);
 }
-#else
-static QDF_STATUS
-lim_send_start_vdev_req(struct pe_session *session, tLimMlmStartReq *mlm_start_req)
-{
-	lim_process_mlm_start_req(session->mac_ctx, mlm_start_req);
-
-	return QDF_STATUS_SUCCESS;
-}
-#endif
 
 /**
  * __lim_handle_sme_start_bss_request() - process SME_START_BSS_REQ message
@@ -605,9 +625,9 @@ __lim_handle_sme_start_bss_request(struct mac_context *mac_ctx, uint32_t *msg_bu
 			sme_start_bss_req->channelId;
 
 		/* Store Persona */
-		session->pePersona = sme_start_bss_req->bssPersona;
+		session->opmode = sme_start_bss_req->bssPersona;
 		QDF_TRACE(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_DEBUG,
-			  FL("PE PERSONA=%d"), session->pePersona);
+			  FL("PE PERSONA=%d"), session->opmode);
 
 		/* Update the phymode */
 		session->gLimPhyMode = sme_start_bss_req->nwType;
@@ -658,7 +678,7 @@ __lim_handle_sme_start_bss_request(struct mac_context *mac_ctx, uint32_t *msg_bu
 		case eSIR_INFRA_AP_MODE:
 			lim_configure_ap_start_bss_session(mac_ctx, session,
 				sme_start_bss_req);
-			if (session->pePersona == QDF_SAP_MODE)
+			if (session->opmode == QDF_SAP_MODE)
 				session->vdev_nss = vdev_type_nss->sap;
 			else
 				session->vdev_nss = vdev_type_nss->p2p_go;
@@ -695,7 +715,7 @@ __lim_handle_sme_start_bss_request(struct mac_context *mac_ctx, uint32_t *msg_bu
 		}
 
 		pe_debug("persona - %d, nss - %d",
-				session->pePersona, session->vdev_nss);
+				session->opmode, session->vdev_nss);
 		session->nss = session->vdev_nss;
 		if (!mac_ctx->mlme_cfg->vht_caps.vht_cap_info.enable2x2)
 			session->nss = 1;
@@ -1044,8 +1064,6 @@ static inline void lim_update_sae_config(struct pe_session *session,
  *
  * Return: QDF_STATUS
  */
-
-#ifdef CONFIG_VDEV_SM
 static QDF_STATUS lim_send_join_req(struct pe_session *session,
 				    tLimMlmJoinReq *mlm_join_req)
 {
@@ -1060,15 +1078,6 @@ static QDF_STATUS lim_send_join_req(struct pe_session *session,
 					     sizeof(*mlm_join_req),
 					     mlm_join_req);
 }
-#else
-static QDF_STATUS lim_send_join_req(struct pe_session *session,
-				    tLimMlmJoinReq *mlm_join_req)
-{
-	lim_process_mlm_join_req(session->mac_ctx, mlm_join_req);
-
-	return QDF_STATUS_SUCCESS;
-}
-#endif
 
 /**
  * lim_send_reassoc_req() - send vdev start request for reassoc
@@ -1077,8 +1086,6 @@ static QDF_STATUS lim_send_join_req(struct pe_session *session,
  *
  * Return: QDF_STATUS
  */
-
-#ifdef CONFIG_VDEV_SM
 static QDF_STATUS lim_send_reassoc_req(struct pe_session *session,
 				       tLimMlmReassocReq *reassoc_req)
 {
@@ -1093,15 +1100,6 @@ static QDF_STATUS lim_send_reassoc_req(struct pe_session *session,
 					     sizeof(*reassoc_req),
 					     reassoc_req);
 }
-#else
-static QDF_STATUS lim_send_reassoc_req(struct pe_session *session,
-				       tLimMlmReassocReq *reassoc_req)
-{
-	lim_process_mlm_reassoc_req(session->mac_ctx, reassoc_req);
-
-	return QDF_STATUS_SUCCESS;
-}
-#endif
 
 /**
  * lim_send_ft_reassoc_req() - send vdev start request for ft_reassoc
@@ -1110,8 +1108,6 @@ static QDF_STATUS lim_send_reassoc_req(struct pe_session *session,
  *
  * Return: QDF_STATUS
  */
-
-#ifdef CONFIG_VDEV_SM
 static QDF_STATUS lim_send_ft_reassoc_req(struct pe_session *session,
 					  tLimMlmReassocReq *reassoc_req)
 {
@@ -1126,15 +1122,6 @@ static QDF_STATUS lim_send_ft_reassoc_req(struct pe_session *session,
 					     sizeof(*reassoc_req),
 					     reassoc_req);
 }
-#else
-static QDF_STATUS lim_send_ft_reassoc_req(struct pe_session *session,
-					  tLimMlmReassocReq *reassoc_req)
-{
-	lim_process_mlm_ft_reassoc_req(session->mac_ctx, reassoc_req);
-
-	return QDF_STATUS_SUCCESS;
-}
-#endif
 
 #ifdef WLAN_FEATURE_11W
 #ifdef WLAN_CONV_CRYPTO_IE_SUPPORT
@@ -1242,7 +1229,7 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 	int8_t local_power_constraint = 0, reg_max = 0;
 	uint16_t ie_len;
 	const uint8_t *vendor_ie;
-	tSirBssDescription *bss_desc;
+	struct bss_description *bss_desc;
 	QDF_STATUS status;
 	struct lim_max_tx_pwr_attr tx_pwr_attr = {0};
 
@@ -1379,7 +1366,7 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 
 		/* Store vendor specific IE for CISCO AP */
 		ie_len = (bss_desc->length + sizeof(bss_desc->length) -
-			 GET_FIELD_OFFSET(tSirBssDescription, ieFields));
+			 GET_FIELD_OFFSET(struct bss_description, ieFields));
 
 		vendor_ie = wlan_get_vendor_ie_ptr_from_oui(
 				SIR_MAC_CISCO_OUI, SIR_MAC_CISCO_OUI_SIZE,
@@ -1412,20 +1399,17 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 		 */
 		session->supported_nss_1x1 = true;
 		/*Store Persona */
-		session->pePersona = sme_join_req->staPersona;
-		pe_debug("enable Smps: %d mode: %d send action: %d supported nss 1x1: %d pePersona %d cbMode %d",
-			session->enableHtSmps,
-			session->htSmpsvalue,
-			session->send_smps_action,
-			session->supported_nss_1x1,
-			session->pePersona,
-			sme_join_req->cbMode);
+		session->opmode = sme_join_req->staPersona;
+		pe_debug("enable Smps: %d mode: %d send action: %d supported nss 1x1: %d opmode %d cbMode %d",
+			 session->enableHtSmps, session->htSmpsvalue,
+			 session->send_smps_action, session->supported_nss_1x1,
+			 session->opmode, sme_join_req->cbMode);
 
 		/*Store Persona */
-		session->pePersona = sme_join_req->staPersona;
+		session->opmode = sme_join_req->staPersona;
 		QDF_TRACE(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_DEBUG,
 			  FL("PE PERSONA=%d cbMode %u nwType: %d dot11mode: %d force_24ghz_in_ht20 %d"),
-			  session->pePersona, sme_join_req->cbMode,
+			  session->opmode, sme_join_req->cbMode,
 			  session->nwType, session->dot11mode,
 			  sme_join_req->force_24ghz_in_ht20);
 
@@ -1435,7 +1419,7 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 		session->vhtCapability =
 			IS_DOT11_MODE_VHT(session->dot11mode);
 		if (session->vhtCapability) {
-			if (session->pePersona == QDF_STA_MODE) {
+			if (session->opmode == QDF_STA_MODE) {
 				session->vht_config.su_beam_formee =
 					sme_join_req->vht_config.su_beam_formee;
 			} else {
@@ -1815,7 +1799,7 @@ static void __lim_process_sme_reassoc_req(struct mac_context *mac_ctx,
 		IS_DOT11_MODE_VHT(reassoc_req->dot11mode);
 
 	if (session_entry->vhtCapability) {
-		if (session_entry->pePersona == QDF_STA_MODE) {
+		if (session_entry->opmode == QDF_STA_MODE) {
 			session_entry->vht_config.su_beam_formee =
 				reassoc_req->vht_config.su_beam_formee;
 		} else {
@@ -2783,6 +2767,19 @@ void lim_delete_all_peers(struct pe_session *session)
 	struct mac_context *mac_ctx = session->mac_ctx;
 	tpDphHashNode sta_ds = NULL;
 	QDF_STATUS status;
+	tSirMacAddr bc_addr = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+	/* IBSS and NDI doesn't send Disassoc frame */
+	if (!LIM_IS_IBSS_ROLE(session) &&
+	    !LIM_IS_NDI_ROLE(session)) {
+		pe_debug("stop_bss_reason: %d", session->stop_bss_reason);
+		if (session->stop_bss_reason == eSIR_SME_MIC_COUNTER_MEASURES)
+			__lim_counter_measures(mac_ctx, session);
+		else
+			lim_send_disassoc_mgmt_frame(mac_ctx,
+				eSIR_MAC_DEAUTH_LEAVING_BSS_REASON,
+				bc_addr, session, false);
+	}
 
 	for (i = 1; i < session->dph.dphHashTable.size; i++) {
 		sta_ds = dph_get_hash_entry(mac_ctx, i,
@@ -2817,7 +2814,7 @@ QDF_STATUS lim_sta_send_del_bss(struct pe_session *session)
 
 	status = lim_del_bss(mac_ctx, sta_ds, 0, session);
 	if (QDF_IS_STATUS_ERROR(status))
-		pe_err("delBss failed for bss %d", session->bssIdx);
+		pe_err("delBss failed for bss %d", session->bss_idx);
 
 end:
 	return status;
@@ -2828,10 +2825,10 @@ QDF_STATUS lim_send_vdev_stop(struct pe_session *session)
 	struct mac_context *mac_ctx = session->mac_ctx;
 	QDF_STATUS status;
 
-	status = lim_del_bss(mac_ctx, NULL, session->bssIdx, session);
+	status = lim_del_bss(mac_ctx, NULL, session->bss_idx, session);
 
 	if (QDF_IS_STATUS_ERROR(status)) {
-		pe_err("delBss failed for bss %d", session->bssIdx);
+		pe_err("delBss failed for bss %d", session->bss_idx);
 		lim_send_stop_bss_failure_resp(mac_ctx, session);
 	}
 
@@ -2844,7 +2841,6 @@ QDF_STATUS lim_send_vdev_stop(struct pe_session *session)
  *
  * Return None
  */
-#ifdef CONFIG_VDEV_SM
 static void lim_delete_peers_and_send_vdev_stop(struct pe_session *session)
 {
 	struct mac_context *mac_ctx = session->mac_ctx;
@@ -2864,14 +2860,6 @@ static void lim_delete_peers_and_send_vdev_stop(struct pe_session *session)
 	if (QDF_IS_STATUS_ERROR(status))
 		lim_send_stop_bss_failure_resp(mac_ctx, session);
 }
-#else
-static void lim_delete_peers_and_send_vdev_stop(struct pe_session *session)
-{
-	lim_delete_all_peers(session);
-	/* send a delBss to HAL and wait for a response */
-	lim_send_vdev_stop(session);
-}
-#endif
 
 static void
 __lim_handle_sme_stop_bss_request(struct mac_context *mac, uint32_t *pMsgBuf)
@@ -2940,20 +2928,7 @@ __lim_handle_sme_stop_bss_request(struct mac_context *mac, uint32_t *pMsgBuf)
 		       pe_session->limSmeState));
 
 	pe_session->smeSessionId = smesessionId;
-
-	/* STA_IN_IBSS and NDI should NOT send Disassoc frame */
-	if (!LIM_IS_IBSS_ROLE(pe_session) &&
-	    !LIM_IS_NDI_ROLE(pe_session)) {
-		tSirMacAddr bcAddr = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-
-		if (stop_bss_req.reasonCode == eSIR_SME_MIC_COUNTER_MEASURES)
-			/* Send disassoc all stations associated thru TKIP */
-			__lim_counter_measures(mac, pe_session);
-		else
-			lim_send_disassoc_mgmt_frame(mac,
-				eSIR_MAC_DEAUTH_LEAVING_BSS_REASON,
-				bcAddr, pe_session, false);
-	}
+	pe_session->stop_bss_reason = stop_bss_req.reasonCode;
 
 	if (!LIM_IS_NDI_ROLE(pe_session)) {
 		/* Free the buffer allocated in START_BSS_REQ */
@@ -3135,7 +3110,7 @@ void __lim_process_sme_assoc_cnf_new(struct mac_context *mac_ctx, uint32_t msg_t
 		 * denied STA we need to remove this HAL entry.
 		 * So to do that set updateContext to 1
 		 */
-		tSirMacStatusCodes mac_status_code =
+		enum mac_status_code mac_status_code =
 					eSIR_MAC_UNSPEC_FAILURE_STATUS;
 
 		if (!sta_ds->mlmStaContext.updateContext)
@@ -3769,7 +3744,6 @@ static void lim_process_roam_invoke(struct mac_context *mac_ctx,
 }
 #endif
 
-#ifdef CONFIG_VDEV_SM
 static void lim_handle_update_ssid_hidden(struct mac_context *mac_ctx,
 				struct pe_session *session, uint8_t ssid_hidden)
 {
@@ -3788,37 +3762,7 @@ static void lim_handle_update_ssid_hidden(struct mac_context *mac_ctx,
 				      WLAN_VDEV_SM_EV_FW_VDEV_RESTART,
 				      sizeof(*session), session);
 }
-#else
-/*
- * lim_handle_update_ssid_hidden() - Processes SSID hidden update
- * @mac_ctx: Pointer to global mac context
- * @session: Pointer to PE session
- * @ssid_hidden: SSID hidden value to set; 0 - Broadcast SSID,
- *    1 - Disable broadcast SSID
- *
- * Return: None
- */
-static void lim_handle_update_ssid_hidden(
-				struct mac_context *mac_ctx,
-				struct pe_session *session,
-				uint8_t ssid_hidden)
-{
-	pe_debug("rcvd HIDE_SSID message old HIDE_SSID: %d new HIDE_SSID: %d",
-		 session->ssidHidden, ssid_hidden);
 
-	if (ssid_hidden != session->ssidHidden) {
-		session->ssidHidden = ssid_hidden;
-	} else {
-		pe_debug("Dont process HIDE_SSID msg with existing setting");
-		return;
-	}
-
-	/* Send vdev restart */
-	lim_send_vdev_restart(mac_ctx, session, session->smeSessionId);
-
-	return;
-}
-#endif
 /**
  * __lim_process_sme_session_update - process SME session update msg
  *
@@ -3911,7 +3855,7 @@ static void __lim_process_sme_change_bi(struct mac_context *mac,
 			/* Update beacon */
 			sch_set_fixed_beacon_fields(mac, pe_session);
 
-			beaconParams.bssIdx = pe_session->bssIdx;
+			beaconParams.bss_idx = pe_session->bss_idx;
 			/* Set change in beacon Interval */
 			beaconParams.beaconInterval =
 				pChangeBIParams->beaconInterval;
@@ -4552,7 +4496,6 @@ static void lim_process_sme_update_access_policy_vendor_ie(
 	pe_session_entry->access_policy = update_vendor_ie->access_policy;
 }
 
-#ifdef CONFIG_VDEV_SM
 QDF_STATUS lim_sta_mlme_vdev_disconnect_bss(struct vdev_mlme_obj *vdev_mlme,
 					    uint16_t data_len, void *data)
 {
@@ -4700,55 +4643,6 @@ static void lim_process_sme_deauth_req(struct mac_context *mac_ctx,
 		__lim_process_sme_deauth_req(mac_ctx,
 					     (uint32_t *)msg->bodyptr);
 }
-#else
-/**
- * lim_process_sme_disassoc_cnf() - process sme disassoc cnf message
- * @mac_ctx: Pointer to Global MAC structure
- * @msg: pointer to message buffer
- *
- * This function is called to process SME_DISASSOC_CNF message
- * from HDD or upper layer application.
- *
- * Return: None
- */
-static void lim_process_sme_disassoc_cnf(struct mac_context *mac_ctx,
-					 struct scheduler_msg *msg)
-{
-	__lim_process_sme_disassoc_cnf(mac_ctx, (uint32_t *)msg->bodyptr);
-}
-
-/**
- * lim_process_sme_disassoc_req() - process sme deauth req
- * @mac_ctx: Pointer to Global MAC structure
- * @msg: pointer to message buffer
- *
- * This function is called to process SME_DISASSOC_REQ message
- * from HDD or upper layer application.
- *
- * Return: None
- */
-static void lim_process_sme_disassoc_req(struct mac_context *mac_ctx,
-					 struct scheduler_msg *msg)
-{
-	__lim_process_sme_disassoc_req(mac_ctx, (uint32_t *)msg->bodyptr);
-}
-
-/**
- * lim_process_sme_deauth_req() - process sme deauth req
- * @mac_ctx: Pointer to Global MAC structure
- * @msg: pointer to message buffer
- *
- * This function is called to process SME_DEAUTH_REQ message
- * from HDD or upper layer application.
- *
- * Return: None
- */
-static void lim_process_sme_deauth_req(struct mac_context *mac_ctx,
-				       struct scheduler_msg *msg)
-{
-	__lim_process_sme_deauth_req(mac_ctx, (uint32_t *)msg->bodyptr);
-}
-#endif
 
 /**
  * lim_process_sme_req_messages()
@@ -4982,6 +4876,9 @@ bool lim_process_sme_req_messages(struct mac_context *mac,
 		lim_process_sme_cfg_action_frm_in_tb_ppdu(mac,
 				(struct  sir_cfg_action_frm_tb_ppdu *)pMsgBuf);
 		break;
+	case WNI_SME_REGISTER_BCN_REPORT_SEND_CB:
+		lim_register_bcn_report_send_cb(mac, pMsg);
+		break;
 	default:
 		qdf_mem_free((void *)pMsg->bodyptr);
 		pMsg->bodyptr = NULL;
@@ -5056,7 +4953,6 @@ static void lim_process_sme_start_beacon_req(struct mac_context *mac, uint32_t *
 	}
 }
 
-#ifdef CONFIG_VDEV_SM
 static void lim_change_channel(
 	struct mac_context *mac_ctx,
 	struct pe_session *session_entry)
@@ -5074,31 +4970,6 @@ static void lim_change_channel(
 					      sizeof(*session_entry),
 					      session_entry);
 }
-#else
-/**
- * lim_change_channel() - lim change channel api
- *
- * @mac_ctx: Pointer to Global MAC structure
- * @session_entry: pointer to the SME message buffer
- *
- * This function is called to process SME_CHANNEL_CHANGE_REQ message
- *
- * Return: None
- */
-static void lim_change_channel(
-	struct mac_context *mac_ctx,
-	struct pe_session *session_entry)
-{
-	lim_set_channel(mac_ctx, session_entry->currentOperChannel,
-			session_entry->ch_center_freq_seg0,
-			session_entry->ch_center_freq_seg1,
-			session_entry->ch_width,
-			session_entry->maxTxPower,
-			session_entry->peSessionId,
-			session_entry->cac_duration_ms,
-			session_entry->dfs_regdomain);
-}
-#endif
 
 /**
  * lim_process_sme_channel_change_request() - process sme ch change req
@@ -6379,7 +6250,6 @@ void lim_process_obss_color_collision_info(struct mac_context *mac_ctx,
 }
 #endif
 
-#ifdef CONFIG_VDEV_SM
 void lim_send_csa_restart_req(struct mac_context *mac_ctx, uint8_t vdev_id)
 {
 	struct pe_session *session;
@@ -6395,7 +6265,6 @@ void lim_send_csa_restart_req(struct mac_context *mac_ctx, uint8_t vdev_id)
 				      WLAN_VDEV_SM_EV_CSA_RESTART,
 				      sizeof(*session), session);
 }
-#endif
 
 void lim_continue_sta_csa_req(struct mac_context *mac_ctx, uint8_t vdev_id)
 {
@@ -6403,102 +6272,23 @@ void lim_continue_sta_csa_req(struct mac_context *mac_ctx, uint8_t vdev_id)
 	lim_process_channel_switch_timeout(mac_ctx);
 }
 
-void lim_remove_duplicate_bssid_node(struct sir_rssi_disallow_lst *entry,
-				     qdf_list_t *list)
-{
-	qdf_list_node_t *cur_list = NULL;
-	qdf_list_node_t *next_list = NULL;
-	struct sir_rssi_disallow_lst *cur_entry;
-	QDF_STATUS status;
-
-	qdf_list_peek_front(list, &cur_list);
-	while (cur_list) {
-		qdf_list_peek_next(list, cur_list, &next_list);
-		cur_entry = qdf_container_of(cur_list,
-					     struct sir_rssi_disallow_lst,
-					     node);
-
-		/*
-		 * Remove the node from blacklisting if the timeout is 0 and
-		 * rssi is 0 dbm i.e btm blacklisted entry
-		 */
-		if ((lim_assoc_rej_get_remaining_delta(cur_entry) == 0) &&
-		    cur_entry->expected_rssi == LIM_MIN_RSSI) {
-			status = qdf_list_remove_node(list, cur_list);
-			if (QDF_IS_STATUS_SUCCESS(status))
-				qdf_mem_free(cur_entry);
-		} else if (qdf_is_macaddr_equal(&entry->bssid,
-						&cur_entry->bssid)) {
-			/*
-			 * Remove the node if we try to add the same bssid again
-			 * Copy the old rssi value alone
-			 */
-			entry->expected_rssi = cur_entry->expected_rssi;
-			status = qdf_list_remove_node(list, cur_list);
-			if (QDF_IS_STATUS_SUCCESS(status)) {
-				qdf_mem_free(cur_entry);
-				break;
-			}
-		}
-		cur_list = next_list;
-		next_list = NULL;
-	}
-}
-
 void lim_add_roam_blacklist_ap(struct mac_context *mac_ctx,
 			       struct roam_blacklist_event *src_lst)
 {
 	uint32_t i;
-	struct sir_rssi_disallow_lst *entry;
+	struct sir_rssi_disallow_lst entry;
 	struct roam_blacklist_timeout *blacklist;
-	QDF_STATUS status = QDF_STATUS_SUCCESS;
 
 	blacklist = &src_lst->roam_blacklist[0];
 	for (i = 0; i < src_lst->num_entries; i++) {
-		entry = qdf_mem_malloc(sizeof(struct sir_rssi_disallow_lst));
-		if (!entry)
-			return;
 
-		qdf_copy_macaddr(&entry->bssid, &blacklist->bssid);
-		entry->retry_delay = blacklist->timeout;
-		entry->time_during_rejection = blacklist->received_time;
+		entry.bssid = blacklist->bssid;
+		entry.retry_delay = blacklist->timeout;
+		entry.time_during_rejection = blacklist->received_time;
 		/* set 0dbm as expected rssi for btm blaclisted entries */
-		entry->expected_rssi = LIM_MIN_RSSI;
+		entry.expected_rssi = LIM_MIN_RSSI;
 
-		qdf_mutex_acquire(&mac_ctx->roam.rssi_disallow_bssid_lock);
-		lim_remove_duplicate_bssid_node(
-					entry,
-					&mac_ctx->roam.rssi_disallow_bssid);
-
-		if (qdf_list_size(&mac_ctx->roam.rssi_disallow_bssid) >=
-		    MAX_RSSI_AVOID_BSSID_LIST) {
-			status = lim_rem_blacklist_entry_with_lowest_delta(
-					&mac_ctx->roam.rssi_disallow_bssid);
-			if (QDF_IS_STATUS_ERROR(status)) {
-				qdf_mutex_release(&mac_ctx->roam.
-					rssi_disallow_bssid_lock);
-				pe_err("Failed to remove entry with lowest delta");
-				qdf_mem_free(entry);
-				return;
-			}
-		}
-
-		if (QDF_IS_STATUS_SUCCESS(status)) {
-			status = qdf_list_insert_back(
-					&mac_ctx->roam.rssi_disallow_bssid,
-					&entry->node);
-			if (QDF_IS_STATUS_ERROR(status)) {
-				qdf_mutex_release(&mac_ctx->roam.
-					rssi_disallow_bssid_lock);
-				pe_err("Failed to enqueue bssid: %pM",
-				       entry->bssid.bytes);
-				qdf_mem_free(entry);
-				return;
-			}
-			pe_debug("Added BTM blacklisted bssid: %pM",
-				 entry->bssid.bytes);
-		}
-		qdf_mutex_release(&mac_ctx->roam.rssi_disallow_bssid_lock);
-		blacklist++;
+		/* Add this bssid to the rssi reject ap type in blacklist mgr */
+		lim_add_bssid_to_reject_list(mac_ctx->pdev, &entry);
 	}
 }

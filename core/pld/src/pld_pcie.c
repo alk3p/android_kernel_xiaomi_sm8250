@@ -95,6 +95,49 @@ static void pld_pcie_remove(struct pci_dev *pdev)
 
 #ifdef CONFIG_PLD_PCIE_CNSS
 /**
+ * pld_pcie_idle_restart_cb() - Perform idle restart
+ * @pdev: PCIE device
+ * @id: PCIE device ID
+ *
+ * This function will be called if there is an idle restart request
+ *
+ * Return: int
+ */
+static int pld_pcie_idle_restart_cb(struct pci_dev *pdev,
+				    const struct pci_device_id *id)
+{
+	struct pld_context *pld_context;
+
+	pld_context = pld_get_global_context();
+	if (pld_context->ops->idle_restart)
+		return pld_context->ops->idle_restart(&pdev->dev,
+						      PLD_BUS_TYPE_PCIE);
+
+	return -ENODEV;
+}
+
+/**
+ * pld_pcie_idle_shutdown_cb() - Perform idle shutdown
+ * @pdev: PCIE device
+ * @id: PCIE device ID
+ *
+ * This function will be called if there is an idle shutdown request
+ *
+ * Return: int
+ */
+static int pld_pcie_idle_shutdown_cb(struct pci_dev *pdev)
+{
+	struct pld_context *pld_context;
+
+	pld_context = pld_get_global_context();
+	if (pld_context->ops->shutdown)
+		return pld_context->ops->idle_shutdown(&pdev->dev,
+						       PLD_BUS_TYPE_PCIE);
+
+	return -ENODEV;
+}
+
+/**
  * pld_pcie_reinit() - SSR re-initialize function for PCIE device
  * @pdev: PCIE device
  * @id: PCIE device ID
@@ -460,6 +503,8 @@ struct cnss_wlan_driver pld_pcie_ops = {
 	.id_table   = pld_pcie_id_table,
 	.probe      = pld_pcie_probe,
 	.remove     = pld_pcie_remove,
+	.idle_restart  = pld_pcie_idle_restart_cb,
+	.idle_shutdown = pld_pcie_idle_shutdown_cb,
 	.reinit     = pld_pcie_reinit,
 	.shutdown   = pld_pcie_shutdown,
 	.crash_shutdown = pld_pcie_crash_shutdown,
@@ -717,6 +762,14 @@ int pld_pcie_get_soc_info(struct device *dev, struct pld_soc_info *info)
 	info->fw_version = cnss_info.fw_version;
 	strlcpy(info->fw_build_timestamp, cnss_info.fw_build_timestamp,
 		sizeof(info->fw_build_timestamp));
+	info->device_version.family_number =
+		cnss_info.device_version.family_number;
+	info->device_version.device_number =
+		cnss_info.device_version.device_number;
+	info->device_version.major_version =
+		cnss_info.device_version.major_version;
+	info->device_version.minor_version =
+		cnss_info.device_version.minor_version;
 
 	return 0;
 }

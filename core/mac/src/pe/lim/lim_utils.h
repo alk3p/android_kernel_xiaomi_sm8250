@@ -281,7 +281,7 @@ void lim_decide_sta_protection_on_assoc(struct mac_context *mac,
 		struct pe_session *pe_session);
 void lim_update_sta_run_time_ht_switch_chnl_params(struct mac_context *mac,
 		tDot11fIEHTInfo *pHTInfo,
-		uint8_t bssIdx,
+		uint8_t bss_idx,
 		struct pe_session *pe_session);
 /* Print MAC address utility function */
 void lim_print_mac_addr(struct mac_context *, tSirMacAddr, uint8_t);
@@ -744,7 +744,6 @@ bool lim_check_disassoc_deauth_ack_pending(struct mac_context *mac,
 
 #ifdef WLAN_FEATURE_11W
 void lim_pmf_sa_query_timer_handler(void *pMacGlobal, uint32_t param);
-void lim_pmf_comeback_timer_callback(void *context);
 void lim_set_protected_bit(struct mac_context *mac,
 	struct pe_session *pe_session,
 	tSirMacAddr peer, tpSirMacMgmtHdr pMacHdr);
@@ -824,6 +823,18 @@ lim_del_pmf_sa_query_timer(struct mac_context *mac_ctx, struct pe_session *pe_se
 {
 }
 #endif
+
+/**
+ * lim_add_bssid_to_reject_list:- Add rssi reject Ap info to blacklist mgr.
+ * @pdev: pdev
+ * @entry: info of the BSSID to be put in rssi reject list.
+ *
+ * This API will add the passed ap info to the rssi reject list.
+ *
+ */
+void
+lim_add_bssid_to_reject_list(struct wlan_objmgr_pdev *pdev,
+			     struct sir_rssi_disallow_lst *entry);
 
 /**
  * lim_strip_op_class_update_struct - strip sup op class IE and populate
@@ -1302,24 +1313,6 @@ QDF_STATUS lim_populate_he_mcs_set(struct mac_context *mac_ctx,
 #endif
 
 /**
- * lim_assoc_rej_add_to_rssi_based_reject_list() - Add BSSID to the rssi based
- * rejection list
- * @mac_ctx: mac ctx
- * @rssi_assoc_rej: rssi assoc reject attribute
- * @bssid : BSSID of the AP
- * @rssi : RSSI of the assoc resp
- *
- * Add BSSID to the rssi based rejection list. Also if number
- * of entries is greater than MAX_RSSI_AVOID_BSSID_LIST
- * remove the entry with lowest time delta
- *
- * Return: void
- */
-void lim_assoc_rej_add_to_rssi_based_reject_list(struct mac_context *mac_ctx,
-	tDot11fTLVrssi_assoc_rej *rssi_assoc_rej,
-	tSirMacAddr bssid, int8_t rssi);
-
-/**
  * lim_decrement_pending_mgmt_count: Decrement mgmt frame count
  * @mac_ctx: Pointer to global MAC structure
  *
@@ -1548,7 +1541,6 @@ void lim_ndi_mlme_vdev_up_transition(struct pe_session *session);
  */
 void lim_disconnect_complete(struct pe_session *session, bool del_bss);
 
-#ifdef CONFIG_VDEV_SM
 /**
  * lim_sta_mlme_vdev_stop_send() - send VDEV stop
  * @vdev_mlme_obj:  VDEV MLME comp object
@@ -1689,8 +1681,6 @@ QDF_STATUS lim_ap_mlme_vdev_restart_send(struct vdev_mlme_obj *vdev_mlme,
  */
 QDF_STATUS lim_ap_mlme_vdev_start_req_failed(struct vdev_mlme_obj *vdev_mlme,
 					     uint16_t data_len, void *data);
-
-#endif
 
 #ifdef CRYPTO_SET_KEY_CONVERGED
 static inline bool lim_is_set_key_req_converged(void)

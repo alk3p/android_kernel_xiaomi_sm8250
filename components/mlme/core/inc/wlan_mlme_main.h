@@ -29,11 +29,11 @@
 #include <wlan_objmgr_vdev_obj.h>
 #include <wlan_objmgr_peer_obj.h>
 
-#define mlme_fatal(params...) QDF_TRACE_FATAL(QDF_MODULE_ID_MLME, params)
-#define mlme_err(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_MLME, params)
-#define mlme_warn(params...) QDF_TRACE_WARN(QDF_MODULE_ID_MLME, params)
-#define mlme_info(params...) QDF_TRACE_INFO(QDF_MODULE_ID_MLME, params)
-#define mlme_debug(params...) QDF_TRACE_DEBUG(QDF_MODULE_ID_MLME, params)
+#define mlme_legacy_fatal(params...) QDF_TRACE_FATAL(QDF_MODULE_ID_MLME, params)
+#define mlme_legacy_err(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_MLME, params)
+#define mlme_legacy_warn(params...) QDF_TRACE_WARN(QDF_MODULE_ID_MLME, params)
+#define mlme_legacy_info(params...) QDF_TRACE_INFO(QDF_MODULE_ID_MLME, params)
+#define mlme_legacy_debug(params...) QDF_TRACE_DEBUG(QDF_MODULE_ID_MLME, params)
 
 /**
  * struct wlan_mlme_psoc_obj -MLME psoc priv object
@@ -50,8 +50,6 @@ struct wlan_mlme_psoc_obj {
 struct peer_mlme_priv_obj {
 	uint32_t ucast_key_cipher;
 };
-
-#ifdef CONFIG_VDEV_SM
 
 /**
  * enum vdev_assoc_type - VDEV associate/reassociate type
@@ -72,63 +70,25 @@ enum vdev_assoc_type {
  *                                   in progress
  * @vdev_start_failed: flag to indicate that vdev start failed.
  * @connection_fail: flag to indicate connection failed
+ * @cac_required_for_new_channel: if CAC is required for new channel
  * @assoc_type: vdev associate/reassociate type
  * @dynamic_cfg: current configuration of nss, chains for vdev.
  * @ini_cfg: Max configuration of nss, chains supported for vdev.
  * @sta_dynamic_oce_value: Dyanmic oce flags value for sta
+ * @roam_invoke_params: Roam invoke params
  */
 struct mlme_legacy_priv {
 	bool chan_switch_in_progress;
 	bool hidden_ssid_restart_in_progress;
 	bool vdev_start_failed;
 	bool connection_fail;
+	bool cac_required_for_new_channel;
 	enum vdev_assoc_type assoc_type;
 	struct wlan_mlme_nss_chains dynamic_cfg;
 	struct wlan_mlme_nss_chains ini_cfg;
 	uint8_t sta_dynamic_oce_value;
+	struct mlme_roam_after_data_stall roam_invoke_params;
 };
-
-#else
-/**
- * struct vdev_mlme_obj - VDEV MLME component object
- * @dynamic_cfg: current configuration of nss, chains for vdev.
- * @ini_cfg: Max configuration of nss, chains supported for vdev.
- * @sta_dynamic_oce_value: Dyanmic oce flags value for sta
- */
-struct vdev_mlme_priv_obj {
-	struct wlan_mlme_nss_chains dynamic_cfg;
-	struct wlan_mlme_nss_chains ini_cfg;
-	uint8_t sta_dynamic_oce_value;
-};
-
-/**
- * mlme_vdev_object_created_notification(): mlme vdev create handler
- * @vdev: vdev which is going to created by objmgr
- * @arg: argument for vdev create handler
- *
- * Register this api with objmgr to detect vdev is created
- *
- * Return: QDF_STATUS status in case of success else return error
- */
-
-QDF_STATUS
-mlme_vdev_object_created_notification(struct wlan_objmgr_vdev *vdev,
-				      void *arg);
-
-/**
- * mlme_vdev_object_destroyed_notification(): mlme vdev delete handler
- * @psoc: vdev which is going to delete by objmgr
- * @arg: argument for vdev delete handler
- *
- * Register this api with objmgr to detect vdev is deleted
- *
- * Return: QDF_STATUS status in case of success else return error
- */
-QDF_STATUS
-mlme_vdev_object_destroyed_notification(struct wlan_objmgr_vdev *vdev,
-					void *arg);
-
-#endif
 
 #ifndef CRYPTO_SET_KEY_CONVERGED
 /**
@@ -146,7 +106,7 @@ void wlan_peer_set_unicast_cipher(struct wlan_objmgr_peer *peer, uint32_t value)
 	peer_priv = wlan_objmgr_peer_get_comp_private_obj(peer,
 							  WLAN_UMAC_COMP_MLME);
 	if (!peer_priv) {
-		mlme_err(" peer mlme component object is NULL");
+		mlme_legacy_err(" peer mlme component object is NULL");
 		return;
 	}
 	peer_priv->ucast_key_cipher  = value;
@@ -166,7 +126,7 @@ uint32_t wlan_peer_get_unicast_cipher(struct wlan_objmgr_peer *peer)
 	peer_priv = wlan_objmgr_peer_get_comp_private_obj(peer,
 							  WLAN_UMAC_COMP_MLME);
 	if (!peer_priv) {
-		mlme_err("peer mlme component object is NULL");
+		mlme_legacy_err("peer mlme component object is NULL");
 		return 0;
 	}
 
@@ -241,6 +201,15 @@ struct wlan_mlme_nss_chains *mlme_get_dynamic_vdev_config(
  */
 struct wlan_mlme_nss_chains *mlme_get_ini_vdev_config(
 					struct wlan_objmgr_vdev *vdev);
+
+/**
+ * mlme_get_roam_invoke_params() - get the roam invoke params
+ * @vdev: vdev pointer
+ *
+ * Return: pointer to the vdev roam invoke config structure
+ */
+struct mlme_roam_after_data_stall *
+mlme_get_roam_invoke_params(struct wlan_objmgr_vdev *vdev);
 
 /**
  * mlme_psoc_object_created_notification(): mlme psoc create handler

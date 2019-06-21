@@ -153,11 +153,11 @@ QDF_STATUS ucfg_tdls_responder(struct tdls_set_responder_req *msg_req);
 
 /**
  * ucfg_tdls_teardown_links() - teardown all TDLS links
- * @vdev: vdev object manager
+ * @psoc: psoc object
  *
  * Return: None
  */
-QDF_STATUS ucfg_tdls_teardown_links(struct wlan_objmgr_vdev *vdev);
+QDF_STATUS ucfg_tdls_teardown_links(struct wlan_objmgr_psoc *psoc);
 
 /**
  * ucfg_tdls_notify_reset_adapter() - notify reset adapter
@@ -268,6 +268,30 @@ QDF_STATUS ucfg_set_tdls_secoffchanneloffset(struct wlan_objmgr_vdev *vdev,
  */
 QDF_STATUS ucfg_tdls_set_rssi(struct wlan_objmgr_vdev *vdev,
 			      uint8_t *mac, int8_t rssi);
+
+/**
+ * ucfg_tdls_notify_connect_failure() - This api is called if STA/P2P
+ * connection fails on one iface and to enable/disable TDLS on the other
+ * STA/P2P iface which is already connected.
+ * @psoc: psoc object
+ *
+ * Return: void
+ */
+void ucfg_tdls_notify_connect_failure(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * ucfg_get_tdls_vdev() - Ucfg api to get tdls specific vdev object
+ * @psoc: wlan psoc object manager
+ * @dbg_id: debug id
+ *
+ * If TDLS is enabled on any vdev then return the corresponding vdev.
+ *
+ * This api increases the ref count of the returned vdev.
+ * Return: vdev manager pointer or NULL.
+ */
+struct wlan_objmgr_vdev *ucfg_get_tdls_vdev(struct wlan_objmgr_psoc *psoc,
+					    wlan_objmgr_ref_dbgid dbg_id);
+
 #else
 
 static inline
@@ -320,7 +344,7 @@ void ucfg_tdls_update_tx_pkt_cnt(struct wlan_objmgr_vdev *vdev,
 }
 
 static inline
-QDF_STATUS ucfg_tdls_teardown_links(struct wlan_objmgr_vdev *vdev)
+QDF_STATUS ucfg_tdls_teardown_links(struct wlan_objmgr_psoc *psoc)
 {
 	return QDF_STATUS_SUCCESS;
 }
@@ -331,5 +355,18 @@ QDF_STATUS ucfg_tdls_set_rssi(struct wlan_objmgr_vdev *vdev,
 {
 	return QDF_STATUS_SUCCESS;
 }
+
+static inline
+void ucfg_tdls_notify_connect_failure(struct wlan_objmgr_psoc *psoc)
+{
+}
+
+static inline
+struct wlan_objmgr_vdev *ucfg_get_tdls_vdev(struct wlan_objmgr_psoc *psoc,
+					    wlan_objmgr_ref_dbgid dbg_id)
+{
+	return NULL;
+}
+
 #endif /* FEATURE_WLAN_TDLS */
 #endif

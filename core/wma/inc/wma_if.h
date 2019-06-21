@@ -146,7 +146,7 @@ struct sAniProbeRspStruct {
  * @supportedRates: legacy supported rates
  * @status: QDF status
  * @staIdx: station index
- * @bssIdx: BSSID of BSS to which the station is associated
+ * @bss_idx: BSSID of BSS to which the station is associated
  * @updateSta: pdate the existing STA entry, if this flag is set
  * @respReqd: A flag to indicate to HAL if the response message is required
  * @rmfEnabled: Robust Management Frame (RMF) enabled/disabled
@@ -179,6 +179,7 @@ struct sAniProbeRspStruct {
  * @stbc_capable: stbc capable
  * @max_amsdu_num: Maximum number of MSDUs in a tx aggregate frame
  * @mbssid_info: Multiple bssid information
+ * @no_ptk_4_way: Do not need 4-way handshake
  *
  * This structure contains parameter required for
  * add sta request of upper layer.
@@ -240,10 +241,10 @@ typedef struct {
 	/* BSSID of BSS to which the station is associated.
 	 * This should be filled back in by HAL, and sent back to LIM as part of
 	 * the response message, so LIM can cache it in the station entry of
-	 * hash table. When station is deleted, LIM will make use of this bssIdx
-	 * to delete BSS from hal tables and from softmac.
+	 * hash table. When station is deleted, LIM will make use of this
+	 * bss_idx to delete BSS from hal tables and from softmac.
 	 */
-	uint8_t bssIdx;
+	uint8_t bss_idx;
 	uint8_t updateSta;
 	uint8_t respReqd;
 	uint8_t rmfEnabled;
@@ -287,6 +288,7 @@ typedef struct {
 	uint8_t twt_requestor;
 	uint8_t twt_responder;
 #endif
+	bool no_ptk_4_way;
 } tAddStaParams, *tpAddStaParams;
 
 /**
@@ -392,7 +394,7 @@ typedef struct sLimMlmSetKeysReq {
  * @currentExtChannel: Current Extension Channel, if applicable
  * @staContext: sta context
  * @status: status
- * @bssIdx: BSS index allocated by HAL
+ * @bss_idx: BSS index allocated by HAL
  * @updateBss: update the existing BSS entry, if this flag is set
  * @ssId: Add BSSID info for rxp filter
  * @respReqd: send the response message to LIM only when this flag is set
@@ -414,11 +416,12 @@ typedef struct sLimMlmSetKeysReq {
  * @he_capable: HE Capability
  * @cac_duration_ms: cac duration in milliseconds
  * @dfs_regdomain: dfs region
+ * @no_ptk_4_way: Do not need 4-way handshake
  */
 typedef struct {
 	tSirMacAddr bssId;
 	tSirMacAddr selfMacAddr;
-	tSirBssType bssType;
+	enum bss_type bssType;
 	uint8_t operMode;
 	tSirNwType nwType;
 	uint8_t shortSlotTimeSupported;
@@ -442,7 +445,7 @@ typedef struct {
 	uint8_t currentOperChannel;
 	tAddStaParams staContext;
 	QDF_STATUS status;
-	uint16_t bssIdx;
+	uint16_t bss_idx;
 	/* HAL should update the existing BSS entry, if this flag is set.
 	 * PE will set this flag in case of reassoc, where we want to resue the
 	 * the old bssID and still return success.
@@ -489,11 +492,12 @@ typedef struct {
 #endif
 	uint32_t cac_duration_ms;
 	uint32_t dfs_regdomain;
+	bool no_ptk_4_way;
 } tAddBssParams, *tpAddBssParams;
 
 /**
  * struct tDeleteBssParams - params required for del bss request
- * @bssIdx: BSSID
+ * @bss_idx: BSSID
  * @status: QDF status
  * @respReqd: response message to LIM only when this flag is set
  * @sessionId: PE session id
@@ -501,7 +505,7 @@ typedef struct {
  * @smesessionId: sme session id
  */
 typedef struct {
-	uint8_t bssIdx;
+	uint8_t bss_idx;
 	QDF_STATUS status;
 	uint8_t respReqd;
 	uint8_t sessionId;
@@ -613,7 +617,7 @@ typedef struct sSendProbeRespParams {
 
 /**
  * struct tSetBssKeyParams - BSS key parameters
- * @bssIdx: BSSID index
+ * @bss_idx: BSSID index
  * @encType: encryption Type
  * @numKeys: number of keys
  * @key: key data
@@ -624,7 +628,7 @@ typedef struct sSendProbeRespParams {
  * @macaddr: MAC address of the peer
  */
 typedef struct {
-	uint8_t bssIdx;
+	uint8_t bss_idx;
 	tAniEdType encType;
 	uint8_t numKeys;
 	tSirKeys key[SIR_MAC_MAX_NUM_OF_DEFAULT_KEYS];
@@ -637,7 +641,7 @@ typedef struct {
 
 /**
  * struct tUpdateBeaconParams - update beacon request parameters
- * @bssIdx: BSSID index
+ * @bss_idx: BSSID index
  * @fShortPreamble: shortPreamble mode
  * @fShortSlotTime: short Slot time
  * @beaconInterval: Beacon Interval
@@ -651,7 +655,7 @@ typedef struct {
  * @smeSessionId: SME  session id
  */
 typedef struct {
-	uint8_t bssIdx;
+	uint8_t bss_idx;
 	uint8_t fShortPreamble;
 	uint8_t fShortSlotTime;
 	uint16_t beaconInterval;
@@ -806,7 +810,7 @@ typedef struct sLinkStateParams {
 
 /**
  * struct tEdcaParams - EDCA parameters
- * @bssIdx: BSSID index
+ * @bss_idx: BSSID index
  * @acbe: best effort access category
  * @acbk: Background access category
  * @acvi: video access category
@@ -814,7 +818,7 @@ typedef struct sLinkStateParams {
  * @mu_edca_params: flag to indicate MU EDCA
  */
 typedef struct {
-	uint16_t bssIdx;
+	uint16_t bss_idx;
 	tSirMacEdcaParamRecord acbe;
 	tSirMacEdcaParamRecord acbk;
 	tSirMacEdcaParamRecord acvi;

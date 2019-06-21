@@ -200,16 +200,16 @@ static void lim_process_sae_msg(struct mac_context *mac, struct sir_sae_msg *bod
 		return;
 	}
 
-	if (session->pePersona != QDF_STA_MODE &&
-	    session->pePersona != QDF_SAP_MODE) {
+	if (session->opmode != QDF_STA_MODE &&
+	    session->opmode != QDF_SAP_MODE) {
 		pe_err("SAE:Not supported in this mode %d",
-				session->pePersona);
+				session->opmode);
 		return;
 	}
 
-	pe_debug("SAE:status %d limMlmState %d pePersona %d peer: "
+	pe_debug("SAE:status %d limMlmState %d opmode %d peer: "
 		 QDF_MAC_ADDR_STR, sae_msg->sae_status,
-		 session->limMlmState, session->pePersona,
+		 session->limMlmState, session->opmode,
 		 QDF_MAC_ADDR_ARRAY(sae_msg->peer_mac_addr));
 	if (LIM_IS_STA_ROLE(session))
 		lim_process_sae_msg_sta(mac, session, sae_msg);
@@ -658,7 +658,7 @@ __lim_ext_scan_forward_bcn_probe_rsp(struct mac_context *pmac, uint8_t *rx_pkt_i
 	struct scheduler_msg         mmh_msg = {0};
 	tpSirMacMgmtHdr              hdr;
 	uint32_t frame_len;
-	tSirBssDescription *bssdescr;
+	struct bss_description *bssdescr;
 
 	result = qdf_mem_malloc(sizeof(*result) + ie_len);
 	if (!result)
@@ -1239,7 +1239,7 @@ lim_handle80211_frames(struct mac_context *mac, struct scheduler_msg *limMsg,
 		pe_session = pe_find_session_by_bssid(mac,
 					pHdr->bssId, &sessionId);
 		if (pe_session &&
-		    (QDF_SAP_MODE == pe_session->pePersona)) {
+		    (QDF_SAP_MODE == pe_session->opmode)) {
 			pe_debug("CAC timer running - drop the frame");
 			goto end;
 		}
@@ -1727,6 +1727,7 @@ static void lim_process_messages(struct mac_context *mac_ctx,
 	case eWNI_SME_UPDATE_EDCA_PROFILE:
 	case WNI_SME_UPDATE_MU_EDCA_PARAMS:
 	case WNI_SME_CFG_ACTION_FRM_HE_TB_PPDU:
+	case WNI_SME_REGISTER_BCN_REPORT_SEND_CB:
 		/* These messages are from HDD.No need to respond to HDD */
 		lim_process_normal_hdd_msg(mac_ctx, msg, false);
 		break;
@@ -1746,26 +1747,24 @@ static void lim_process_messages(struct mac_context *mac_ctx,
 			msg->type);
 		for (i = 0; i < mac_ctx->lim.maxBssId; i++) {
 			session_entry = &mac_ctx->lim.gpSession[i];
-			if ((session_entry) && (session_entry->valid)
-				&& (session_entry->pePersona ==
-				QDF_P2P_GO_MODE)) { /* Save P2P attr for Go */
-					qdf_mem_copy(
-						&session_entry->p2pGoPsUpdate,
-						msg->bodyptr,
-						sizeof(tSirP2PNoaAttr));
-					pe_debug("bssId"
-						QDF_MAC_ADDR_STR
-						" ctWin=%d oppPsFlag=%d",
-						QDF_MAC_ADDR_ARRAY(
-							session_entry->bssId),
-						session_entry->p2pGoPsUpdate.ctWin,
-						session_entry->p2pGoPsUpdate.oppPsFlag);
-					pe_debug("uNoa1IntervalCnt=%d uNoa1Duration=%d uNoa1Interval=%d uNoa1StartTime=%d",
-						session_entry->p2pGoPsUpdate.uNoa1IntervalCnt,
-						session_entry->p2pGoPsUpdate.uNoa1Duration,
-						session_entry->p2pGoPsUpdate.uNoa1Interval,
-						session_entry->p2pGoPsUpdate.uNoa1StartTime);
-					break;
+			if ((session_entry) && (session_entry->valid) &&
+			    (session_entry->opmode == QDF_P2P_GO_MODE)) {
+				/* Save P2P attr for Go */
+				qdf_mem_copy(&session_entry->p2pGoPsUpdate,
+					     msg->bodyptr,
+					     sizeof(tSirP2PNoaAttr));
+				pe_debug("bssId"
+					 QDF_MAC_ADDR_STR
+					 " ctWin=%d oppPsFlag=%d",
+					 QDF_MAC_ADDR_ARRAY(session_entry->bssId),
+					 session_entry->p2pGoPsUpdate.ctWin,
+					 session_entry->p2pGoPsUpdate.oppPsFlag);
+				pe_debug("uNoa1IntervalCnt=%d uNoa1Duration=%d uNoa1Interval=%d uNoa1StartTime=%d",
+					 session_entry->p2pGoPsUpdate.uNoa1IntervalCnt,
+					 session_entry->p2pGoPsUpdate.uNoa1Duration,
+					 session_entry->p2pGoPsUpdate.uNoa1Interval,
+					 session_entry->p2pGoPsUpdate.uNoa1StartTime);
+				break;
 			}
 		}
 		qdf_mem_free(msg->bodyptr);
@@ -1963,7 +1962,7 @@ static void lim_process_messages(struct mac_context *mac_ctx,
 			if (wlan_reg_get_channel_state(mac_ctx->pdev,
 					session_entry->currentOperChannel)
 					!= CHANNEL_STATE_DFS) {
-				beacon_params.bssIdx = session_entry->bssIdx;
+				beacon_params.bss_idx = session_entry->bss_idx;
 				beacon_params.beaconInterval =
 					session_entry->beaconParams.beaconInterval;
 				beacon_params.paramChangeBitmap |=
@@ -2070,11 +2069,9 @@ static void lim_process_messages(struct mac_context *mac_ctx,
 		qdf_mem_free((void *)msg->bodyptr);
 		msg->bodyptr = NULL;
 		break;
-#ifdef CONFIG_VDEV_SM
 	case eWNI_SME_CSA_RESTART_REQ:
 		lim_send_csa_restart_req(mac_ctx, msg->bodyval);
 		break;
-#endif
 	case eWNI_SME_STA_CSA_CONTINUE_REQ:
 		lim_continue_sta_csa_req(mac_ctx, msg->bodyval);
 		break;

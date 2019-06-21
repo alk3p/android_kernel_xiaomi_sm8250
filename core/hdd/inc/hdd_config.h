@@ -869,6 +869,12 @@ struct dhcp_server {
  *   OUI data Len : 00
  *   Info Mask : 35 - Check for NSS, VHT Caps and Band
  *   Capabilities: 6C - (NSS == 3 or 4) && VHT Caps Preset && Band == 2G
+ * OUI 5 : 001018
+ *   OUI data Len : 06
+ *   OUI Data : 02FF009C0000
+ *   OUI data Mask: BC - 10111100
+ *   Info Mask : 25 - Check for NSS and Band
+ *   Capabilities: 48 - NSS == 4 && Band == 2G
  *
  * This ini is used to specify the AP OUIs with which only 1x1 connection
  * is allowed.
@@ -885,7 +891,7 @@ struct dhcp_server {
 	"gActionOUIConnect1x1", \
 	0, \
 	ACTION_OUI_MAX_STR_LEN, \
-	"000C43 00 25 42 001018 06 02FFF02C0000 BC 25 42 001018 06 02FF040C0000 BC 25 42 00037F 00 35 6C", \
+	"000C43 00 25 42 001018 06 02FFF02C0000 BC 25 42 001018 06 02FF040C0000 BC 25 42 00037F 00 35 6C 001018 06 02FF009C0000 BC 25 48", \
 	"Used to specify action OUIs for 1x1 connection")
 
 /*
@@ -1004,7 +1010,7 @@ struct dhcp_server {
 	"gActionOUISwitchTo11nMode", \
 	0, \
 	ACTION_OUI_MAX_STR_LEN, \
-	"00904C 03 0418BF E0 21 40", \
+	"00904C 05 0418BF0CB2 F8 21 40", \
 	"Used to specify action OUIs for switching to 11n")
 
 /*
@@ -1262,6 +1268,111 @@ struct dhcp_server {
 			CFG_VALUE_OR_DEFAULT, \
 			"Disable wow feature")
 
+/**
+ * enum host_log_level - Debug verbose level imposed by user
+ * @HOST_LOG_LEVEL_NONE: no trace will be logged.
+ * @HOST_LOG_LEVEL_FATAL: fatal error will be logged
+ * @HOST_LOG_LEVEL_ERROR: error(include level less than error) will be logged
+ * @HOST_LOG_LEVEL_WARN: warning(include level less than warning) will be logged
+ * @HOST_LOG_LEVEL_INFO: inform(include level less than inform) will be logged
+ * @HOST_LOG_LEVEL_DEBUG: debug(include level less than debug) will be logged
+ * @HOST_LOG_LEVEL_TRACE: trace(include level less than trace) will be logged
+ * @HOST_LOG_LEVEL_MAX: Max host log level
+ */
+enum host_log_level {
+	HOST_LOG_LEVEL_NONE = 0,
+	HOST_LOG_LEVEL_FATAL,
+	HOST_LOG_LEVEL_ERROR,
+	HOST_LOG_LEVEL_WARN,
+	HOST_LOG_LEVEL_INFO,
+	HOST_LOG_LEVEL_DEBUG,
+	HOST_LOG_LEVEL_TRACE,
+	HOST_LOG_LEVEL_MAX,
+};
+
+/*
+ * <ini>
+ * gHostModuleLoglevel - modulized host debug log level
+ * @Min: N/A
+ * @Max: N/A
+ * @Default: N/A
+ *
+ * This ini is used to set modulized host debug log level.
+ * WLAN host module log level input string format looks like below:
+ * gHostModuleLoglevel="<host Module ID>,<Log Level>,..."
+ * For example:
+ * gHostModuleLoglevel=51,1,52,2,53,3,54,4,55,5,56,6
+ * The above input string means:
+ * For WLAN host module ID 51 enable log level HOST_LOG_LEVEL_FATAL
+ * For WLAN host module ID 52 enable log level HOST_LOG_LEVEL_ERROR
+ * For WLAN host module ID 53 enable log level HOST_LOG_LEVEL_WARN
+ * For WLAN host module ID 54 enable log level HOST_LOG_LEVEL_INFO
+ * For WLAN host module ID 55 enable log level HOST_LOG_LEVEL_DEBUG
+ * For WLAN host module ID 55 enable log level HOST_LOG_LEVEL_TRACE
+ * For valid values of module ids check enum QDF_MODULE_ID and
+ * for valid values of log levels check below.
+ * HOST_LOG_LEVEL_NONE = 0, No trace will be logged
+ * HOST_LOG_LEVEL_FATAL = 1, fatal error log
+ * HOST_LOG_LEVEL_ERROR = 2, error(include level less than error) log
+ * HOST_LOG_LEVEL_WARN = 3, warning(include level less than warning) log
+ * HOST_LOG_LEVEL_INFO = 4, inform(include level less than inform) log
+ * HOST_LOG_LEVEL_DEBUG = 5, debug(include level less than debug) log
+ * HOST_LOG_LEVEL_TRACE = 6, trace(include level less than trace) log
+ *
+ * Related: None
+ *
+ * Supported Feature: Debugging
+ *
+ * Usage: Internal
+ *
+ * </ini>
+ */
+
+#define HOST_MODULE_LOG_LEVEL_STRING_MAX_LENGTH  (QDF_MODULE_ID_MAX * 6)
+#define CFG_ENABLE_HOST_MODULE_LOG_LEVEL CFG_INI_STRING( \
+	"gHostModuleLoglevel", \
+	0, \
+	HOST_MODULE_LOG_LEVEL_STRING_MAX_LENGTH, \
+	"", \
+	"Set modulized host debug log level")
+
+/*
+ * <ini>
+ * gActionOUIForceMaxNss - Used to specify action OUIs for Max NSS connection
+ * @Default:
+ * Note: User should strictly add new action OUIs at the end of this
+ * default value.
+ *
+ * Default OUIs: (All values in Hex)
+ * OUI 1 :001018
+ *   OUI data Len : 06
+ *   OUI Data : 0201009c0000
+ *   OUI data Mask: FC
+ *   Info Mask : 01 - only OUI present in Info mask
+ * OUI 2 :001018
+ *   OUI data Len : 06
+ *   OUI Data : 0201001c0000
+ *   OUI data Mask: FC
+ *   Info Mask : 01 - only OUI present in Info mask
+ *
+ * This ini is used to specify the AP OUIs with which max capability is
+ * sent in association request even though AP advertises 1x1 capability.
+ *
+ * Related: None
+ *
+ * Supported Feature: Action OUIs
+ *
+ * Usage: External
+ *
+ * </ini>
+ */
+#define CFG_ACTION_OUI_FORCE_MAX_NSS CFG_INI_STRING( \
+			"gActionOUIForceMaxNss", \
+			0, \
+			ACTION_OUI_MAX_STR_LEN, \
+			"001018 06 0201009c0000 FC 01 001018 06 0201001c0000 FC 01", \
+			"Used to specify action OUIs for forcing max NSS connection")
+
 #define CFG_HDD_ALL \
 	CFG_ENABLE_PACKET_LOG_ALL \
 	CFG_ENABLE_RUNTIME_PM_ALL \
@@ -1274,6 +1385,7 @@ struct dhcp_server {
 	CFG(CFG_ACTION_OUI_ITO_ALTERNATE) \
 	CFG(CFG_ACTION_OUI_ITO_EXTENSION) \
 	CFG(CFG_ACTION_OUI_DISABLE_AGGRESSIVE_TX) \
+	CFG(CFG_ACTION_OUI_FORCE_MAX_NSS) \
 	CFG(CFG_ACTION_OUI_SWITCH_TO_11N_MODE) \
 	CFG(CFG_ADVERTISE_CONCURRENT_OPERATION) \
 	CFG(CFG_BUG_ON_REINIT_FAILURE) \
@@ -1299,5 +1411,6 @@ struct dhcp_server {
 	CFG(CFG_HDD_DOT11_MODE) \
 	CFG(CFG_ENABLE_DISABLE_CHANNEL) \
 	CFG(CFG_SAR_VERSION) \
-	CFG(CFG_WOW_DISABLE)
+	CFG(CFG_WOW_DISABLE) \
+	CFG(CFG_ENABLE_HOST_MODULE_LOG_LEVEL)
 #endif

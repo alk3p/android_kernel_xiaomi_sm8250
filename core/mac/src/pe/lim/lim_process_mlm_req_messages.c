@@ -78,7 +78,7 @@ static void lim_process_sae_auth_timeout(struct mac_context *mac_ctx)
 		 * SAE authentication is not completed. Restore from
 		 * auth state.
 		 */
-		if (session->pePersona == QDF_STA_MODE)
+		if (session->opmode == QDF_STA_MODE)
 			lim_restore_from_auth_state(mac_ctx,
 				eSIR_SME_AUTH_TIMEOUT_RESULT_CODE,
 				eSIR_MAC_UNSPEC_FAILURE_REASON, session);
@@ -279,7 +279,7 @@ static void mlm_add_sta(struct mac_context *mac_ctx, tpAddStaParams sta_param,
 		sta_param->lsigTxopProtection, sta_param->fDsssCckMode40Mhz,
 		sta_param->fShortGI20Mhz, sta_param->fShortGI40Mhz);
 
-	if (QDF_P2P_GO_MODE == session_entry->pePersona)
+	if (QDF_P2P_GO_MODE == session_entry->opmode)
 		sta_param->p2pCapableSta = 1;
 }
 
@@ -404,7 +404,7 @@ lim_mlm_add_bss(struct mac_context *mac_ctx,
 			 session->limMlmState));
 
 	/* pass on the session persona to hal */
-	addbss_param->halPersona = session->pePersona;
+	addbss_param->halPersona = session->opmode;
 
 	if (session->ch_width == CH_WIDTH_160MHZ) {
 		is_ch_dfs = true;
@@ -1166,19 +1166,6 @@ static void lim_process_mlm_assoc_req(struct mac_context *mac_ctx, uint32_t *msg
 	/* map the session entry pointer to the AssocFailureTimer */
 	mac_ctx->lim.limTimers.gLimAssocFailureTimer.sessionId =
 		mlm_assoc_req->sessionId;
-#ifdef WLAN_FEATURE_11W
-	/*
-	 * Store current MLM state in case ASSOC response returns with
-	 * TRY_AGAIN_LATER return code.
-	 */
-	if (session_entry->limRmfEnabled) {
-		session_entry->pmfComebackTimerInfo.lim_prev_mlm_state =
-			session_entry->limPrevMlmState;
-		session_entry->pmfComebackTimerInfo.lim_mlm_state =
-			session_entry->limMlmState;
-	}
-#endif /* WLAN_FEATURE_11W */
-
 	session_entry->limPrevMlmState = session_entry->limMlmState;
 	session_entry->limMlmState = eLIM_MLM_WT_ASSOC_RSP_STATE;
 	MTRACE(mac_trace(mac_ctx, TRACE_CODE_MLM_STATE,
@@ -2252,7 +2239,7 @@ void lim_process_auth_failure_timeout(struct mac_context *mac_ctx)
 		 * Failure timeout. Issue MLM auth confirm with timeout reason
 		 * code. Restore default failure timeout
 		 */
-		if (QDF_P2P_CLIENT_MODE == session->pePersona &&
+		if (QDF_P2P_CLIENT_MODE == session->opmode &&
 		    session->defaultAuthFailureTimeout) {
 			if (cfg_in_range(CFG_AUTH_FAILURE_TIMEOUT,
 					 session->defaultAuthFailureTimeout)) {

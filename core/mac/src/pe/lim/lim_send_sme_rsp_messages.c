@@ -191,43 +191,47 @@ static void lim_handle_join_rsp_status(struct mac_context *mac_ctx,
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
 	struct ht_profile *ht_profile;
 #endif
+	if (session_entry->beacon) {
+		sme_join_rsp->beaconLength = session_entry->bcnLen;
+		qdf_mem_copy(sme_join_rsp->frames,
+			     session_entry->beacon,
+			     sme_join_rsp->beaconLength);
+		qdf_mem_free(session_entry->beacon);
+		session_entry->beacon = NULL;
+		session_entry->bcnLen = 0;
+		pe_debug("Beacon: %d",
+			sme_join_rsp->beaconLength);
+	}
+
+	if (session_entry->assocReq) {
+		sme_join_rsp->assocReqLength =
+			session_entry->assocReqLen;
+		qdf_mem_copy(sme_join_rsp->frames +
+			     sme_join_rsp->beaconLength,
+			     session_entry->assocReq,
+			     sme_join_rsp->assocReqLength);
+		qdf_mem_free(session_entry->assocReq);
+		session_entry->assocReq = NULL;
+		session_entry->assocReqLen = 0;
+		pe_debug("AssocReq: %d",
+			sme_join_rsp->assocReqLength);
+	}
+	if (session_entry->assocRsp) {
+		sme_join_rsp->assocRspLength =
+			session_entry->assocRspLen;
+		qdf_mem_copy(sme_join_rsp->frames +
+			     sme_join_rsp->beaconLength +
+			     sme_join_rsp->assocReqLength,
+			     session_entry->assocRsp,
+			     sme_join_rsp->assocRspLength);
+		qdf_mem_free(session_entry->assocRsp);
+		session_entry->assocRsp = NULL;
+		session_entry->assocRspLen = 0;
+		pe_debug("AssocRsp: %d",
+			sme_join_rsp->assocRspLength);
+	}
+
 	if (result_code == eSIR_SME_SUCCESS) {
-		if (session_entry->beacon) {
-			sme_join_rsp->beaconLength = session_entry->bcnLen;
-			qdf_mem_copy(sme_join_rsp->frames,
-				session_entry->beacon,
-				sme_join_rsp->beaconLength);
-			qdf_mem_free(session_entry->beacon);
-			session_entry->beacon = NULL;
-			session_entry->bcnLen = 0;
-			pe_debug("Beacon: %d",
-				sme_join_rsp->beaconLength);
-		}
-		if (session_entry->assocReq) {
-			sme_join_rsp->assocReqLength =
-				session_entry->assocReqLen;
-			qdf_mem_copy(sme_join_rsp->frames +
-				sme_join_rsp->beaconLength,
-				session_entry->assocReq,
-				sme_join_rsp->assocReqLength);
-			qdf_mem_free(session_entry->assocReq);
-			session_entry->assocReq = NULL;
-			session_entry->assocReqLen = 0;
-			pe_debug("AssocReq: %d",
-				sme_join_rsp->assocReqLength);
-		}
-		if (session_entry->assocRsp) {
-			sme_join_rsp->assocRspLength =
-				session_entry->assocRspLen;
-			qdf_mem_copy(sme_join_rsp->frames +
-				sme_join_rsp->beaconLength +
-				sme_join_rsp->assocReqLength,
-				session_entry->assocRsp,
-				sme_join_rsp->assocRspLength);
-			qdf_mem_free(session_entry->assocRsp);
-			session_entry->assocRsp = NULL;
-			session_entry->assocRspLen = 0;
-		}
 		if (session_entry->ricData) {
 			sme_join_rsp->parsedRicRspLen =
 				session_entry->RICDataLen;
@@ -262,8 +266,6 @@ static void lim_handle_join_rsp_status(struct mac_context *mac_ctx,
 		}
 #endif
 		sme_join_rsp->aid = session_entry->limAID;
-		pe_debug("AssocRsp: %d",
-			sme_join_rsp->assocRspLength);
 		sme_join_rsp->vht_channel_width =
 			session_entry->ch_width;
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
@@ -562,7 +564,7 @@ void lim_send_sme_start_bss_rsp(struct mac_context *mac,
 				     schBeaconOffsetEnd);
 
 			pSirSmeRsp->bssDescription.length = (uint16_t)
-				(offsetof(tSirBssDescription, ieFields[0])
+				(offsetof(struct bss_description, ieFields[0])
 				- sizeof(pSirSmeRsp->bssDescription.length)
 				+ ieLen);
 			/* This is the size of the message, subtracting the size of the pointer to ieFields */
@@ -664,7 +666,7 @@ void lim_send_sme_disassoc_ntf(struct mac_context *mac,
 		for (i = 0; i < mac->lim.maxBssId; i++) {
 			session = &mac->lim.gpSession[i];
 			if (session->valid &&
-			    (session->pePersona == QDF_SAP_MODE)) {
+			    (session->opmode == QDF_SAP_MODE)) {
 				/* Find the sta ds entry in another session */
 				sta_ds = dph_lookup_hash_entry(mac,
 						peerMacAddr, &assoc_id,
@@ -1240,7 +1242,7 @@ void lim_send_sme_addts_rsp(struct mac_context *mac,
 
 	rsp->messageType = eWNI_SME_ADDTS_RSP;
 	rsp->rc = status;
-	rsp->rsp.status = (enum eSirMacStatusCodes)status;
+	rsp->rsp.status = (enum mac_status_code)status;
 	rsp->rsp.tspec = tspec;
 	rsp->sessionId = smesessionId;
 
@@ -2130,7 +2132,7 @@ lim_process_beacon_tx_success_ind(struct mac_context *mac_ctx, uint16_t msgType,
 	tpSirFirstBeaconTxCompleteInd bcn_ind =
 		(tSirFirstBeaconTxCompleteInd *) event;
 
-	session = pe_find_session_by_bss_idx(mac_ctx, bcn_ind->bssIdx);
+	session = pe_find_session_by_bss_idx(mac_ctx, bcn_ind->bss_idx);
 	if (!session) {
 		pe_err("Session Does not exist for given session id");
 		return;

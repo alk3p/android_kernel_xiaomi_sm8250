@@ -122,6 +122,11 @@
 #define SME_CMD_ROAM_CMD_TIMEOUT (SIR_VDEV_START_REQUEST_TIMEOUT + 4000)
 #define SME_CMD_ADD_DEL_TS_TIMEOUT (4 * 1000)
 
+/*
+ * POLICY_MGR_SER_CMD_TIMEOUT should be same as SME_CMD_POLICY_MGR_CMD_TIMEOUT
+ * if SME_CMD_POLICY_MGR_CMD_TIMEOUT is changed change
+ * POLICY_MGR_SER_CMD_TIMEOUT as well.
+ */
 #define SME_CMD_POLICY_MGR_CMD_TIMEOUT (SIR_VDEV_PLCY_MGR_TIMEOUT + 2000)
 #define SME_POLICY_MGR_CMD_TIMEOUT (SME_CMD_POLICY_MGR_CMD_TIMEOUT + 1000)
 
@@ -411,6 +416,28 @@ QDF_STATUS sme_update_config(mac_handle_t mac_handle,
 QDF_STATUS sme_set11dinfo(mac_handle_t mac_handle,
 			  struct sme_config_params *pSmeConfigParams);
 QDF_STATUS sme_hdd_ready_ind(mac_handle_t mac_handle);
+
+#ifdef WLAN_BCN_RECV_FEATURE
+/*
+ * sme_register_bcn_report_pe_cb() - Register SME callback
+ * @mac_handle: The handle returned by mac_open.
+ * @cb: cb of type beacon_report_cb
+ *
+ * This function Register SME callback in order to send
+ * beacon report to upper layer
+ *
+ * Return QDF_STATUS_SUCCESS -
+ */
+QDF_STATUS
+sme_register_bcn_report_pe_cb(mac_handle_t mac_handle, beacon_report_cb cb);
+#else
+static inline QDF_STATUS
+sme_register_bcn_report_pe_cb(mac_handle_t mac_handle, beacon_report_cb cb)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
+
 /**
  * sme_ser_cmd_callback() - callback from serialization module
  * @cmd: serialization command
@@ -458,7 +485,6 @@ QDF_STATUS sme_get_ap_channel_from_scan_cache(
 QDF_STATUS sme_get_ap_channel_from_scan(void *profile,
 		tScanResultHandle *scan_cache,
 		uint8_t *ap_chnl_id);
-QDF_STATUS sme_scan_flush_result(mac_handle_t mac_handle);
 tCsrScanResultInfo *sme_scan_result_get_first(mac_handle_t,
 		tScanResultHandle hScanResult);
 tCsrScanResultInfo *sme_scan_result_get_next(mac_handle_t,
@@ -935,7 +961,6 @@ QDF_STATUS sme_roam_start_beacon_req(mac_handle_t mac_handle,
 				     struct qdf_mac_addr bssid,
 				     uint8_t dfsCacWaitStatus);
 
-#ifdef CONFIG_VDEV_SM
 /**
  * sme_csa_restart() - request CSA IE transmission from PE
  * @mac_ctx: mac context
@@ -944,7 +969,6 @@ QDF_STATUS sme_roam_start_beacon_req(mac_handle_t mac_handle,
  * Return: QDF_STATUS
  */
 QDF_STATUS sme_csa_restart(struct mac_context *mac_ctx, uint8_t session_id);
-#endif
 
 QDF_STATUS sme_roam_csa_ie_request(mac_handle_t mac_handle,
 				   struct qdf_mac_addr bssid,
@@ -1056,6 +1080,11 @@ QDF_STATUS sme_stats_ext_request(uint8_t session_id,
 static inline void
 sme_stats_ext_register_callback(mac_handle_t mac_handle,
 				stats_ext_cb callback)
+{
+}
+
+static inline void
+sme_stats_ext_deregister_callback(mac_handle_t mac_handle)
 {
 }
 
@@ -1542,6 +1571,58 @@ QDF_STATUS sme_update_mimo_power_save(mac_handle_t mac_handle,
 				      uint8_t is_ht_smps_enabled,
 				      uint8_t ht_smps_mode,
 				      bool send_smps_action);
+#ifdef WLAN_BCN_RECV_FEATURE
+/**
+ * sme_handle_bcn_recv_start() - Enable fw to start sending
+ * beacons of the current connected AP
+ * @mac_handle: Opaque handle to the global MAC context
+ * @vdev_id: SME session id
+ *
+ * This function remove beacon filter. It allow fw to send
+ * all beacons from connected peer to driver.
+ *
+ * Return: QDF_STATUS enumeration
+ */
+QDF_STATUS sme_handle_bcn_recv_start(mac_handle_t mac_handle,
+				     uint32_t vdev_id);
+
+/**
+ * sme_is_beacon_report_started() - Check bcn recv started
+ * @mac_handle: Opaque handle to the global MAC context
+ * @session_id: SME session id
+ *
+ * This function is to check beacon report started or not.
+ *
+ * Return: true on success
+ */
+bool sme_is_beacon_report_started(mac_handle_t mac_handle,
+				  uint32_t session_id);
+
+/**
+ * stop_beacon_report() - To stop beacon report
+ * @mac_handle: Opaque handle to the global MAC context
+ * @session_id: SME session id
+ *
+ * Return: None
+ */
+void sme_stop_beacon_report(mac_handle_t mac_handle,
+			    uint32_t session_id);
+
+#else
+static inline
+bool sme_is_beacon_report_started(mac_handle_t mac_handle,
+				  uint32_t session_id)
+{
+	return true;
+}
+
+static inline
+void sme_stop_beacon_report(mac_handle_t mac_handle,
+			    uint32_t session_id)
+{
+}
+
+#endif
 
 QDF_STATUS sme_add_beacon_filter(mac_handle_t mac_handle,
 				 uint32_t session_id, uint32_t *ie_map);
@@ -1932,6 +2013,16 @@ QDF_STATUS sme_fast_reassoc(mac_handle_t mac_handle,
 			    struct csr_roam_profile *profile,
 			    const tSirMacAddr bssid, int channel,
 			    uint8_t vdev_id, const tSirMacAddr connected_bssid);
+
+/**
+ * sme_roam_invoke_nud_fail() - invokes REASSOC command to best available bssid
+ * @mac_handle: handle returned by mac_open
+ * @vdev_id: vdev id
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS sme_roam_invoke_nud_fail(mac_handle_t mac_handle, uint8_t vdev_id);
+
 #else
 static inline
 QDF_STATUS sme_fast_reassoc(mac_handle_t mac_handle,
@@ -1941,6 +2032,13 @@ QDF_STATUS sme_fast_reassoc(mac_handle_t mac_handle,
 {
 	return QDF_STATUS_SUCCESS;
 }
+
+static inline
+QDF_STATUS sme_roam_invoke_nud_fail(mac_handle_t mac_handle, uint8_t vdev_id)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
 #endif
 /**
  * sme_congestion_register_callback() - registers congestion callback
@@ -3412,5 +3510,28 @@ sme_get_mws_coex_info(mac_handle_t mac_handle, uint32_t vdev_id,
 							   cmd_id),
 		      void *context);
 #endif /* WLAN_MWS_INFO_DEBUGFS */
+
+#ifdef WLAN_BCN_RECV_FEATURE
+/**
+ * sme_register_bcn_recv_pause_ind_cb() - Register pause ind cb
+ * mac_handle: man handler
+ * cb: callback function to HDD
+ *
+ * This function register HDD callback in order to indicate beacon
+ * receive pause indication to userspace.
+ *
+ * return QDF_STATUS of cb registration
+ */
+QDF_STATUS sme_register_bcn_recv_pause_ind_cb(mac_handle_t mac_handle,
+					      beacon_pause_cb cb);
+
+#else
+static inline
+QDF_STATUS sme_register_bcn_recv_pause_ind_cb(mac_handle_t mac_handle,
+					      beacon_pause_cb cb)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
 
 #endif /* #if !defined( __SME_API_H ) */

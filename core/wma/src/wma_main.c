@@ -3303,6 +3303,9 @@ QDF_STATUS wma_open(struct wlan_objmgr_psoc *psoc,
 	target_psoc_set_htc_hdl(tgt_psoc_info, htc_handle);
 	wma_handle->cds_context = cds_context;
 	wma_handle->qdf_dev = qdf_dev;
+	wma_handle->enable_tx_compl_tsf64 =
+			cds_cfg->enable_tx_compl_tsf64;
+
 	/* Register Converged Event handlers */
 	init_deinit_register_tgt_psoc_ev_handlers(psoc);
 
@@ -3599,6 +3602,7 @@ QDF_STATUS wma_open(struct wlan_objmgr_psoc *psoc,
 	qdf_wake_lock_create(&wma_handle->wmi_cmd_rsp_wake_lock,
 					"wlan_fw_rsp_wakelock");
 	qdf_runtime_lock_init(&wma_handle->wmi_cmd_rsp_runtime_lock);
+	qdf_runtime_lock_init(&wma_handle->sap_prevent_runtime_pm_lock);
 
 	/* Register peer assoc conf event handler */
 	wmi_unified_register_event_handler(wma_handle->wmi_handle,
@@ -3698,6 +3702,7 @@ QDF_STATUS wma_open(struct wlan_objmgr_psoc *psoc,
 
 err_dbglog_init:
 	qdf_wake_lock_destroy(&wma_handle->wmi_cmd_rsp_wake_lock);
+	qdf_runtime_lock_deinit(&wma_handle->sap_prevent_runtime_pm_lock);
 	qdf_runtime_lock_deinit(&wma_handle->wmi_cmd_rsp_runtime_lock);
 	qdf_spinlock_destroy(&wma_handle->vdev_respq_lock);
 	qdf_spinlock_destroy(&wma_handle->wma_hold_req_q_lock);
@@ -4655,6 +4660,9 @@ QDF_STATUS wma_wmi_service_close(void)
 	wma_handle->wmi_handle = NULL;
 
 	for (i = 0; i < wma_handle->max_bssid; i++) {
+		/* Release peer and vdev ref hold by wma if not already done */
+		wma_release_vdev_and_peer_ref(wma_handle,
+					      &wma_handle->interfaces[i]);
 		wma_vdev_deinit(&wma_handle->interfaces[i]);
 	}
 
@@ -4773,6 +4781,7 @@ QDF_STATUS wma_close(void)
 	wma_cleanup_vdev_resp_queue(wma_handle);
 	wma_cleanup_hold_req(wma_handle);
 	qdf_wake_lock_destroy(&wma_handle->wmi_cmd_rsp_wake_lock);
+	qdf_runtime_lock_deinit(&wma_handle->sap_prevent_runtime_pm_lock);
 	qdf_runtime_lock_deinit(&wma_handle->wmi_cmd_rsp_runtime_lock);
 	qdf_spinlock_destroy(&wma_handle->vdev_respq_lock);
 	qdf_spinlock_destroy(&wma_handle->wma_hold_req_q_lock);
@@ -5601,6 +5610,19 @@ wma_fill_chain_cfg(struct target_psoc_info *tgt_hdl,
 		mac_ctx->fw_chain_cfg.max_rx_chains_5g = num_chain;
 }
 
+static void wma_update_mlme_related_tgt_caps(struct wlan_objmgr_psoc *psoc,
+					     struct wmi_unified *wmi_handle)
+{
+	struct mlme_tgt_caps mlme_tgt_cfg;
+
+	mlme_tgt_cfg.data_stall_recovery_fw_support =
+		wmi_service_enabled(wmi_handle,
+				    wmi_service_data_stall_recovery_support);
+
+	/* Call this at last only after filling all the tgt caps */
+	wlan_mlme_update_cfg_with_tgt_caps(psoc, &mlme_tgt_cfg);
+}
+
 /**
  * wma_update_hdd_cfg() - update HDD config
  * @wma_handle: wma handle
@@ -5640,6 +5662,7 @@ static int wma_update_hdd_cfg(tp_wma_handle wma_handle)
 		return -EINVAL;
 	}
 
+	wma_update_mlme_related_tgt_caps(wma_handle->psoc, wmi_handle);
 	qdf_mem_zero(&tgt_cfg, sizeof(struct wma_tgt_cfg));
 
 	tgt_cfg.sub_20_support = wma_handle->sub_20_support;
@@ -6834,6 +6857,16 @@ int wma_rx_service_ready_ext_event(void *handle, uint8_t *event,
 	} else {
 		wlan_res_cfg->peer_unmap_conf_support = false;
 		cdp_cfg_set_peer_unmap_conf_support(soc, false);
+	}
+
+	if (wma_handle->enable_tx_compl_tsf64 &&
+	    wmi_service_enabled(wmi_handle,
+				wmi_service_tx_compl_tsf64)) {
+		wlan_res_cfg->tstamp64_en = true;
+		cdp_cfg_set_tx_compl_tsf64(soc, true);
+	} else {
+		wlan_res_cfg->tstamp64_en = false;
+		cdp_cfg_set_tx_compl_tsf64(soc, false);
 	}
 
 	return 0;

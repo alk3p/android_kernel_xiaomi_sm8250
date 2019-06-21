@@ -257,6 +257,26 @@ typedef void (*lost_link_info_cb)(hdd_handle_t hdd_handle,
 typedef void (*hidden_ssid_cb)(hdd_handle_t hdd_handle,
 				uint8_t vdev_id);
 
+/**
+ * typedef bcn_report_cb - recv bcn callback fun
+ * @hdd_handle: HDD handle registered with SME
+ * @beacon_report: Beacon report structure
+ */
+typedef void (*beacon_report_cb)(hdd_handle_t hdd_handle,
+				 struct wlan_beacon_report *beacon_report);
+
+/**
+ * beacon_pause_cb : scan start callback fun
+ * @hdd_handler: HDD handler
+ * @vdev_id: vdev id
+ * @type: scan event type
+ * @is_disconnected: Driver is in dis connected state or not
+ */
+typedef void (*beacon_pause_cb)(hdd_handle_t hdd_handle,
+				uint8_t vdev_id,
+				enum scan_event_type type,
+				bool is_disconnected);
+
 #ifdef WLAN_FEATURE_MOTION_DETECTION
 typedef QDF_STATUS (*md_host_evt_cb)(void *hdd_ctx, struct sir_md_evt *event);
 #endif /* WLAN_FEATURE_MOTION_DETECTION */
@@ -364,6 +384,10 @@ struct sme_context {
 						  wmi_mws_coex_cmd_id cmd_id);
 #endif /* WLAN_MWS_INFO_DEBUGFS */
 
+#ifdef WLAN_BCN_RECV_FEATURE
+	beacon_report_cb beacon_report_cb;
+	beacon_pause_cb beacon_pause_cb;
+#endif
 };
 
 #endif /* #if !defined( __SMEINTERNAL_H ) */

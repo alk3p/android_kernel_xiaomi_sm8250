@@ -55,9 +55,16 @@ static int wlan_cfg80211_tdls_validate_mac_addr(const uint8_t *mac)
 	return 0;
 }
 
-QDF_STATUS wlan_cfg80211_tdls_priv_init(struct vdev_osif_priv *osif_priv)
+QDF_STATUS wlan_cfg80211_tdls_osif_priv_init(struct wlan_objmgr_vdev *vdev)
 {
 	struct osif_tdls_vdev *tdls_priv;
+	struct vdev_osif_priv *osif_priv;
+
+	osif_priv = wlan_vdev_get_ospriv(vdev);
+	if (!osif_priv) {
+		cfg80211_err("osif_priv is NULL!");
+		return QDF_STATUS_E_FAULT;
+	}
 
 	cfg80211_debug("initialize tdls os if layer private structure");
 	tdls_priv = qdf_mem_malloc(sizeof(*tdls_priv));
@@ -78,37 +85,48 @@ QDF_STATUS wlan_cfg80211_tdls_priv_init(struct vdev_osif_priv *osif_priv)
 	return QDF_STATUS_SUCCESS;
 }
 
-void wlan_cfg80211_tdls_priv_deinit(struct vdev_osif_priv *osif_priv)
+void wlan_cfg80211_tdls_osif_priv_deinit(struct wlan_objmgr_vdev *vdev)
 {
-	cfg80211_debug("deinitialize tdls os if layer private structure");
+	struct vdev_osif_priv *osif_priv;
+
+	osif_priv = wlan_vdev_get_ospriv(vdev);
 	if (!osif_priv) {
-		cfg80211_err("OS private structure of vdev is null ");
+		cfg80211_err("osif_priv is NULL!");
 		return;
 	}
+
+	cfg80211_debug("deinitialize tdls os if layer private structure");
 	if (osif_priv->osif_tdls)
 		qdf_mem_free(osif_priv->osif_tdls);
 	osif_priv->osif_tdls = NULL;
 }
 
-void hdd_notify_teardown_tdls_links(struct wlan_objmgr_vdev *vdev)
+void hdd_notify_teardown_tdls_links(struct wlan_objmgr_psoc *psoc)
 {
 	struct vdev_osif_priv *osif_priv;
 	struct osif_tdls_vdev *tdls_priv;
 	QDF_STATUS status;
 	unsigned long rc;
+	struct wlan_objmgr_vdev *vdev;
 
-	if (!vdev)
+	vdev = ucfg_get_tdls_vdev(psoc, WLAN_OSIF_ID);
+	if (!vdev) {
+		cfg80211_err("Unable to get the vdev");
 		return;
-
+	}
 	osif_priv = wlan_vdev_get_ospriv(vdev);
 
 	tdls_priv = osif_priv->osif_tdls;
+	if (!tdls_priv) {
+		cfg80211_err("tdls priv is NULL");
+		goto release_ref;
+	}
 
 	reinit_completion(&tdls_priv->tdls_teardown_comp);
-	status = ucfg_tdls_teardown_links(vdev);
+	status = ucfg_tdls_teardown_links(psoc);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		cfg80211_err("ucfg_tdls_teardown_links failed err %d", status);
-		return;
+		goto release_ref;
 	}
 
 	cfg80211_debug("Wait for tdls teardown completion. Timeout %u ms",
@@ -120,10 +138,14 @@ void hdd_notify_teardown_tdls_links(struct wlan_objmgr_vdev *vdev)
 
 	if (0 == rc) {
 		cfg80211_err(" Teardown Completion timed out rc: %ld", rc);
-		return;
+		goto release_ref;
 	}
 
 	cfg80211_debug("TDLS teardown completion status %ld ", rc);
+
+release_ref:
+	wlan_objmgr_vdev_release_ref(vdev,
+				     WLAN_OSIF_ID);
 }
 
 void hdd_notify_tdls_reset_adapter(struct wlan_objmgr_vdev *vdev)

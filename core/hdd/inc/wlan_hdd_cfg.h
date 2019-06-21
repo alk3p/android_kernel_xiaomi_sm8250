@@ -154,7 +154,10 @@ struct hdd_config {
 	bool enable_packet_log;
 #endif
 	uint32_t rx_mode;
-
+	uint32_t tx_comp_loop_pkt_limit;
+	uint32_t rx_reap_loop_pkt_limit;
+	uint32_t rx_hp_oos_update_limit;
+	uint64_t rx_softirq_max_yield_duration_ns;
 #ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 	uint32_t bus_bw_high_threshold;
 	uint32_t bus_bw_medium_threshold;
@@ -211,6 +214,9 @@ struct hdd_config {
 	uint32_t cfg_wmi_credit_cnt;
 	uint32_t sar_version;
 	bool is_wow_disabled;
+#ifdef WLAN_FEATURE_TSF_PLUS
+	uint8_t tsf_ptp_options;
+#endif /* WLAN_FEATURE_TSF_PLUS */
 };
 
 /**

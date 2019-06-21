@@ -149,14 +149,14 @@ struct pe_session {
 	tSirMacAddr bssId;
 	tSirMacAddr selfMacAddr;
 	tSirMacSSid ssId;
-	uint8_t bssIdx;
+	uint8_t bss_idx;
 	uint8_t valid;
 	tLimMlmStates limMlmState;      /* MLM State */
 	tLimMlmStates limPrevMlmState;  /* Previous MLM State */
 	tLimSmeStates limSmeState;      /* SME State */
 	tLimSmeStates limPrevSmeState;  /* Previous SME State */
 	tLimSystemRole limSystemRole;
-	tSirBssType bssType;
+	enum bss_type bssType;
 	uint8_t operMode;       /* AP - 0; STA - 1 ; */
 	tSirNwType nwType;
 	struct start_bss_req *pLimStartBssReq; /* handle to start bss req */
@@ -319,7 +319,7 @@ struct pe_session {
 	uint32_t lim11hEnable;
 
 	int8_t maxTxPower;   /* MIN (Regulatory and local power constraint) */
-	enum QDF_OPMODE pePersona;
+	enum QDF_OPMODE opmode;
 	int8_t txMgmtPower;
 	bool is11Rconnection;
 	bool is_adaptive_11r_connection;
@@ -487,10 +487,6 @@ struct pe_session {
 	/* Fast Transition (FT) */
 	tftPEContext ftPEContext;
 	bool isNonRoamReassoc;
-#ifdef WLAN_FEATURE_11W
-	qdf_mc_timer_t pmfComebackTimer;
-	struct comeback_timer_info pmfComebackTimerInfo;
-#endif /* WLAN_FEATURE_11W */
 	uint8_t  is_key_installed;
 	/* timer for resetting protection fileds at regular intervals */
 	qdf_mc_timer_t protection_fields_reset_timer;
@@ -578,6 +574,7 @@ struct pe_session {
 #endif
 	bool enable_session_twt_support;
 	uint32_t cac_duration_ms;
+	tSirResultCodes stop_bss_reason;
 	uint32_t dfs_regdomain;
 };
 
@@ -632,7 +629,7 @@ static inline void pe_free_dph_node_array_buffer(void)
 struct pe_session *pe_create_session(struct mac_context *mac,
 			      uint8_t *bssid,
 			      uint8_t *sessionId,
-			      uint16_t numSta, tSirBssType bssType,
+			      uint16_t numSta, enum bss_type bssType,
 			      uint8_t sme_session_id);
 
 /**
@@ -651,17 +648,18 @@ struct pe_session *pe_find_session_by_bssid(struct mac_context *mac, uint8_t *bs
 				     uint8_t *sessionId);
 
 /**
- * pe_find_session_by_bss_idx() - looks up the PE session given the bssIdx.
+ * pe_find_session_by_bss_idx() - looks up the PE session given the bss_idx.
  *
  * @mac:          pointer to global adapter context
- * @bssIdx:        bss index of the session
+ * @bss_idx:        bss index of the session
  *
  * This function returns the session context  if the session
- * corresponding to the given bssIdx is found in the PE session table.
+ * corresponding to the given bss_idx is found in the PE session table.
  *
  * Return: pointer to the session context or NULL if session is not found.
  */
-struct pe_session *pe_find_session_by_bss_idx(struct mac_context *mac, uint8_t bssIdx);
+struct pe_session *pe_find_session_by_bss_idx(struct mac_context *mac,
+					      uint8_t bss_idx);
 
 /**
  * pe_find_session_by_peer_sta() - looks up the PE session given the Peer

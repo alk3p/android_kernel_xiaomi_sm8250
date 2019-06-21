@@ -100,46 +100,8 @@
 #define SIR_MAC_MGMT_ACTION       0xD
 #define SIR_MAC_MGMT_RESERVED15   0xF
 
-/* Action frame categories */
-
-#define SIR_MAC_ACTION_SPECTRUM_MGMT   0
-#define SIR_MAC_ACTION_QOS_MGMT        1
-#define SIR_MAC_ACTION_DLP             2
-#define SIR_MAC_ACTION_BLKACK          3
-#define SIR_MAC_ACTION_PUBLIC_USAGE    4
-#define SIR_MAC_ACTION_RRM             5
-#define SIR_MAC_ACTION_FAST_BSS_TRNST  6
-#define SIR_MAC_ACTION_HT              7
-#define SIR_MAC_ACTION_SA_QUERY        8
-#define SIR_MAC_ACTION_PROT_DUAL_PUB   9
-#define SIR_MAC_ACTION_WNM            10
-#define SIR_MAC_ACTION_UNPROT_WNM     11
-#define SIR_MAC_ACTION_TDLS           12
-#define SIR_MAC_ACITON_MESH           13
-#define SIR_MAC_ACTION_MHF            14
-#define SIR_MAC_SELF_PROTECTED        15
-#define SIR_MAC_ACTION_WME            17
-#define SIR_MAC_ACTION_FST            18
-#define SIR_MAC_ACTION_VHT            21
-#define SIR_MAC_ACTION_MAX            256
-
 #define SIR_MAC_ACTION_TX             1
 #define SIR_MAC_ACTION_RX             2
-
-/* QoS management action codes */
-
-#define SIR_MAC_QOS_ADD_TS_REQ      0
-#define SIR_MAC_QOS_ADD_TS_RSP      1
-#define SIR_MAC_QOS_DEL_TS_REQ      2
-#define SIR_MAC_QOS_SCHEDULE        3
-#define SIR_MAC_QOS_MAP_CONFIGURE   4
-/* and these are proprietary */
-#define SIR_MAC_QOS_DEF_BA_REQ      4
-#define SIR_MAC_QOS_DEF_BA_RSP      5
-
-#define SIR_MAC_ADDBA_REQ     0
-#define SIR_MAC_ADDBA_RSP     1
-#define SIR_MAC_DELBA_REQ     2
 
 #define SIR_MAC_BA_POLICY_DELAYED       0
 #define SIR_MAC_BA_POLICY_IMMEDIATE     1
@@ -147,14 +109,6 @@
 #define SIR_MAC_BA_DEFAULT_BUFF_SIZE    64
 
 #define MAX_BA_BUFF_SIZE    256
-
-#ifdef ANI_SUPPORT_11H
-#define SIR_MAC_ACTION_MEASURE_REQUEST_ID      0
-#define SIR_MAC_ACTION_MEASURE_REPORT_ID       1
-#define SIR_MAC_ACTION_TPC_REQUEST_ID          2
-#define SIR_MAC_ACTION_TPC_REPORT_ID           3
-#endif /* ANI_SUPPORT_11H */
-#define SIR_MAC_ACTION_CHANNEL_SWITCH_ID       4
 
 #ifdef ANI_SUPPORT_11H
 #define SIR_MAC_BASIC_MEASUREMENT_TYPE         0
@@ -174,14 +128,6 @@
 #define SIR_MAC_RRM_TSM_TYPE                   9
 #define SIR_MAC_RRM_LOCATION_CIVIC_TYPE        11
 #define SIR_MAC_RRM_FINE_TIME_MEAS_TYPE        16
-
-/* RRM action codes */
-#define SIR_MAC_RRM_RADIO_MEASURE_REQ          0
-#define SIR_MAC_RRM_RADIO_MEASURE_RPT          1
-#define SIR_MAC_RRM_LINK_MEASUREMENT_REQ       2
-#define SIR_MAC_RRM_LINK_MEASUREMENT_RPT       3
-#define SIR_MAC_RRM_NEIGHBOR_REQ               4
-#define SIR_MAC_RRM_NEIGHBOR_RPT               5
 
 /* VHT Action Field */
 #define SIR_MAC_VHT_GID_NOTIFICATION           1
@@ -217,19 +163,6 @@
 /* 11w SA query request/response action frame category code */
 #define SIR_MAC_SA_QUERY_REQ             0
 #define SIR_MAC_SA_QUERY_RSP             1
-#endif
-
-#ifdef FEATURE_WLAN_TDLS
-#define SIR_MAC_TDLS_SETUP_REQ           0
-#define SIR_MAC_TDLS_SETUP_RSP           1
-#define SIR_MAC_TDLS_SETUP_CNF           2
-#define SIR_MAC_TDLS_TEARDOWN            3
-#define SIR_MAC_TDLS_PEER_TRAFFIC_IND    4
-#define SIR_MAC_TDLS_CH_SWITCH_REQ       5
-#define SIR_MAC_TDLS_CH_SWITCH_RSP       6
-#define SIR_MAC_TDLS_PEER_TRAFFIC_RSP    9
-#define SIR_MAC_TDLS_DIS_REQ             10
-#define SIR_MAC_TDLS_DIS_RSP             14
 #endif
 
 /* WNM Action field values; IEEE Std 802.11-2012, 8.5.14.1, Table 8-250 */
@@ -417,7 +350,7 @@
 /* Status Code (present in Management response frames) enum */
 /* (IEEE Std 802.11-2016, 9.4.1.9, Table 9-46) */
 
-typedef enum eSirMacStatusCodes {
+enum mac_status_code {
 	eSIR_MAC_SUCCESS_STATUS = 0,    /* Reserved */
 	eSIR_MAC_UNSPEC_FAILURE_STATUS = 1,     /* Unspecified reason */
 	/* 802.11 reserved                              2-9 */
@@ -504,8 +437,7 @@ typedef enum eSirMacStatusCodes {
 	eSIR_MAC_ESE_INVALID_PARAMETERS_STATUS = 203,   /* ESE-Invalid parameters. (Re)Assoc request had one or more TSPEC parameters with */
 	/* invalid values. */
 #endif
-
-} tSirMacStatusCodes;
+};
 
 /**
  * Reason Code (present in Deauthentication/Disassociation

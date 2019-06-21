@@ -396,10 +396,14 @@ int wma_vdev_tsf_handler(void *handle, uint8_t *data, uint32_t data_len)
 	ptsf->tsf_high = tsf_event->tsf_high;
 	ptsf->soc_timer_low = tsf_event->qtimer_low;
 	ptsf->soc_timer_high = tsf_event->qtimer_high;
-
+	ptsf->global_tsf_low = tsf_event->wlan_global_tsf_low;
+	ptsf->global_tsf_high = tsf_event->wlan_global_tsf_high;
 	wma_nofl_debug("receive WMI_VDEV_TSF_REPORT_EVENTID on %d, tsf: %d %d",
 		       ptsf->vdev_id, ptsf->tsf_low, ptsf->tsf_high);
 
+	wma_nofl_debug("g_tsf: %d %d; soc_timer: %d %d",
+		       ptsf->global_tsf_low, ptsf->global_tsf_high,
+			   ptsf->soc_timer_low, ptsf->soc_timer_high);
 	tsf_msg.type = eWNI_SME_TSF_EVENT;
 	tsf_msg.bodyptr = ptsf;
 	tsf_msg.bodyval = 0;
@@ -1267,8 +1271,6 @@ int wma_csa_offload_handler(void *handle, uint8_t *event, uint32_t len)
 		qdf_mem_free(csa_offload_event);
 		return -EINVAL;
 	}
-
-	wma_set_channel_switch_in_progress(&wma->interfaces[vdev_id]);
 
 	wma_send_msg(wma, WMA_CSA_OFFLOAD_EVENT, (void *)csa_offload_event, 0);
 	return 0;
@@ -2244,13 +2246,13 @@ static void wma_wow_inc_wake_lock_stats_by_dst_addr(t_wma_handle *wma,
 	stats = &vdev->wow_stats;
 
 	switch (*dest_mac) {
-	case WMA_BCAST_MAC_ADDR:
+	case QDF_BCAST_MAC_ADDR:
 		stats->bcast++;
 		break;
-	case WMA_MCAST_IPV4_MAC_ADDR:
+	case QDF_MCAST_IPV4_MAC_ADDR:
 		stats->ipv4_mcast++;
 		break;
-	case WMA_MCAST_IPV6_MAC_ADDR:
+	case QDF_MCAST_IPV6_MAC_ADDR:
 		stats->ipv6_mcast++;
 		break;
 	default:

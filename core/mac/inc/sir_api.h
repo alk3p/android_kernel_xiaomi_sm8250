@@ -92,8 +92,6 @@ typedef uint8_t tSirVersionString[SIR_VERSION_STRING_LEN];
 	(QOS_MAP_LEN_MIN + 2 * QOS_MAP_MAX_EX)
 #define NUM_CHAINS_MAX  2
 
-#define MAX_RSSI_AVOID_BSSID_LIST    10
-
 /* Maximum number of realms present in fils indication element */
 #define SIR_MAX_REALM_COUNT 7
 /* Realm length */
@@ -185,6 +183,25 @@ struct rsn_caps {
 	uint16_t MFPCapable:1;
 	uint16_t Reserved:8;
 };
+
+/**
+ * struct wlan_beacon_report - Beacon info to be send to userspace
+ * @ssid: ssid present in beacon
+ * @bssid: bssid present in beacon
+ * @frequency: channel frequency in MHz
+ * @beacon_interval: Interval between two consecutive beacons
+ * @time_stamp: time stamp at which beacon received from AP
+ * @boot_time: Boot time when beacon received
+ */
+struct wlan_beacon_report {
+	struct wlan_ssid ssid;
+	struct qdf_mac_addr bssid;
+	uint32_t frequency;
+	uint16_t beacon_interval;
+	qdf_time_t time_stamp;
+	qdf_time_t boot_time;
+};
+
 
 /* / Result codes Firmware return to Host SW */
 typedef enum eSirResultCodes {
@@ -413,7 +430,7 @@ struct sir_set_antenna_mode {
 };
 
 /**
- * enum tSirBssType - Enum for BSS type used in scanning/joining etc.
+ * enum bss_type - Enum for BSS type used in scanning/joining etc.
  *
  * @eSIR_INFRASTRUCTURE_MODE: Infrastructure station
  * @eSIR_INFRA_AP_MODE: softAP mode
@@ -422,7 +439,7 @@ struct sir_set_antenna_mode {
  * @eSIR_MONITOR_MODE: Monitor mode
  * @eSIR_NDI_MODE: NAN datapath mode
  */
-typedef enum eSirBssType {
+enum bss_type {
 	eSIR_INFRASTRUCTURE_MODE,
 	eSIR_INFRA_AP_MODE,
 	eSIR_IBSS_MODE,
@@ -430,7 +447,7 @@ typedef enum eSirBssType {
 	eSIR_MONITOR_MODE,
 	eSIR_NDI_MODE,
 	eSIR_DONOT_USE_BSS_TYPE = SIR_MAX_ENUM_SIZE
-} tSirBssType;
+};
 
 /* / Power Capability info used in 11H */
 struct power_cap_info {
@@ -551,7 +568,7 @@ struct start_bss_req {
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
 	uint8_t cc_switch_mode;
 #endif
-	tSirBssType bssType;
+	enum bss_type bssType;
 	tSirMacSSid ssId;
 	uint8_t channelId;
 	ePhyChanBondState cbMode;
@@ -603,8 +620,8 @@ struct start_bss_req {
 };
 
 #define GET_IE_LEN_IN_BSS(lenInBss) (lenInBss + sizeof(lenInBss) - \
-				    ((uintptr_t)OFFSET_OF(tSirBssDescription,\
-							  ieFields)))
+			    ((uintptr_t)OFFSET_OF(struct bss_description,\
+						  ieFields)))
 
 #define WSCIE_PROBE_RSP_LEN (317 + 2)
 
@@ -675,7 +692,6 @@ struct bss_description {
 	/* Please keep the structure 4 bytes aligned above the ieFields */
 	uint32_t ieFields[1];
 };
-typedef struct bss_description tSirBssDescription;
 
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
 struct ht_profile {
@@ -697,13 +713,13 @@ struct start_bss_rsp {
 	uint16_t length;
 	uint8_t sessionId;
 	tSirResultCodes statusCode;
-	tSirBssType bssType;    /* Add new type for WDS mode */
+	enum bss_type bssType;    /* Add new type for WDS mode */
 	uint16_t beaconInterval;        /* Beacon Interval for both type */
 	uint32_t staId;         /* Station ID for Self */
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
 	struct ht_profile ht_profile;
 #endif
-	tSirBssDescription bssDescription;      /* Peer BSS description */
+	struct bss_description bssDescription;      /* Peer BSS description */
 };
 
 struct report_channel_list {
@@ -869,7 +885,7 @@ struct join_req {
 	uint8_t sessionId;
 	tSirMacSSid ssId;
 	tSirMacAddr selfMacAddr;        /* self Mac address */
-	tSirBssType bsstype;    /* add new type for BT-AMP STA and AP Modules */
+	enum bss_type bsstype;    /* add new type for BT-AMP STA and AP Modules */
 	uint8_t dot11mode;      /* to support BT-AMP */
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
 	uint8_t cc_switch_mode;
@@ -957,7 +973,7 @@ struct join_req {
 	uint8_t nss;
 	bool nss_forced_1x1;
 	bool enable_session_twt_support;
-	tSirBssDescription bssDescription;
+	struct bss_description bssDescription;
 	/*
 	 * WARNING: Pls make bssDescription as last variable in struct
 	 * join_req as it has ieFields followed after this bss
@@ -1117,7 +1133,7 @@ struct assoc_cnf {
 	struct qdf_mac_addr bssid;      /* Self BSSID */
 	struct qdf_mac_addr peer_macaddr;
 	uint16_t aid;
-	tSirMacStatusCodes mac_status_code;
+	enum mac_status_code mac_status_code;
 	uint8_t *owe_ie;
 	uint32_t owe_ie_len;
 };
@@ -1341,7 +1357,7 @@ struct mic_failure_ind {
 struct missed_beacon_ind {
 	uint16_t messageType;   /* eWNI_SME_MISSED_BEACON_IND */
 	uint16_t length;
-	uint8_t bssIdx;
+	uint8_t bss_idx;
 };
 
 /* / Definition for Set Context request */
@@ -1549,7 +1565,7 @@ typedef struct sSirAddtsReqInfo {
 
 typedef struct sSirAddtsRspInfo {
 	uint8_t dialogToken;
-	tSirMacStatusCodes status;
+	enum mac_status_code status;
 	tSirMacTsDelayIE delay;
 
 	struct mac_tspec_ie tspec;
@@ -1655,7 +1671,7 @@ typedef struct sSmeIbssPeerInd {
 } tSmeIbssPeerInd, *tpSmeIbssPeerInd;
 
 struct ibss_peer_inactivity_ind {
-	uint8_t bssIdx;
+	uint8_t bss_idx;
 	uint8_t staIdx;
 	struct qdf_mac_addr peer_addr;
 };
@@ -2123,6 +2139,7 @@ typedef enum {
  * @rssi_diff:                  RSSI difference for the AP to be better over the
  *                              current AP to avoid ping pong effects
  * @good_rssi_roam:             Lazy Roam
+ * @rssi_reject_list:           RSSI reject list (APs rejected by OCE, BTM)
  * @bg_scan_bad_rssi_thresh:    Bad RSSI threshold to perform bg scan.
  * @bad_rssi_thresh_offset_2g:  Offset from Bad RSSI threshold for 2G to 5G Roam
  * @bg_scan_client_bitmap:      Bitmap to identify the client scans to snoop.
@@ -2154,7 +2171,8 @@ struct roam_ext_params {
 	int initial_dense_status;
 	int traffic_threshold;
 	uint8_t num_rssi_rejection_ap;
-	struct rssi_disallow_bssid rssi_rejection_ap[MAX_RSSI_AVOID_BSSID_LIST];
+	struct reject_ap_config_params
+			rssi_reject_bssid_list[MAX_RSSI_AVOID_BSSID_LIST];
 	int8_t bg_scan_bad_rssi_thresh;
 	uint8_t roam_bad_rssi_thresh_offset_2g;
 	uint32_t bg_scan_client_bitmap;
@@ -2911,7 +2929,7 @@ typedef struct sSirDfsCsaIeRequest {
 typedef struct sSirFirstBeaconTxCompleteInd {
 	uint16_t messageType;   /* eWNI_SME_MISSED_BEACON_IND */
 	uint16_t length;
-	uint8_t bssIdx;
+	uint8_t bss_idx;
 } tSirFirstBeaconTxCompleteInd, *tpSirFirstBeaconTxCompleteInd;
 
 typedef struct sSirSmeCSAIeTxCompleteRsp {
@@ -4506,6 +4524,8 @@ struct sir_sme_ext_cng_chan_ind {
  * @tsf_high: high 32bits of tsf
  * @soc_timer_low: low 32bits of synced SOC timer value
  * @soc_timer_high: high 32bits of synced SOC timer value
+ * @global_tsf_low: low 32bits of tsf64
+ * @global_tsf_high: high 32bits of tsf64
  *
  * driver use this struct to store the tsf info
  */
@@ -4515,6 +4535,8 @@ struct stsf {
 	uint32_t tsf_high;
 	uint32_t soc_timer_low;
 	uint32_t soc_timer_high;
+	uint32_t global_tsf_low;
+	uint32_t global_tsf_high;
 };
 
 #define SIR_BCN_FLT_MAX_ELEMS_IE_LIST 8

@@ -1353,9 +1353,9 @@ static QDF_STATUS wma_roam_scan_filter(tp_wma_handle wma_handle,
 	qdf_mem_copy(params->bssid_favored_factor,
 			roam_params->bssid_favored_factor, MAX_BSSID_FAVORED);
 	qdf_mem_copy(params->rssi_rejection_ap,
-		roam_params->rssi_rejection_ap,
+		roam_params->rssi_reject_bssid_list,
 		MAX_RSSI_AVOID_BSSID_LIST *
-		sizeof(struct rssi_disallow_bssid));
+		sizeof(struct reject_ap_config_params));
 
 	if (params->lca_disallow_config_present) {
 		params->disallow_duration
@@ -1841,14 +1841,13 @@ QDF_STATUS wma_process_roaming_config(tp_wma_handle wma_handle,
 		/*
 		 * Send 11k offload disable command to FW as part of RSO Stop
 		 */
-		if (roam_req->reason == REASON_DISCONNECTED) {
-			qdf_status = wma_send_offload_11k_params(wma_handle,
+		qdf_status =
+		    wma_send_offload_11k_params(wma_handle,
 						&roam_req->offload_11k_params);
-			if (qdf_status != QDF_STATUS_SUCCESS) {
-				WMA_LOGE("11k offload disable not sent, status %d",
-					 qdf_status);
-				break;
-			}
+		if (QDF_IS_STATUS_ERROR(qdf_status)) {
+			WMA_LOGE("11k offload disable not sent, status %d",
+				 qdf_status);
+			break;
 		}
 
 		/* Send BTM config as disabled during RSO Stop */
@@ -2649,7 +2648,6 @@ static void wma_roam_update_vdev(tp_wma_handle wma,
 					      roam_synch_ind_ptr->bssid.bytes);
 	wma_add_bss(wma, (tpAddBssParams)roam_synch_ind_ptr->add_bss_params);
 	wma_add_sta(wma, add_sta_params);
-	wma_vdev_set_mlme_state_run(wma, vdev_id);
 	qdf_mem_copy(wma->interfaces[vdev_id].bssid,
 			roam_synch_ind_ptr->bssid.bytes, QDF_MAC_ADDR_SIZE);
 	qdf_mem_free(del_bss_params);
@@ -2831,13 +2829,13 @@ int wma_mlme_roam_synch_event_handler_cb(void *handle, uint8_t *event,
 		WMA_LOGE("LFR3: Invalid Beacon Length");
 		goto cleanup_label;
 	}
-	bss_desc_ptr = qdf_mem_malloc(sizeof(tSirBssDescription) + ie_len);
+	bss_desc_ptr = qdf_mem_malloc(sizeof(struct bss_description) + ie_len);
 	if (!bss_desc_ptr) {
 		QDF_ASSERT(bss_desc_ptr);
 		status = -ENOMEM;
 		goto cleanup_label;
 	}
-	qdf_mem_zero(bss_desc_ptr, sizeof(tSirBssDescription) + ie_len);
+	qdf_mem_zero(bss_desc_ptr, sizeof(struct bss_description) + ie_len);
 	if (QDF_IS_STATUS_ERROR(wma->pe_roam_synch_cb(
 			(struct mac_context *)wma->mac_context,
 			roam_synch_ind_ptr, bss_desc_ptr,
@@ -3044,7 +3042,6 @@ int wma_roam_synch_frame_event_handler(void *handle, uint8_t *event,
 	return 0;
 }
 
-#ifdef CONFIG_VDEV_SM
 /**
  * __wma_roam_synch_event_handler() - roam synch event handler
  * @handle: wma handle
@@ -3100,15 +3097,6 @@ int wma_roam_synch_event_handler(void *handle, uint8_t *event,
 	wma_debug("Posted EV_ROAM to VDEV SM");
 	return 0;
 }
-#else
-int wma_roam_synch_event_handler(void *handle, uint8_t *event,
-				 uint32_t len)
-{
-	wma_mlme_roam_synch_event_handler_cb(handle, event, len);
-
-	return 0;
-}
-#endif
 
 #define RSN_CAPS_SHIFT               16
 /**
@@ -3476,8 +3464,6 @@ void wma_set_channel(tp_wma_handle wma, tpSwitchChannelParams params)
 	 */
 	if ((wma_is_vdev_in_ap_mode(wma, req.vdev_id) == true) ||
 	    (params->restart_on_chan_switch == true)) {
-		wma_set_channel_switch_in_progress(
-						&wma->interfaces[req.vdev_id]);
 		req.hidden_ssid = intr[vdev_id].vdev_restart_params.ssidHidden;
 	}
 
@@ -3517,8 +3503,6 @@ void wma_set_channel(tp_wma_handle wma, tpSwitchChannelParams params)
 	    wma_is_vdev_up(vdev_id)) {
 		WMA_LOGD("%s: setting channel switch to true for vdev_id:%d",
 			 __func__, req.vdev_id);
-		wma_set_channel_switch_in_progress(
-						&wma->interfaces[req.vdev_id]);
 	}
 
 	msg = wma_fill_vdev_req(wma, req.vdev_id, WMA_CHNL_SWITCH_REQ,
@@ -4870,9 +4854,10 @@ QDF_STATUS wma_start_extscan(tp_wma_handle wma,
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	if (!params)
+	if (!params) {
 		wma_err("NULL param");
 		return QDF_STATUS_E_NOMEM;
+	}
 
 	status = wmi_unified_start_extscan_cmd(wma->wmi_handle, params);
 	if (QDF_IS_STATUS_SUCCESS(status))

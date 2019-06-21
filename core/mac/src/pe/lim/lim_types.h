@@ -144,7 +144,7 @@ enum eChannelChangeReasonCodes {
 
 typedef struct sLimMlmStartReq {
 	tSirMacSSid ssId;
-	tSirBssType bssType;
+	enum bss_type bssType;
 	tSirMacAddr bssId;
 	tSirMacBeaconInterval beaconPeriod;
 	uint8_t dtimPeriod;
@@ -838,7 +838,7 @@ lim_post_mlm_message(struct mac_context *mac, uint32_t msgType, uint32_t *pMsgBu
  *
  ***FUNCTION:
  * This function is called in various places to get IE length
- * from tSirBssDescription structure
+ * from struct bss_description structure
  * number being scanned.
  *
  ***PARAMS:
@@ -868,7 +868,7 @@ lim_get_ielen_from_bss_description(struct bss_description *pBssDescr)
 	 * length itself and length of pointer
 	 * that holds ieFields
 	 *
-	 * <------------sizeof(tSirBssDescription)-------------------->
+	 * <------------sizeof(struct bss_description)-------------------->
 	 * +--------+---------------------------------+---------------+
 	 * | length | other fields                    | pointer to IEs|
 	 * +--------+---------------------------------+---------------+
@@ -877,7 +877,7 @@ lim_get_ielen_from_bss_description(struct bss_description *pBssDescr)
 	 */
 
 	ielen = (uint16_t)(pBssDescr->length + sizeof(pBssDescr->length) -
-			   GET_FIELD_OFFSET(tSirBssDescription, ieFields));
+			   GET_FIELD_OFFSET(struct bss_description, ieFields));
 
 	return ielen;
 } /*** end lim_get_ielen_from_bss_description() ***/
@@ -957,16 +957,6 @@ QDF_STATUS lim_process_sme_del_all_tdls_peers(struct mac_context *p_mac,
  * Return: None
  */
 void lim_send_bcn_rsp(struct mac_context *mac_ctx, tpSendbeaconParams rsp);
-
-/**
- * lim_remove_duplicate_bssid_node() - remove duplicate bssid from the
- * @entry: entry to check for which the duplicate entry is present
- * @list:  mac_ctx->roam.rssi_disallow_bssid list
- *
- * Return: None
- */
-void lim_remove_duplicate_bssid_node(struct sir_rssi_disallow_lst *entry,
-				     qdf_list_t *list);
 
 /**
  * lim_add_roam_blacklist_ap() - handle the blacklist bssid list received from
@@ -1123,7 +1113,6 @@ void lim_process_mlm_join_req(struct mac_context *mac_ctx,
  */
 void lim_process_mlm_deauth_req(struct mac_context *mac_ctx, uint32_t *msg_buf);
 
-#ifdef CONFIG_VDEV_SM
 /**
  * lim_sta_mlme_vdev_disconnect_bss() - Disconnect from BSS
  * @vdev_mlme_obj:  VDEV MLME comp object
@@ -1137,7 +1126,7 @@ void lim_process_mlm_deauth_req(struct mac_context *mac_ctx, uint32_t *msg_buf);
  */
 QDF_STATUS lim_sta_mlme_vdev_disconnect_bss(struct vdev_mlme_obj *vdev_mlme,
 					    uint16_t data_len, void *data);
-#endif
+
 /**
  * lim_process_assoc_cleanup() - frees up resources used in function
  * lim_process_assoc_req_frame()

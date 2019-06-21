@@ -1395,6 +1395,33 @@ static void wlan_hdd_pld_remove(struct device *dev, enum pld_bus_type bus_type)
 }
 
 /**
+ * wlan_hdd_pld_idle_shutdown() - wifi module idle shutdown after interface
+ *                                inactivity timeout has trigerred idle shutdown
+ * @dev: device to remove
+ * @pld_bus_type: PLD bus type
+ *
+ * Return: 0 for success and negative error code for failure
+ */
+static int wlan_hdd_pld_idle_shutdown(struct device *dev,
+				       enum pld_bus_type bus_type)
+{
+	return hdd_psoc_idle_shutdown(dev);
+}
+
+/**
+ * wlan_hdd_pld_idle_restart() - wifi module idle restart after idle shutdown
+ * @dev: device to remove
+ * @pld_bus_type: PLD bus type
+ *
+ * Return: 0 for success and negative error code for failure
+ */
+static int wlan_hdd_pld_idle_restart(struct device *dev,
+				      enum pld_bus_type bus_type)
+{
+	return hdd_psoc_idle_restart(dev);
+}
+
+/**
  * wlan_hdd_pld_shutdown() - shutdown function registered to PLD
  * @dev: device to shutdown
  * @pld_bus_type: PLD bus type
@@ -1671,24 +1698,19 @@ static int wlan_hdd_pld_runtime_suspend(struct device *dev,
 static int wlan_hdd_pld_runtime_resume(struct device *dev,
 				       enum pld_bus_type bus_type)
 {
-	struct osif_psoc_sync *psoc_sync;
-	int errno;
-
-	errno = osif_psoc_sync_op_start(dev, &psoc_sync);
-	if (errno)
-		return errno;
-
-	errno = wlan_hdd_runtime_resume(dev);
-
-	osif_psoc_sync_op_stop(psoc_sync);
-
-	return errno;
+	/* As opposite to suspend, Runtime PM resume can happen
+	 * synchronously during driver shutdown or idle shutown,
+	 * so remove PSOC sync protection here.
+	 */
+	return wlan_hdd_runtime_resume(dev);
 }
 #endif
 
 struct pld_driver_ops wlan_drv_ops = {
 	.probe      = wlan_hdd_pld_probe,
 	.remove     = wlan_hdd_pld_remove,
+	.idle_shutdown = wlan_hdd_pld_idle_shutdown,
+	.idle_restart = wlan_hdd_pld_idle_restart,
 	.shutdown   = wlan_hdd_pld_shutdown,
 	.reinit     = wlan_hdd_pld_reinit,
 	.crash_shutdown = wlan_hdd_pld_crash_shutdown,

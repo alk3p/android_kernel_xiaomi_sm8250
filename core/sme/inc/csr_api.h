@@ -231,9 +231,9 @@ typedef struct tagCsrScanResultInfo {
 	unsigned long timer;           /* timer is variable for hidden SSID timer */
 	/*
 	 * This member must be the last in the structure because the
-	 * end of tSirBssDescription is an
+	 * end of struct bss_description is an
 	 * array with nonknown size at this time */
-	tSirBssDescription BssDescriptor;
+	struct bss_description BssDescriptor;
 } tCsrScanResultInfo;
 
 typedef struct tagCsrEncryptionList {
@@ -317,6 +317,7 @@ typedef struct tagCsrScanResultFilter {
 	bool realm_check;
 	uint8_t fils_realm[2];
 	bool force_rsne_override;
+	qdf_time_t age_threshold;
 } tCsrScanResultFilter;
 
 typedef struct sCsrChnPower_ {
@@ -348,7 +349,7 @@ typedef enum {
 	/*
 	 * an association or start_IBSS operation starts,
 	 * callback may get a pointer to struct csr_roam_profile and
-	 * a pointer to tSirBssDescription
+	 * a pointer to struct bss_description
 	 */
 	eCSR_ROAM_ASSOCIATION_START,
 	/*
@@ -880,7 +881,7 @@ typedef struct tagCsrRoamConnectedProfile {
 	 * which can be WSC IE and/or P2P IE
 	 */
 	uint8_t *pAddIEAssoc;
-	tSirBssDescription *pBssDesc;
+	struct bss_description *pBssDesc;
 	bool qap;               /* AP supports QoS */
 	struct mobility_domain_info mdid;
 #ifdef FEATURE_WLAN_ESE
@@ -1053,7 +1054,7 @@ struct csr_config_params {
 
 struct csr_roam_info {
 	struct csr_roam_profile *pProfile;
-	tSirBssDescription *pBssDesc;
+	struct bss_description *pBssDesc;
 	uint32_t nBeaconLength;
 	uint32_t nAssocReqLength;
 	uint32_t nAssocRspLength;
@@ -1184,7 +1185,7 @@ struct csr_roam_info {
 	struct sir_sae_info *sae_info;
 #endif
 	struct assoc_ind *owe_pending_assoc_ind;
-	uint8_t roam_reason;
+	uint16_t roam_reason;
 };
 
 typedef struct sSirSmeAssocIndToUpperLayerCnf {
@@ -1446,6 +1447,9 @@ typedef void (*tCsrSnrCallback)(int8_t snr, uint32_t staId, void *pContext);
 QDF_STATUS csr_roam_issue_ft_preauth_req(struct mac_context *mac_ctx,
 					 uint32_t session_id,
 					 struct bss_description *bss_desc);
+
+QDF_STATUS csr_continue_lfr2_connect(struct mac_context *mac,
+				     uint32_t session_id);
 #else
 static inline
 QDF_STATUS csr_roam_issue_ft_preauth_req(struct mac_context *mac_ctx,
@@ -1454,11 +1458,13 @@ QDF_STATUS csr_roam_issue_ft_preauth_req(struct mac_context *mac_ctx,
 {
 	return QDF_STATUS_E_NOSUPPORT;
 }
-#endif
 
-#ifdef WLAN_FEATURE_HOST_ROAM
+static inline
 QDF_STATUS csr_continue_lfr2_connect(struct mac_context *mac,
-				     uint32_t session_id);
+				     uint32_t session_id)
+{
+	return QDF_STATUS_E_NOSUPPORT;
+}
 #endif
 
 typedef void (*csr_readyToSuspendCallback)(void *pContext, bool suspended);

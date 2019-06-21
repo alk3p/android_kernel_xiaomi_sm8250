@@ -114,18 +114,11 @@
 
 #define WMA_HW_DEF_SCAN_MAX_DURATION      30000 /* 30 secs */
 
-#define WMA_BCAST_MAC_ADDR (0xFF)
-#define WMA_MCAST_IPV4_MAC_ADDR (0x01)
-#define WMA_MCAST_IPV6_MAC_ADDR (0x33)
-#define WMA_ICMP_PROTOCOL (0x01)
-
-#define WMA_IS_EAPOL_GET_MIN_LEN          14
 #define WMA_EAPOL_SUBTYPE_GET_MIN_LEN     21
 #define WMA_EAPOL_INFO_GET_MIN_LEN        23
 #define WMA_IS_DHCP_GET_MIN_LEN           38
 #define WMA_DHCP_SUBTYPE_GET_MIN_LEN      0x11D
 #define WMA_DHCP_INFO_GET_MIN_LEN         50
-#define WMA_IS_ARP_GET_MIN_LEN            14
 #define WMA_ARP_SUBTYPE_GET_MIN_LEN       22
 #define WMA_IPV4_PROTO_GET_MIN_LEN        24
 #define WMA_IPV4_PKT_INFO_GET_MIN_LEN     42
@@ -169,16 +162,10 @@
 #define WMA_MIN_RF_CHAINS               (1)
 #define WMA_MAX_NSS               (2)
 
-#define WMA_BCN_BUF_MAX_SIZE 512
 #define WMA_NOA_IE_SIZE(num_desc) (2 + (13 * (num_desc)))
 #define WMA_MAX_NOA_DESCRIPTORS 4
 
 #define WMA_TIM_SUPPORTED_PVB_LENGTH ((HAL_NUM_STA / 8) + 1)
-
-#define WMA_WOW_PTRN_MASK_VALID     0xFF
-#define WMA_NUM_BITS_IN_BYTE           8
-
-#define WMA_AP_WOW_DEFAULT_PTRN_MAX    4
 
 #define WMA_BSS_STATUS_STARTED 0x1
 #define WMA_BSS_STATUS_STOPPED 0x2
@@ -221,8 +208,6 @@
 #define WMA_TX_Q_RECHECK_TIMER_WAIT      2      /* 2 ms */
 #define WMA_MAX_NUM_ARGS 8
 
-#define WMA_SMPS_MASK_LOWER_16BITS 0xFF
-#define WMA_SMPS_MASK_UPPER_3BITS 0x7
 #define WMA_SMPS_PARAM_VALUE_S 29
 
 /*
@@ -242,11 +227,7 @@
 #define WMI_CMDID_MAX (WMI_TXBF_CMDID + 1)
 
 #define WMA_NLO_FREQ_THRESH          1000       /* in MHz */
-#define WMA_SEC_TO_MSEC(sec)         (sec * 1000)       /* sec to msec */
 #define WMA_MSEC_TO_USEC(msec)	     (msec * 1000) /* msec to usec */
-
-/* Default rssi threshold defined in CFG80211 */
-#define WMA_RSSI_THOLD_DEFAULT   -300
 
 #define WMA_AUTH_REQ_RECV_WAKE_LOCK_TIMEOUT     WAKELOCK_DURATION_RECOMMENDED
 #define WMA_ASSOC_REQ_RECV_WAKE_LOCK_DURATION   WAKELOCK_DURATION_RECOMMENDED
@@ -695,9 +676,6 @@ typedef struct {
 	A_UINT32 requestor_id;
 	A_UINT32 disable_hw_ack;
 	wmi_channel chan;
-#ifndef CONFIG_VDEV_SM
-	qdf_atomic_t hidden_ssid_restart_in_progress;
-#endif
 	uint8_t ssidHidden;
 } vdev_restart_params_t;
 
@@ -818,9 +796,6 @@ struct wma_txrx_node {
 	qdf_atomic_t bss_status;
 	uint8_t rate_flags;
 	uint8_t nss;
-#ifndef CONFIG_VDEV_SM
-	bool is_channel_switch;
-#endif
 	uint16_t pause_bitmap;
 	int8_t tx_power;
 	int8_t max_tx_power;
@@ -1163,6 +1138,7 @@ typedef struct {
 					uint8_t vdev_id);
 	qdf_wake_lock_t wmi_cmd_rsp_wake_lock;
 	qdf_runtime_lock_t wmi_cmd_rsp_runtime_lock;
+	qdf_runtime_lock_t sap_prevent_runtime_pm_lock;
 	enum active_apf_mode active_uc_apf_mode;
 	enum active_apf_mode active_mc_bc_apf_mode;
 	struct wma_ini_config ini_config;
@@ -1190,6 +1166,7 @@ typedef struct {
 	qdf_mc_timer_t wma_fw_time_sync_timer;
 	qdf_atomic_t critical_events_in_flight;
 	bool fw_therm_throt_support;
+	bool enable_tx_compl_tsf64;
 } t_wma_handle, *tp_wma_handle;
 
 /**
@@ -1623,6 +1600,7 @@ enum uapsd_up {
  * @frame_len: frame length, includs mac header, fixed params and ies
  * @frame_buf: buffer contaning probe response or beacon
  * @is_same_bssid: flag to indicate if roaming is requested for same bssid
+ * @forced_roaming: Roaming to be done without giving bssid, and channel.
  */
 struct wma_roam_invoke_cmd {
 	uint32_t vdev_id;
@@ -1631,6 +1609,7 @@ struct wma_roam_invoke_cmd {
 	uint32_t frame_len;
 	uint8_t *frame_buf;
 	uint8_t is_same_bssid;
+	bool forced_roaming;
 };
 
 /**
@@ -1982,69 +1961,6 @@ static inline void wma_mgmt_nbuf_unmap_cb(struct wlan_objmgr_pdev *pdev,
  */
 int wma_chan_info_event_handler(void *handle, uint8_t *event_buf,
 						uint32_t len);
-
-#ifdef CONFIG_VDEV_SM
-static inline
-void wma_vdev_set_mlme_state_stop(tp_wma_handle wma, uint8_t vdev_id) {}
-
-static inline
-void wma_vdev_set_mlme_state_run(tp_wma_handle wma, uint8_t vdev_id) {}
-#else
-/**
- * wma_vdev_set_mlme_state() - Set vdev mlme state
- * @wma: wma handle
- * @vdev_id: the Id of the vdev to configure
- * @state: vdev state
- *
- * Return: None
- */
-static inline
-void wma_vdev_set_mlme_state(tp_wma_handle wma, uint8_t vdev_id,
-		enum wlan_vdev_state state)
-{
-	struct wlan_objmgr_vdev *vdev;
-
-	if (!wma) {
-		WMA_LOGE("%s: WMA context is invald!", __func__);
-		return;
-	}
-
-	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(wma->psoc, vdev_id,
-			WLAN_LEGACY_WMA_ID);
-	if (vdev) {
-		wlan_vdev_obj_lock(vdev);
-		wlan_vdev_mlme_set_state(vdev, state);
-		wlan_vdev_obj_unlock(vdev);
-		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_WMA_ID);
-	}
-}
-
-/**
- * wma_vdev_set_mlme_state_stop() - Set vdev mlme state to stop
- * @wma: wma handle
- * @vdev_id: the Id of the vdev to configure
- *
- * Return: None
- */
-static inline
-void wma_vdev_set_mlme_state_stop(tp_wma_handle wma, uint8_t vdev_id)
-{
-	wma_vdev_set_mlme_state(wma, vdev_id, WLAN_VDEV_S_STOP);
-}
-
-/**
- * wma_vdev_set_mlme_state_run() - Set vdev mlme state to run
- * @wma: wma handle
- * @vdev_id: the Id of the vdev to configure
- *
- * Return: None
- */
-static inline
-void wma_vdev_set_mlme_state_run(tp_wma_handle wma, uint8_t vdev_id)
-{
-	wma_vdev_set_mlme_state(wma, vdev_id, WLAN_VDEV_S_RUN);
-}
-#endif
 
 /**
  * wma_update_vdev_pause_bitmap() - update vdev pause bitmap
@@ -2546,6 +2462,14 @@ void wma_check_and_set_wake_timer(uint32_t time);
  * Return: 0 for success or non-zero on failure
  */
 uint8_t wma_rx_invalid_peer_ind(uint8_t vdev_id, void *wh);
+
+/**
+ * is_roam_inprogress() - Is vdev in progress
+ * @vdev_id: vdev of interest
+ *
+ * Return: true if roaming, false otherwise
+ */
+bool wma_is_roam_in_progress(uint32_t vdev_id);
 
 /**
  * wma_get_psoc_from_scn_handle() - API to get psoc from scn handle

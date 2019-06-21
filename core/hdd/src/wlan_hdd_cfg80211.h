@@ -122,8 +122,8 @@ struct hdd_context;
 
 #ifdef FEATURE_WLAN_TDLS
 #define WLAN_IS_TDLS_SETUP_ACTION(action) \
-	((SIR_MAC_TDLS_SETUP_REQ <= action) && \
-	(SIR_MAC_TDLS_SETUP_CNF >= action))
+	((TDLS_SETUP_REQUEST <= action) && \
+	(TDLS_SETUP_CONFIRM >= action))
 #if !defined(TDLS_MGMT_VERSION2)
 #define TDLS_MGMT_VERSION2 0
 #endif
@@ -146,6 +146,10 @@ struct hdd_context;
 #if defined(CFG80211_DEL_STA_V2) || (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0)) || defined(WITH_BACKPORTS)
 #define USE_CFG80211_DEL_STA_V2
 #endif
+
+#define TWT_SETUP_WAKE_INTVL_MANTISSA_MAX 0xFFFF
+#define TWT_SETUP_WAKE_DURATION_MAX       0xFFFF
+#define TWT_SETUP_WAKE_INTVL_EXP_MAX      31
 
 /**
  * enum eDFS_CAC_STATUS: CAC status

@@ -362,7 +362,7 @@ static int wlan_hdd_update_scan_ies(struct hdd_adapter *adapter,
 						      scan_ie, *scan_ie_len))
 				add_ie = true;
 			break;
-		case IE_EID_VENDOR:
+		case WLAN_ELEMID_VENDOR:
 			if ((0 != qdf_mem_cmp(&temp_ie[0], MBO_OUI_TYPE,
 							MBO_OUI_TYPE_SIZE)) ||
 				(0 == qdf_mem_cmp(&temp_ie[0], QCN_OUI_TYPE,
@@ -681,6 +681,8 @@ static int __wlan_hdd_cfg80211_scan(struct wiphy *wiphy,
 	     !qdf_mem_cmp(&request->ssids[0], "DIRECT-", 7))
 		ucfg_p2p_status_scan(vdev);
 
+	/* set priority as SCAN_PRIORITY_COUNT to use default scan priority */
+	params.priority = SCAN_PRIORITY_COUNT;
 	status = wlan_cfg80211_scan(vdev, request, &params);
 	hdd_objmgr_put_vdev(vdev);
 error:
@@ -957,8 +959,16 @@ static int __wlan_hdd_cfg80211_vendor_scan(struct wiphy *wiphy,
 	hdd_enter_dev(wdev->netdev);
 
 	ret = wlan_hdd_validate_context(hdd_ctx);
-	if (0 != ret)
+	if (ret) {
+		/*
+		 * During SSR, if -EBUSY is returned then OBSS vendor scan is
+		 * not issued immediately.
+		 */
+		if (ret == -EAGAIN)
+			return -EBUSY;
+
 		return ret;
+	}
 
 	if (wlan_cfg80211_nla_parse(tb, QCA_WLAN_VENDOR_ATTR_SCAN_MAX,
 				    data, data_len, scan_policy)) {

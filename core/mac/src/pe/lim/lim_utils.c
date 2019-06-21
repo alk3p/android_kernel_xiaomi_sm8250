@@ -68,6 +68,7 @@
 #include "qdf_util.h"
 #include "wlan_qct_sys.h"
 #include <wlan_scan_ucfg_api.h>
+#include <wlan_blm_api.h>
 
 #define ASCII_SPACE_CHARACTER 0x20
 
@@ -878,7 +879,7 @@ void lim_handle_update_olbc_cache(struct mac_context *mac_ctx)
 		return;
 	}
 	qdf_mem_zero((uint8_t *) &beaconParams, sizeof(tUpdateBeaconParams));
-	beaconParams.bssIdx = pe_session->bssIdx;
+	beaconParams.bss_idx = pe_session->bss_idx;
 
 	beaconParams.paramChangeBitmap = 0;
 	/*
@@ -1909,7 +1910,6 @@ static void __lim_process_channel_switch_timeout(struct pe_session *pe_session)
 	}
 }
 
-#ifdef CONFIG_VDEV_SM
 void lim_disconnect_complete(struct pe_session *session, bool del_bss)
 {
 	QDF_STATUS status;
@@ -1956,34 +1956,6 @@ void lim_process_channel_switch_timeout(struct mac_context *mac_ctx)
 	if (QDF_IS_STATUS_ERROR(status))
 		mlme_set_chan_switch_in_progress(session_entry->vdev, false);
 }
-#else
-void lim_disconnect_complete(struct pe_session *session, bool del_bss)
-{
-	if (del_bss)
-		lim_sta_send_del_bss(session);
-}
-
-/**
- * lim_process_channel_switch_timeout() - process chanel switch timeout
- * @mac: pointer to Global MAC structure
- *
- * Return: none
- */
-void lim_process_channel_switch_timeout(struct mac_context *mac_ctx)
-{
-	struct pe_session *session_entry;
-
-	session_entry = pe_find_session_by_session_id(
-		mac_ctx,
-		mac_ctx->lim.limTimers.gLimChannelSwitchTimer.sessionId);
-	if (!session_entry) {
-		pe_err("Session does not exist for given sessionID");
-		return;
-	}
-
-	__lim_process_channel_switch_timeout(session_entry);
-}
-#endif
 
 /**
  * lim_update_channel_switch() - This Function updates channel switch
@@ -2176,7 +2148,6 @@ lim_util_count_sta_del(struct mac_context *mac,
 	sch_edca_profile_update(mac, pe_session);
 }
 
-#ifdef CONFIG_VDEV_SM
 /**
  * lim_switch_channel_vdev_started() - Send vdev started when switch channel
  *
@@ -2195,9 +2166,6 @@ static void lim_switch_channel_vdev_started(struct pe_session *pe_session)
 				WLAN_VDEV_SM_EV_START_SUCCESS,
 				sizeof(*pe_session), pe_session);
 }
-#else
-static void lim_switch_channel_vdev_started(struct pe_session *pe_session) {}
-#endif
 
 /**
  * lim_switch_channel_cback()
@@ -3865,7 +3833,6 @@ QDF_STATUS lim_tx_complete(void *context, qdf_nbuf_t buf, bool free)
 	return QDF_STATUS_SUCCESS;
 }
 
-#ifdef CONFIG_VDEV_SM
 static void lim_ht_width_switch_cback(struct mac_context *mac,
 				QDF_STATUS status, uint32_t *data,
 				struct pe_session *pe_session)
@@ -3875,15 +3842,6 @@ static void lim_ht_width_switch_cback(struct mac_context *mac,
 	if (QDF_IS_STATUS_SUCCESS(status))
 		lim_switch_channel_vdev_started(pe_session);
 }
-#else
-static void lim_ht_width_switch_cback(struct mac_context *mac,
-				QDF_STATUS status, uint32_t *data,
-				struct pe_session *pe_session)
-{
-	pe_debug("status %d for ht width switch for vdev %d", status,
-		 pe_session->smeSessionId);
-}
-#endif
 
 static void lim_ht_switch_chnl_params(struct pe_session *pe_session)
 {
@@ -3928,7 +3886,6 @@ static void lim_ht_switch_chnl_params(struct pe_session *pe_session)
 				    true, 0, 0);
 }
 
-#ifdef CONFIG_VDEV_SM
 static void lim_ht_switch_chnl_req(struct pe_session *session)
 {
 	struct mac_context *mac;
@@ -3954,13 +3911,6 @@ static void lim_ht_switch_chnl_req(struct pe_session *session)
 		mlme_set_chan_switch_in_progress(session->vdev, false);
 	}
 }
-#else
-static void lim_ht_switch_chnl_req(struct pe_session *session)
-{
-	lim_ht_switch_chnl_params(session);
-}
-#endif
-
 
 /**
  * \brief This function updates lim global structure, if CB parameters in the BSS
@@ -3977,14 +3927,14 @@ static void lim_ht_switch_chnl_req(struct pe_session *session)
  * \param pRcvdHTInfo Pointer to HT Info IE obtained from a  Beacon or
  * Probe Response
  *
- * \param bssIdx BSS Index of the Bss to which Station is associated.
+ * \param bss_idx BSS Index of the Bss to which Station is associated.
  *
  *
  */
 
 void lim_update_sta_run_time_ht_switch_chnl_params(struct mac_context *mac,
 						   tDot11fIEHTInfo *pHTInfo,
-						   uint8_t bssIdx,
+						   uint8_t bss_idx,
 						   struct pe_session *pe_session)
 {
 	/* If self capability is set to '20Mhz only', then do not change the CB mode. */
@@ -4725,7 +4675,7 @@ void lim_handle_heart_beat_timeout_for_session(struct mac_context *mac_ctx,
 		 * Failure detected
 		 */
 		pe_debug("Sending Probe for Session: %d",
-			psession_entry->bssIdx);
+			psession_entry->bss_idx);
 		lim_deactivate_and_change_timer(mac_ctx,
 			eLIM_PROBE_AFTER_HB_TIMER);
 		MTRACE(mac_trace(mac_ctx, TRACE_CODE_TIMER_ACTIVATE, 0,
@@ -5065,7 +5015,7 @@ uint8_t lim_get_noa_attr_stream(struct mac_context *mac, uint8_t *pNoaStream,
 	uint8_t *pBody = pNoaStream;
 
 	if ((pe_session) && (pe_session->valid) &&
-	    (pe_session->pePersona == QDF_P2P_GO_MODE)) {
+	    (pe_session->opmode == QDF_P2P_GO_MODE)) {
 		if ((!(pe_session->p2pGoPsUpdate.uNoa1Duration))
 		    && (!(pe_session->p2pGoPsUpdate.uNoa2Duration))
 		    && (!pe_session->p2pGoPsUpdate.oppPsFlag)
@@ -5304,9 +5254,9 @@ void lim_get_short_slot_from_phy_mode(struct mac_context *mac, struct pe_session
 	/* only 2.4G band should have short slot enable, rest it should be default */
 	if (phyMode == WNI_CFG_PHY_MODE_11G) {
 		/* short slot is default in all other modes */
-		if ((pe_session->pePersona == QDF_SAP_MODE) ||
-		    (pe_session->pePersona == QDF_IBSS_MODE) ||
-		    (pe_session->pePersona == QDF_P2P_GO_MODE)) {
+		if ((pe_session->opmode == QDF_SAP_MODE) ||
+		    (pe_session->opmode == QDF_IBSS_MODE) ||
+		    (pe_session->opmode == QDF_P2P_GO_MODE)) {
 			val = true;
 		}
 		/* Program Polaris based on AP capability */
@@ -6470,18 +6420,18 @@ bool lim_is_robust_mgmt_action_frame(uint8_t action_category)
 	 * is required then this function need few more arguments
 	 * and little change in logic.
 	 */
-	case SIR_MAC_ACTION_SPECTRUM_MGMT:
-	case SIR_MAC_ACTION_QOS_MGMT:
-	case SIR_MAC_ACTION_DLP:
-	case SIR_MAC_ACTION_BLKACK:
-	case SIR_MAC_ACTION_RRM:
-	case SIR_MAC_ACTION_FAST_BSS_TRNST:
-	case SIR_MAC_ACTION_SA_QUERY:
-	case SIR_MAC_ACTION_PROT_DUAL_PUB:
-	case SIR_MAC_ACTION_WNM:
-	case SIR_MAC_ACITON_MESH:
-	case SIR_MAC_ACTION_MHF:
-	case SIR_MAC_ACTION_FST:
+	case ACTION_CATEGORY_SPECTRUM_MGMT:
+	case ACTION_CATEGORY_QOS:
+	case ACTION_CATEGORY_DLS:
+	case ACTION_CATEGORY_BACK:
+	case ACTION_CATEGORY_RRM:
+	case ACTION_FAST_BSS_TRNST:
+	case ACTION_CATEGORY_SA_QUERY:
+	case ACTION_CATEGORY_PROTECTED_DUAL_OF_PUBLIC_ACTION:
+	case ACTION_CATEGORY_WNM:
+	case ACTION_CATEGORY_MESH_ACTION:
+	case ACTION_CATEGORY_MULTIHOP_ACTION:
+	case ACTION_CATEGORY_FST:
 		return true;
 	default:
 		pe_debug("non-PMF action category: %d", action_category);
@@ -7512,50 +7462,19 @@ lim_rem_blacklist_entry_with_lowest_delta(qdf_list_t *list)
 	return QDF_STATUS_E_INVAL;
 }
 
-void lim_assoc_rej_add_to_rssi_based_reject_list(struct mac_context *mac_ctx,
-	tDot11fTLVrssi_assoc_rej  *rssi_assoc_rej,
-	tSirMacAddr bssid, int8_t rssi)
+void
+lim_add_bssid_to_reject_list(struct wlan_objmgr_pdev *pdev,
+			     struct sir_rssi_disallow_lst *entry)
 {
-	struct sir_rssi_disallow_lst *entry;
-	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	struct reject_ap_info ap_info;
 
-	entry = qdf_mem_malloc(sizeof(*entry));
-	if (!entry)
-		return;
+	ap_info.bssid = entry->bssid;
+	ap_info.reject_ap_type = DRIVER_RSSI_REJECT_TYPE;
+	ap_info.rssi_reject_params.expected_rssi = entry->expected_rssi;
+	ap_info.rssi_reject_params.retry_delay = entry->retry_delay;
 
-	pe_debug("%pM: assoc resp rssi %d, delta rssi %d retry delay %d sec and list size %d",
-		bssid, rssi, rssi_assoc_rej->delta_rssi,
-		rssi_assoc_rej->retry_delay,
-		qdf_list_size(&mac_ctx->roam.rssi_disallow_bssid));
-
-	qdf_mem_copy(entry->bssid.bytes,
-		bssid, QDF_MAC_ADDR_SIZE);
-	entry->retry_delay = rssi_assoc_rej->retry_delay *
-		QDF_MC_TIMER_TO_MS_UNIT;
-	entry->expected_rssi = rssi + rssi_assoc_rej->delta_rssi;
-	entry->time_during_rejection =
-		qdf_do_div(qdf_get_monotonic_boottime(),
-		QDF_MC_TIMER_TO_MS_UNIT);
-
-	qdf_mutex_acquire(&mac_ctx->roam.rssi_disallow_bssid_lock);
-	if (qdf_list_size(&mac_ctx->roam.rssi_disallow_bssid) >=
-		MAX_RSSI_AVOID_BSSID_LIST) {
-		status = lim_rem_blacklist_entry_with_lowest_delta(
-					&mac_ctx->roam.rssi_disallow_bssid);
-		if (QDF_IS_STATUS_ERROR(status))
-			pe_err("Failed to remove entry with lowest delta");
-	}
-
-	if (QDF_IS_STATUS_SUCCESS(status))
-		status = qdf_list_insert_back(
-				&mac_ctx->roam.rssi_disallow_bssid,
-				&entry->node);
-	qdf_mutex_release(&mac_ctx->roam.rssi_disallow_bssid_lock);
-
-	if (QDF_IS_STATUS_ERROR(status)) {
-		pe_err("Failed to enqueue bssid entry");
-		qdf_mem_free(entry);
-	}
+	/* Add this ap info to the rssi reject ap type in blacklist manager */
+	wlan_blm_add_bssid_to_reject_list(pdev, &ap_info);
 }
 
 void lim_decrement_pending_mgmt_count(struct mac_context *mac_ctx)
@@ -7614,7 +7533,7 @@ bool lim_check_if_vendor_oui_match(struct mac_context *mac_ctx,
 
 	elem_id = *ie;
 
-	if (elem_id == IE_EID_VENDOR &&
+	if (elem_id == WLAN_ELEMID_VENDOR &&
 		!qdf_mem_cmp(&ptr[2], oui, oui_len))
 		return true;
 	else
@@ -7858,7 +7777,6 @@ void lim_process_ap_ecsa_timeout(void *data)
 	}
 }
 
-#ifdef CONFIG_VDEV_SM
 QDF_STATUS lim_sta_mlme_vdev_start_send(struct vdev_mlme_obj *vdev_mlme,
 					uint16_t data_len, void *data)
 {
@@ -8191,25 +8109,6 @@ void lim_send_start_bss_confirm(struct mac_context *mac_ctx,
 					      sizeof(*start_cnf), start_cnf);
 	}
 }
-
-#else
-
-void lim_send_start_bss_confirm(struct mac_context *mac_ctx,
-				tLimMlmStartCnf *start_cnf)
-{
-	lim_post_sme_message(mac_ctx, LIM_MLM_START_CNF,
-			     (uint32_t *)start_cnf);
-}
-
-void lim_send_beacon(struct mac_context *mac_ctx, struct pe_session *session)
-{
-	lim_send_beacon_ind(mac_ctx, session, REASON_DEFAULT);
-}
-
-void lim_ndi_mlme_vdev_up_transition(struct pe_session *session)
-{
-}
-#endif
 
 /**
  * lim_get_dot11d_transmit_power() - regulatory max transmit power

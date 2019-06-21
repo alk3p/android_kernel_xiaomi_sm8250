@@ -48,6 +48,7 @@
 #include "lim_ibss_peer_mgmt.h"
 #include "lim_ft_defs.h"
 #include "lim_session.h"
+#include "lim_process_fils.h"
 
 #include "qdf_types.h"
 #include "wma_types.h"
@@ -659,7 +660,7 @@ lim_cleanup_rx_path(struct mac_context *mac, tpDphHashNode sta,
 	if (!pe_session->add_bss_failed) {
 		if (pe_session->limSmeState == eLIM_SME_JOIN_FAILURE_STATE) {
 			retCode =
-				lim_del_bss(mac, sta, pe_session->bssIdx,
+				lim_del_bss(mac, sta, pe_session->bss_idx,
 					    pe_session);
 		} else
 			retCode = lim_del_sta(mac,
@@ -887,7 +888,7 @@ void
 lim_reject_association(struct mac_context *mac_ctx, tSirMacAddr peer_addr,
 			uint8_t sub_type, uint8_t add_pre_auth_context,
 			tAniAuthType auth_type, uint16_t sta_id,
-			uint8_t delete_sta, enum eSirMacStatusCodes result_code,
+			uint8_t delete_sta, enum mac_status_code result_code,
 			struct pe_session *session_entry)
 {
 	tpDphHashNode sta_ds;
@@ -2698,6 +2699,19 @@ lim_del_sta(struct mac_context *mac,
 	return retCode;
 }
 
+/**
+ * lim_set_mbssid_info() - Save mbssid info
+ * @pe_session: pe session entry
+ *
+ * Return: None
+ */
+static void lim_set_mbssid_info(struct pe_session *pe_session)
+{
+	struct scan_mbssid_info *mbssid_info;
+
+	mbssid_info = &pe_session->pLimJoinReq->bssDescription.mbssid_info;
+	mlme_set_mbssid_info(pe_session->vdev, mbssid_info);
+}
 
 /**
  * lim_add_sta_self()
@@ -2775,6 +2789,8 @@ lim_add_sta_self(struct mac_context *mac, uint16_t staIdx, uint8_t updateSta,
 	qdf_mem_copy(&pAddStaParams->mbssid_info,
 		     &pe_session->pLimJoinReq->bssDescription.mbssid_info,
 		     sizeof(struct scan_mbssid_info));
+
+	lim_set_mbssid_info(pe_session);
 
 	pAddStaParams->shortPreambleSupported =
 					mac->mlme_cfg->ht_caps.short_preamble;
@@ -2869,9 +2885,8 @@ lim_add_sta_self(struct mac_context *mac, uint16_t staIdx, uint8_t updateSta,
 	listenInterval = mac->mlme_cfg->sap_cfg.listen_interval;
 	pAddStaParams->listenInterval = (uint16_t) listenInterval;
 
-	if (QDF_P2P_CLIENT_MODE == pe_session->pePersona) {
+	if (QDF_P2P_CLIENT_MODE == pe_session->opmode)
 		pAddStaParams->p2pCapableSta = 1;
-	}
 
 	pe_debug(" StaIdx: %d updateSta = %d htcapable = %d ",
 		pAddStaParams->staIdx, pAddStaParams->updateSta,
@@ -2894,6 +2909,9 @@ lim_add_sta_self(struct mac_context *mac, uint16_t staIdx, uint8_t updateSta,
 
 	if (IS_DOT11_MODE_HE(selfStaDot11Mode))
 		lim_add_self_he_cap(pAddStaParams, pe_session);
+
+	if (lim_is_fils_connection(pe_session))
+		pAddStaParams->no_ptk_4_way = true;
 
 	msgQ.type = WMA_ADD_STA_REQ;
 	msgQ.reserved = 0;
@@ -3004,7 +3022,7 @@ lim_delete_dph_hash_entry(struct mac_context *mac_ctx, tSirMacAddr sta_addr,
 		return;
 	}
 
-	beacon_params.bssIdx = session_entry->bssIdx;
+	beacon_params.bss_idx = session_entry->bss_idx;
 	sta_ds = dph_lookup_hash_entry(mac_ctx, sta_addr, &aid,
 			 &session_entry->dph.dphHashTable);
 
@@ -3143,8 +3161,8 @@ lim_check_and_announce_join_success(struct mac_context *mac_ctx,
 	lim_deactivate_and_change_timer(mac_ctx,
 		eLIM_PERIODIC_JOIN_PROBE_REQ_TIMER);
 
-	if (QDF_P2P_CLIENT_MODE == session_entry->pePersona &&
-		beacon_probe_rsp->P2PProbeRes.NoticeOfAbsence.present) {
+	if (QDF_P2P_CLIENT_MODE == session_entry->opmode &&
+	    beacon_probe_rsp->P2PProbeRes.NoticeOfAbsence.present) {
 
 		noa_duration_from_beacon = (uint32_t *)
 		(beacon_probe_rsp->P2PProbeRes.NoticeOfAbsence.NoADesc + 1);
@@ -3330,7 +3348,7 @@ QDF_STATUS lim_extract_ap_capabilities(struct mac_context *mac,
  */
 
 QDF_STATUS
-lim_del_bss(struct mac_context *mac, tpDphHashNode sta, uint16_t bssIdx,
+lim_del_bss(struct mac_context *mac, tpDphHashNode sta, uint16_t bss_idx,
 	    struct pe_session *pe_session)
 {
 	tpDeleteBssParams pDelBssParams = NULL;
@@ -3346,11 +3364,11 @@ lim_del_bss(struct mac_context *mac, tpDphHashNode sta, uint16_t bssIdx,
 	/* DPH was storing the AssocID in staID field, */
 	/* staID is actually assigned by HAL when AddSTA message is sent. */
 	if (sta) {
-		pDelBssParams->bssIdx = sta->bssId;
+		pDelBssParams->bss_idx = sta->bssId;
 		sta->valid = 0;
 		sta->mlmStaContext.mlmState = eLIM_MLM_WT_DEL_BSS_RSP_STATE;
 	} else
-		pDelBssParams->bssIdx = bssIdx;
+		pDelBssParams->bss_idx = bss_idx;
 	pe_session->limMlmState = eLIM_MLM_WT_DEL_BSS_RSP_STATE;
 	MTRACE(mac_trace
 		       (mac, TRACE_CODE_MLM_STATE, pe_session->peSessionId,
@@ -3370,7 +3388,7 @@ lim_del_bss(struct mac_context *mac, tpDphHashNode sta, uint16_t bssIdx,
 	pDelBssParams->smesessionId = pe_session->smeSessionId;
 	pe_debug("Sessionid %d : Sending HAL_DELETE_BSS_REQ "
 			  "for bss idx: %X BSSID:" QDF_MAC_ADDR_STR,
-		       pDelBssParams->sessionId, pDelBssParams->bssIdx,
+		       pDelBssParams->sessionId, pDelBssParams->bss_idx,
 		       QDF_MAC_ADDR_ARRAY(pe_session->bssId));
 	/* we need to defer the message until we get the response back from HAL. */
 	SET_LIM_PROCESS_DEFD_MESGS(mac, false);
@@ -3978,9 +3996,9 @@ QDF_STATUS lim_sta_send_add_bss(struct mac_context *mac, tpSirAssocRsp pAssocRsp
 	pAddBssParams->status = QDF_STATUS_SUCCESS;
 	pAddBssParams->respReqd = true;
 	/* update persona */
-	pAddBssParams->halPersona = (uint8_t) pe_session->pePersona;
+	pAddBssParams->halPersona = (uint8_t)pe_session->opmode;
 
-	if (QDF_P2P_CLIENT_MODE == pe_session->pePersona)
+	if (QDF_P2P_CLIENT_MODE == pe_session->opmode)
 		pAddBssParams->staContext.p2pCapableSta = 1;
 
 	pAddBssParams->bSpectrumMgtEnabled = pe_session->spectrumMgtEnabled;
@@ -4040,6 +4058,9 @@ QDF_STATUS lim_sta_send_add_bss(struct mac_context *mac, tpSirAssocRsp pAssocRsp
 		pAddBssParams->staContext.ch_width = CH_WIDTH_10MHZ;
 	}
 	lim_set_sta_ctx_twt(&pAddBssParams->staContext, pe_session);
+
+	if (lim_is_fils_connection(pe_session))
+		pAddBssParams->no_ptk_4_way = true;
 
 	msgQ.type = WMA_ADD_BSS_REQ;
 	/** @ToDo : Update the Global counter to keeptrack of the PE <--> HAL messages*/
@@ -4475,7 +4496,7 @@ QDF_STATUS lim_sta_send_add_bss_pre_assoc(struct mac_context *mac, uint8_t updat
 	pAddBssParams->staContext.sessionId = pe_session->peSessionId;
 	pAddBssParams->sessionId = pe_session->peSessionId;
 
-	pAddBssParams->halPersona = (uint8_t) pe_session->pePersona; /* update persona */
+	pAddBssParams->halPersona = (uint8_t)pe_session->opmode;
 
 	pAddBssParams->bSpectrumMgtEnabled = pe_session->spectrumMgtEnabled;
 
@@ -4521,6 +4542,9 @@ QDF_STATUS lim_sta_send_add_bss_pre_assoc(struct mac_context *mac, uint8_t updat
 		pAddBssParams->ch_width = CH_WIDTH_10MHZ;
 		pAddBssParams->staContext.ch_width = CH_WIDTH_10MHZ;
 	}
+
+	if (lim_is_fils_connection(pe_session))
+		pAddBssParams->no_ptk_4_way = true;
 
 	msgQ.type = WMA_ADD_BSS_REQ;
 	/** @ToDo : Update the Global counter to keeptrack of the PE <--> HAL messages*/

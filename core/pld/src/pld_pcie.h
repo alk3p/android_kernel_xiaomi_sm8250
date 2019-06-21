@@ -285,6 +285,16 @@ static inline int pld_pcie_power_off(struct device *dev)
 	return 0;
 }
 
+static inline int pld_pcie_idle_restart(struct device *dev)
+{
+	return 0;
+}
+
+static inline int pld_pcie_idle_shutdown(struct device *dev)
+{
+	return 0;
+}
+
 static inline int pld_pcie_force_assert_target(struct device *dev)
 {
 	return -EINVAL;
@@ -314,6 +324,11 @@ static inline void pld_pcie_get_msi_address(struct device *dev,
 					    uint32_t *msi_addr_high)
 {
 	return;
+}
+
+static inline int pld_pcie_is_drv_connected(struct device *dev)
+{
+	return 0;
 }
 
 static inline bool pld_pcie_platform_driver_support(void)
@@ -447,6 +462,16 @@ static inline int pld_pcie_power_off(struct device *dev)
 	return cnss_power_down(dev);
 }
 
+static inline int pld_pcie_idle_restart(struct device *dev)
+{
+	return cnss_idle_restart(dev);
+}
+
+static inline int pld_pcie_idle_shutdown(struct device *dev)
+{
+	return cnss_idle_shutdown(dev);
+}
+
 static inline int pld_pcie_force_assert_target(struct device *dev)
 {
 	return cnss_force_fw_assert(dev);
@@ -472,6 +497,11 @@ static inline void pld_pcie_get_msi_address(struct device *dev,
 					    uint32_t *msi_addr_high)
 {
 	cnss_get_msi_address(dev, msi_addr_low, msi_addr_high);
+}
+
+static inline int pld_pcie_is_drv_connected(struct device *dev)
+{
+	return cnss_pci_is_drv_connected(dev);
 }
 
 static inline bool pld_pcie_platform_driver_support(void)

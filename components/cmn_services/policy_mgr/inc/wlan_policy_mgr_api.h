@@ -2555,24 +2555,29 @@ bool policy_mgr_is_force_scc(struct wlan_objmgr_psoc *psoc);
  * @psoc: PSOC object information
  * @con_ch: pointer to the channel on which sap will come up
  * @sap_ch: initial channel for SAP
+ * @sap_vdev_id: sap vdev id.
  *
  * This function checks & updates the channel SAP to come up on in
  * case of STA+SAP concurrency
  * Return: Success if SAP can come up on a channel
  */
 QDF_STATUS policy_mgr_valid_sap_conc_channel_check(
-	struct wlan_objmgr_psoc *psoc, uint8_t *con_ch, uint8_t sap_ch);
+	struct wlan_objmgr_psoc *psoc, uint8_t *con_ch, uint8_t sap_ch,
+	uint8_t sap_vdev_id);
 
 /**
  * policy_mgr_get_alternate_channel_for_sap() - Get an alternate
  * channel to move the SAP to
  * @psoc: PSOC object information
+ * @sap_vdev_id: sap vdev id.
+ * @sap_channel: sap channel.
  *
  * This function returns an alternate channel for SAP to move to
  * Return: The new channel for SAP
  */
 uint8_t policy_mgr_get_alternate_channel_for_sap(
-	struct wlan_objmgr_psoc *psoc);
+	struct wlan_objmgr_psoc *psoc, uint8_t sap_vdev_id,
+	uint8_t sap_channel);
 
 /**
  * policy_mgr_disallow_mcc() - Check for mcc
@@ -2957,4 +2962,21 @@ QDF_STATUS policy_mgr_get_hw_mode_from_idx(
 QDF_STATUS policy_mgr_update_nan_vdev_mac_info(struct wlan_objmgr_psoc *psoc,
 					       uint8_t nan_vdev_id,
 					       uint8_t mac_id);
+
+/**
+ * policy_mgr_get_mode_specific_conn_info() - Get active mode specific
+ * channel and vdev id
+ * @psoc: PSOC object information
+ * @channel: Mode specific channel (list)
+ * @vdev_id: Mode specific vdev id (list)
+ * @mode: Connection Mode
+ *
+ * Get active mode specific channel and vdev id
+ *
+ * Return: number of connection found as per given mode
+ */
+uint32_t policy_mgr_get_mode_specific_conn_info(struct wlan_objmgr_psoc *psoc,
+						uint8_t *channel,
+						uint8_t *vdev_id,
+						enum policy_mgr_con_mode mode);
 #endif /* __WLAN_POLICY_MGR_API_H */

@@ -323,7 +323,7 @@ static tSirMacHTChannelWidth get_operating_channel_width(tpDphHashNode stads)
  * @bcn:            beacon struct
  * @rx_pkt_info:    received packet info
  * @session:        pe session pointer
- * @bssIdx:         bss index
+ * @bss_idx:         bss index
  * @beaconParams:   update beacon params
  * @sendProbeReq:   out flag to indicate if probe rsp is to be sent
  * @pMh:            mac header
@@ -336,7 +336,7 @@ static bool
 sch_bcn_process_sta(struct mac_context *mac_ctx,
 			       tpSchBeaconStruct bcn,
 			       uint8_t *rx_pkt_info,
-			       struct pe_session *session, uint8_t *bssIdx,
+			       struct pe_session *session, uint8_t *bss_idx,
 			       tUpdateBeaconParams *beaconParams,
 			       uint8_t *sendProbeReq, tpSirMacMgmtHdr pMh)
 {
@@ -370,11 +370,11 @@ sch_bcn_process_sta(struct mac_context *mac_ctx,
 	}
 
 	lim_detect_change_in_ap_capabilities(mac_ctx, bcn, session);
-	if (lim_get_sta_hash_bssidx(mac_ctx, DPH_STA_HASH_INDEX_PEER, bssIdx,
+	if (lim_get_sta_hash_bssidx(mac_ctx, DPH_STA_HASH_INDEX_PEER, bss_idx,
 				    session) != QDF_STATUS_SUCCESS)
 		return false;
 
-	beaconParams->bssIdx = *bssIdx;
+	beaconParams->bss_idx = *bss_idx;
 	qdf_mem_copy((uint8_t *) &session->lastBeaconTimeStamp,
 			(uint8_t *) bcn->timeStamp, sizeof(uint64_t));
 	session->currentBssBeaconCnt++;
@@ -702,7 +702,7 @@ sch_bcn_update_opmode_change(struct mac_context *mac_ctx, tpDphHashNode sta_ds,
  * @bcn:            beacon struct
  * @rx_pkt_info:    received packet info
  * @session:        pe session pointer
- * @bssIdx:         bss index
+ * @bss_idx:         bss index
  * @beaconParams:   update beacon params
  * @sendProbeReq:   out flag to indicate if probe rsp is to be sent
  * @pMh:            mac header
@@ -715,7 +715,8 @@ static void
 sch_bcn_process_sta_ibss(struct mac_context *mac_ctx,
 				    tpSchBeaconStruct bcn,
 				    uint8_t *rx_pkt_info,
-				    struct pe_session *session, uint8_t *bssIdx,
+				    struct pe_session *session,
+				    uint8_t *bss_idx,
 				    tUpdateBeaconParams *beaconParams,
 				    uint8_t *sendProbeReq, tpSirMacMgmtHdr pMh)
 {
@@ -812,7 +813,7 @@ static void __sch_beacon_process_for_session(struct mac_context *mac_ctx,
 					     uint8_t *rx_pkt_info,
 					     struct pe_session *session)
 {
-	uint8_t bssIdx = 0;
+	uint8_t bss_idx = 0;
 	tUpdateBeaconParams beaconParams;
 	uint8_t sendProbeReq = false;
 	tpSirMacMgmtHdr pMh = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
@@ -826,7 +827,7 @@ static void __sch_beacon_process_for_session(struct mac_context *mac_ctx,
 		lim_handle_ibss_coalescing(mac_ctx, bcn, rx_pkt_info, session);
 	} else if (LIM_IS_STA_ROLE(session)) {
 		if (false == sch_bcn_process_sta(mac_ctx, bcn,
-				rx_pkt_info, session, &bssIdx,
+				rx_pkt_info, session, &bss_idx,
 				&beaconParams, &sendProbeReq, pMh))
 			return;
 	}
@@ -839,7 +840,7 @@ static void __sch_beacon_process_for_session(struct mac_context *mac_ctx,
 	   bcn->VHTOperation.present)) && session->htCapability &&
 	   bcn->HTInfo.present && !LIM_IS_IBSS_ROLE(session))
 		lim_update_sta_run_time_ht_switch_chnl_params(mac_ctx,
-						&bcn->HTInfo, bssIdx, session);
+						&bcn->HTInfo, bss_idx, session);
 
 	if ((LIM_IS_STA_ROLE(session) && !wma_is_csa_offload_enabled())
 	    || LIM_IS_IBSS_ROLE(session)) {
@@ -864,7 +865,7 @@ static void __sch_beacon_process_for_session(struct mac_context *mac_ctx,
 	if (LIM_IS_STA_ROLE(session)
 	    || LIM_IS_IBSS_ROLE(session))
 		sch_bcn_process_sta_ibss(mac_ctx, bcn,
-					rx_pkt_info, session, &bssIdx,
+					rx_pkt_info, session, &bss_idx,
 					&beaconParams, &sendProbeReq, pMh);
 	/* Obtain the Max Tx power for the current regulatory  */
 	regMax = lim_get_regulatory_max_transmit_power(
@@ -935,10 +936,11 @@ static void __sch_beacon_process_for_session(struct mac_context *mac_ctx,
 		lim_send_beacon_params(mac_ctx, &beaconParams, session);
 	}
 
-	if ((session->pePersona == QDF_P2P_CLIENT_MODE) &&
-		session->send_p2p_conf_frame) {
+	if ((session->opmode == QDF_P2P_CLIENT_MODE) &&
+	    session->send_p2p_conf_frame) {
 		lim_p2p_oper_chan_change_confirm_action_frame(mac_ctx,
-				session->bssId, session);
+							      session->bssId,
+							      session);
 		session->send_p2p_conf_frame = false;
 	}
 }
@@ -1059,7 +1061,7 @@ void sch_beacon_process_for_ap(struct mac_context *mac_ctx,
 	qdf_mem_zero(&bcn_prm, sizeof(tUpdateBeaconParams));
 	bcn_prm.paramChangeBitmap = 0;
 
-	bcn_prm.bssIdx = ap_session->bssIdx;
+	bcn_prm.bss_idx = ap_session->bss_idx;
 
 	if (!ap_session->is_session_obss_color_collision_det_enabled)
 		sch_check_bss_color_ie(mac_ctx, ap_session,
@@ -1082,6 +1084,65 @@ void sch_beacon_process_for_ap(struct mac_context *mac_ctx,
 		lim_send_beacon_params(mac_ctx, &bcn_prm, ap_session);
 	}
 }
+
+#ifdef WLAN_BCN_RECV_FEATURE
+/*
+ * sch_send_beacon_report() - To Fill beacon report for
+ * each beacon coming from connected peer and sends it
+ * to upper layer
+ * @mac_ctx: Mac context
+ * @beacon_struct: Pointing to beacon structure
+ * @session: pointer to the PE session
+ *
+ * Return: None
+ */
+static
+void sch_send_beacon_report(struct mac_context *mac_ctx,
+			    struct sSirProbeRespBeacon *beacon_struct,
+			    struct pe_session *session)
+{
+	struct wlan_beacon_report beacon_report;
+
+	if (!mac_ctx->lim.sme_bcn_rcv_callback)
+		return;
+
+	if (!LIM_IS_STA_ROLE(session))
+		return;
+
+	if (sir_compare_mac_addr(session->bssId, beacon_struct->bssid)) {
+		/* Prepare beacon report from incoming beacon */
+		qdf_mem_copy(beacon_report.bssid.bytes, beacon_struct->bssid,
+			     sizeof(tSirMacAddr));
+
+		qdf_mem_copy(&beacon_report.time_stamp,
+			     &beacon_struct->timeStamp, sizeof(qdf_time_t));
+		beacon_report.beacon_interval = beacon_struct->beaconInterval;
+		beacon_report.frequency =
+				cds_chan_to_freq(beacon_struct->channelNumber);
+
+		beacon_report.ssid.length = beacon_struct->ssId.length;
+		qdf_mem_copy(&beacon_report.ssid.ssid,
+			     &beacon_struct->ssId.ssId,
+			     beacon_report.ssid.length);
+
+		beacon_report.boot_time =
+				qdf_do_div(qdf_get_monotonic_boottime(),
+					   QDF_MC_TIMER_TO_MS_UNIT);
+
+		/* Send report to upper layer */
+		mac_ctx->lim.sme_bcn_rcv_callback(mac_ctx->hdd_handle,
+						  &beacon_report);
+	}
+}
+
+#else
+static inline
+void sch_send_beacon_report(struct mac_context *mac_ctx,
+			    struct sSirProbeRespBeacon *beacon_struct,
+			    struct pe_session *session)
+{
+}
+#endif
 
 /**
  * sch_beacon_process() - process the beacon frame
@@ -1108,11 +1169,13 @@ sch_beacon_process(struct mac_context *mac_ctx, uint8_t *rx_pkt_info,
 	 * Now process the beacon in the context of the BSS which is
 	 * transmitting the beacons, if one is found
 	 */
-	if (!session)
+	if (!session) {
 		__sch_beacon_process_no_session(mac_ctx, &bcn, rx_pkt_info);
-	else
+	} else {
+		sch_send_beacon_report(mac_ctx, &bcn, session);
 		__sch_beacon_process_for_session(mac_ctx, &bcn, rx_pkt_info,
 						 session);
+	}
 }
 
 /**

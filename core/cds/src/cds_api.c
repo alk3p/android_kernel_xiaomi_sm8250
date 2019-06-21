@@ -92,7 +92,8 @@ static struct ol_if_ops  dp_ol_if_ops = {
 	.is_hw_dbs_2x2_capable = policy_mgr_is_hw_dbs_2x2_capable,
 	.lro_hash_config = target_if_lro_hash_config,
 	.rx_mic_error = wma_rx_mic_error_ind,
-	.rx_invalid_peer = wma_rx_invalid_peer_ind
+	.rx_invalid_peer = wma_rx_invalid_peer_ind,
+	.is_roam_inprogress = wma_is_roam_in_progress
     /* TODO: Add any other control path calls required to OL_IF/WMA layer */
 };
 #else
@@ -176,6 +177,21 @@ uint8_t cds_get_datapath_handles(void **soc, struct cdp_pdev **pdev,
 	return 0;
 }
 
+static bool cds_is_drv_connected(void)
+{
+	int ret;
+	qdf_device_t qdf_ctx;
+
+	qdf_ctx = cds_get_context(QDF_MODULE_ID_QDF_DEVICE);
+	if (!qdf_ctx) {
+		cds_err("cds context is invalid");
+		return false;
+	}
+
+	ret = pld_is_drv_connected(qdf_ctx->dev);
+
+	return ((ret > 0) ? true : false);
+}
 
 QDF_STATUS cds_init(void)
 {
@@ -196,6 +212,7 @@ QDF_STATUS cds_init(void)
 	qdf_register_self_recovery_callback(__cds_trigger_recovery);
 	qdf_register_fw_down_callback(cds_is_fw_down);
 	qdf_register_recovering_state_query_callback(cds_is_driver_recovering);
+	qdf_register_drv_connected_callback(cds_is_drv_connected);
 
 	return QDF_STATUS_SUCCESS;
 

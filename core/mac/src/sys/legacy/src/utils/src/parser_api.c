@@ -665,7 +665,7 @@ populate_dot11f_ht_caps(struct mac_context *mac,
 			pDot11f->supportedMCSSet[1] = 0;
 		} else if (IS_24G_CH(pe_session->currentOperChannel) &&
 			   disable_high_ht_mcs_2x2 &&
-			   (pe_session->pePersona == QDF_STA_MODE)) {
+			   (pe_session->opmode == QDF_STA_MODE)) {
 				pe_debug("Disabling high HT MCS [%d]",
 					 disable_high_ht_mcs_2x2);
 				pDot11f->supportedMCSSet[1] =
@@ -1094,6 +1094,9 @@ populate_dot11f_ext_cap(struct mac_context *mac,
 
 	if (pe_session && pe_session->is_mbssid_enabled)
 		p_ext_cap->multi_bssid = 1;
+
+	if (mac->mlme_cfg->btm.btm_offload_config & BTM_OFFLOAD_ENABLED_MASK)
+		p_ext_cap->bss_transition = 1;
 
 	/* Need to calculate the num_bytes based on bits set */
 	if (pDot11f->present)
@@ -4460,7 +4463,7 @@ sir_convert_addts_rsp2_struct(struct mac_context *mac,
 	uint16_t i;
 	uint32_t status;
 
-	if (SIR_MAC_QOS_ADD_TS_RSP != *(pFrame + 1)) {
+	if (QOS_ADD_TS_RSP != *(pFrame + 1)) {
 		pe_err("Action of %d; this is not supported & is probably an error",
 			*(pFrame + 1));
 		return QDF_STATUS_E_FAILURE;
@@ -4472,12 +4475,12 @@ sir_convert_addts_rsp2_struct(struct mac_context *mac,
 
 	/* delegate to the framesc-generated code, */
 	switch (*pFrame) {
-	case SIR_MAC_ACTION_QOS_MGMT:
+	case ACTION_CATEGORY_QOS:
 		status =
 			dot11f_unpack_add_ts_response(mac, pFrame, nFrame,
 						      &addts, false);
 		break;
-	case SIR_MAC_ACTION_WME:
+	case ACTION_CATEGORY_WMM:
 		status =
 			dot11f_unpack_wmm_add_ts_response(mac, pFrame, nFrame,
 							  &wmmaddts, false);
@@ -4500,9 +4503,9 @@ sir_convert_addts_rsp2_struct(struct mac_context *mac,
 	}
 	/* & "transliterate" from a 'tDot11fAddTSResponse' or a */
 	/* 'tDot11WMMAddTSResponse' to a 'tSirMacAddtsRspInfo'... */
-	if (SIR_MAC_ACTION_QOS_MGMT == *pFrame) {
+	if (ACTION_CATEGORY_QOS == *pFrame) {
 		pAddTs->dialogToken = addts.DialogToken.token;
-		pAddTs->status = (tSirMacStatusCodes) addts.Status.status;
+		pAddTs->status = (enum mac_status_code)addts.Status.status;
 
 		if (addts.TSDelay.present) {
 			convert_ts_delay(mac, &pAddTs->delay, &addts.TSDelay);
@@ -4591,7 +4594,7 @@ sir_convert_addts_rsp2_struct(struct mac_context *mac,
 	} else {
 		pAddTs->dialogToken = wmmaddts.DialogToken.token;
 		pAddTs->status =
-			(tSirMacStatusCodes) wmmaddts.StatusCode.statusCode;
+			(enum mac_status_code)wmmaddts.StatusCode.statusCode;
 
 		if (wmmaddts.WMMTSPEC.present) {
 			pAddTs->wmeTspecPresent = 1;
@@ -4626,7 +4629,7 @@ sir_convert_delts_req2_struct(struct mac_context *mac,
 	tDot11fWMMDelTS wmmdelts = { {0} };
 	uint32_t status;
 
-	if (SIR_MAC_QOS_DEL_TS_REQ != *(pFrame + 1)) {
+	if (QOS_DEL_TS_REQ != *(pFrame + 1)) {
 		pe_err("sirConvertDeltsRsp2Struct invoked "
 			"with an Action of %d; this is not "
 			"supported & is probably an error",
@@ -4638,11 +4641,11 @@ sir_convert_delts_req2_struct(struct mac_context *mac,
 
 	/* delegate to the framesc-generated code, */
 	switch (*pFrame) {
-	case SIR_MAC_ACTION_QOS_MGMT:
+	case ACTION_CATEGORY_QOS:
 		status = dot11f_unpack_del_ts(mac, pFrame, nFrame,
 					      &delts, false);
 		break;
-	case SIR_MAC_ACTION_WME:
+	case ACTION_CATEGORY_WMM:
 		status = dot11f_unpack_wmm_del_ts(mac, pFrame, nFrame,
 						  &wmmdelts, false);
 		break;
@@ -4666,7 +4669,7 @@ sir_convert_delts_req2_struct(struct mac_context *mac,
 	}
 	/* & "transliterate" from a 'tDot11fDelTSResponse' or a */
 	/* 'tDot11WMMDelTSResponse' to a 'tSirMacDeltsReqInfo'... */
-	if (SIR_MAC_ACTION_QOS_MGMT == *pFrame) {
+	if (ACTION_CATEGORY_QOS == *pFrame) {
 		pDelTs->tsinfo.traffic.trafficType =
 			(uint16_t) delts.TSInfo.traffic_type;
 		pDelTs->tsinfo.traffic.tsid = (uint16_t) delts.TSInfo.tsid;
@@ -5989,10 +5992,10 @@ QDF_STATUS populate_dot11f_twt_extended_caps(struct mac_context *mac_ctx,
 	dot11f->num_bytes = DOT11F_IE_EXTCAP_MAX_LEN;
 	p_ext_cap = (struct s_ext_cap *)dot11f->bytes;
 
-	if (pe_session->pePersona == QDF_STA_MODE)
+	if (pe_session->opmode == QDF_STA_MODE)
 		p_ext_cap->twt_requestor_support =
 			mac_ctx->mlme_cfg->twt_cfg.is_twt_requestor_enabled;
-	if (pe_session->pePersona == QDF_SAP_MODE)
+	if (pe_session->opmode == QDF_SAP_MODE)
 		p_ext_cap->twt_responder_support =
 			mac_ctx->mlme_cfg->twt_cfg.is_twt_responder_enabled;
 

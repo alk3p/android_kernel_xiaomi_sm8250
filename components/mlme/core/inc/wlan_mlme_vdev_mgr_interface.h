@@ -22,7 +22,6 @@
 #ifndef _WLAN_MLME_VDEV_MGR_INT_API_H_
 #define _WLAN_MLME_VDEV_MGR_INT_API_H_
 
-#ifdef CONFIG_VDEV_SM
 #include <wlan_objmgr_vdev_obj.h>
 #include "include/wlan_vdev_mlme.h"
 #include "wlan_mlme_main.h"
@@ -130,6 +129,45 @@ mlme_set_connection_fail(struct wlan_objmgr_vdev *vdev, bool val);
 bool mlme_get_vdev_start_failed(struct wlan_objmgr_vdev *vdev);
 
 /**
+ * mlme_get_cac_required() - get if cac is required for new channel
+ * @vdev: vdev pointer
+ *
+ * Return: if cac is required
+ */
+bool mlme_get_cac_required(struct wlan_objmgr_vdev *vdev);
+
+/**
+ * mlme_set_cac_required() - set if cac is required for new channel
+ * @vdev: vdev pointer
+ * @val: value to be set
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+mlme_set_cac_required(struct wlan_objmgr_vdev *vdev, bool val);
+
+/**
+ * mlme_set_mbssid_info() - save mbssid info
+ * @vdev: vdev pointer
+ * @mbssid_info: mbssid info
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+mlme_set_mbssid_info(struct wlan_objmgr_vdev *vdev,
+		     struct scan_mbssid_info *mbssid_info);
+
+/**
+ * mlme_get_mbssid_info() - get mbssid info
+ * @vdev: vdev pointer
+ * @mbss_11ax: mbss 11ax info
+ *
+ * Return: None
+ */
+void mlme_get_mbssid_info(struct wlan_objmgr_vdev *vdev,
+			  struct vdev_mlme_mbss_11ax *mbss_11ax);
+
+/**
  * mlme_is_vdev_in_beaconning_mode() - check if vdev is beaconing mode
  * @vdev_opmode: vdev opmode
  *
@@ -156,5 +194,4 @@ QDF_STATUS mlme_set_assoc_type(struct wlan_objmgr_vdev *vdev,
  * Return: associate type
  */
 enum vdev_assoc_type  mlme_get_assoc_type(struct wlan_objmgr_vdev *vdev);
-#endif
 #endif

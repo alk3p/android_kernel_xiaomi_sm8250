@@ -54,6 +54,7 @@
 #include <wlan_crypto_global_api.h>
 #include "cfg_ucfg_api.h"
 #include "wlan_mlme_ucfg_api.h"
+#include "wlan_mlme_vdev_mgr_interface.h"
 
 #define SAP_DEBUG
 static struct sap_context *gp_sap_ctx[SAP_MAX_NUM_SESSION];
@@ -628,6 +629,19 @@ void wlan_sap_set_vht_ch_width(struct sap_context *sap_ctx,
 	}
 
 	sap_ctx->ch_params.ch_width = vht_channel_width;
+}
+
+bool wlan_sap_get_ch_params(struct sap_context *sap_ctx,
+			    struct ch_params *ch_params)
+{
+	if (!sap_ctx) {
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+			  FL("Invalid SAP pointer"));
+		return false;
+	}
+
+	*ch_params = sap_ctx->ch_params;
+	return true;
 }
 
 /**
@@ -1308,32 +1322,12 @@ wlansap_update_csa_channel_params(struct sap_context *sap_context,
  *
  * Return: QDF_STATUS
  */
-#ifdef CONFIG_VDEV_SM
 static inline void sap_start_csa_restart(struct mac_context *mac,
 					 struct sap_context *sap_ctx)
 {
 	sme_csa_restart(mac, sap_ctx->sessionId);
 }
-#else
-static void sap_start_csa_restart(struct mac_context *mac,
-				  struct sap_context *sap_ctx)
-{
-	struct sap_sm_event sap_event;
 
-	/*
-	 * Post the eSAP_CHANNEL_SWITCH_ANNOUNCEMENT_START
-	 * to SAP state machine to process the channel
-	 * request with CSA IE set in the beacons.
-	 */
-	sap_event.event =
-		eSAP_CHANNEL_SWITCH_ANNOUNCEMENT_START;
-	sap_event.params = 0;
-	sap_event.u1 = 0;
-	sap_event.u2 = 0;
-
-	sap_fsm(sap_ctx, &sap_event);
-}
-#endif
 /**
  * wlansap_set_channel_change_with_csa() - Set channel change with CSA
  * @sap_ctx: Pointer to SAP context
@@ -1758,6 +1752,45 @@ void wlansap_get_sec_channel(uint8_t sec_ch_offset,
 		  __func__, sec_ch_offset, *sec_channel);
 }
 
+static void
+wlansap_set_cac_required_for_chan(struct mac_context *mac_ctx,
+				  struct sap_context *sap_ctx)
+{
+	bool is_ch_dfs = false;
+	bool cac_required;
+
+	if (sap_ctx->ch_params.ch_width == CH_WIDTH_160MHZ) {
+		is_ch_dfs = true;
+	} else if (sap_ctx->ch_params.ch_width == CH_WIDTH_80P80MHZ) {
+		if ((wlan_reg_get_channel_state(mac_ctx->pdev,
+						sap_ctx->channel) ==
+						CHANNEL_STATE_DFS) ||
+		    (wlan_reg_get_channel_state(mac_ctx->pdev,
+					sap_ctx->ch_params.center_freq_seg1 -
+					SIR_80MHZ_START_CENTER_CH_DIFF) ==
+					CHANNEL_STATE_DFS))
+			is_ch_dfs = true;
+	} else if (wlan_reg_get_channel_state(mac_ctx->pdev,
+					      sap_ctx->channel) ==
+					      CHANNEL_STATE_DFS) {
+		is_ch_dfs = true;
+	}
+	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
+		  "%s: vdev id %d chan %d is_ch_dfs %d pre_cac_complete %d ignore_cac %d cac_state %d",
+		  __func__, sap_ctx->sessionId, sap_ctx->channel, is_ch_dfs,
+		  sap_ctx->pre_cac_complete, mac_ctx->sap.SapDfsInfo.ignore_cac,
+		  mac_ctx->sap.SapDfsInfo.cac_state);
+
+	if (!is_ch_dfs || sap_ctx->pre_cac_complete ||
+	    mac_ctx->sap.SapDfsInfo.ignore_cac ||
+	    (mac_ctx->sap.SapDfsInfo.cac_state == eSAP_DFS_SKIP_CAC))
+		cac_required = false;
+	else
+		cac_required = true;
+
+	mlme_set_cac_required(sap_ctx->vdev, cac_required);
+}
+
 QDF_STATUS wlansap_channel_change_request(struct sap_context *sap_ctx,
 					  uint8_t target_channel)
 {
@@ -1831,6 +1864,7 @@ QDF_STATUS wlansap_channel_change_request(struct sap_context *sap_ctx,
 	sap_ctx->csr_roamProfile.ch_params.center_freq_seg1 =
 						ch_params->center_freq_seg1;
 	sap_dfs_set_current_channel(sap_ctx);
+	wlansap_set_cac_required_for_chan(mac_ctx, sap_ctx);
 
 	status = sme_roam_channel_change_req(MAC_HANDLE(mac_ctx),
 					     sap_ctx->bssid,
@@ -2691,6 +2725,26 @@ QDF_STATUS wlansap_update_owe_info(struct sap_context *sap_ctx,
 	return status;
 }
 
+static bool wlansap_is_channel_present_in_acs_list(uint8_t ch,
+						uint8_t *ch_list,
+						uint8_t ch_count)
+{
+	uint8_t i;
+
+	for(i = 0; i < ch_count; i++) {
+		if (ch_list[i] == ch) {
+			/*
+			 * channel was given by hostpad for ACS, and is present
+			 * in PCL.
+			 */
+			sap_debug("channel present in ACS channel list %d", ch);
+			return true;
+		}
+	}
+
+	return false;
+}
+
 QDF_STATUS wlansap_filter_ch_based_acs(struct sap_context *sap_ctx,
 				       uint8_t *ch_list,
 				       uint32_t *ch_cnt)
@@ -2704,8 +2758,9 @@ QDF_STATUS wlansap_filter_ch_based_acs(struct sap_context *sap_ctx,
 	}
 
 	for (ch_index = 0; ch_index < *ch_cnt; ch_index++) {
-		if (ch_list[ch_index] >= sap_ctx->acs_cfg->start_ch &&
-		    ch_list[ch_index] <= sap_ctx->acs_cfg->end_ch)
+		if (wlansap_is_channel_present_in_acs_list(ch_list[ch_index],
+					     sap_ctx->acs_cfg->ch_list,
+					     sap_ctx->acs_cfg->ch_list_count))
 			ch_list[target_ch_cnt++] = ch_list[ch_index];
 	}
 

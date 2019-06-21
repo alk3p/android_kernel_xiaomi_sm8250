@@ -1279,7 +1279,10 @@ int pld_power_on(struct device *dev)
 
 	switch (pld_get_bus_type(dev)) {
 	case PLD_BUS_TYPE_PCIE:
-		ret = pld_pcie_power_on(dev);
+		/* cnss platform driver handles PCIe SoC
+		 * power on/off seqeunce so let CNSS driver
+		 * handle the power on sequence for PCIe SoC
+		 */
 		break;
 	case PLD_BUS_TYPE_SNOC:
 		ret = pld_snoc_power_on(dev);
@@ -1305,7 +1308,10 @@ int pld_power_off(struct device *dev)
 
 	switch (pld_get_bus_type(dev)) {
 	case PLD_BUS_TYPE_PCIE:
-		ret = pld_pcie_power_off(dev);
+		/* cnss platform driver handles PCIe SoC
+		 * power on/off seqeunce so let CNSS driver
+		 * handle the power off sequence for PCIe SoC
+		 */
 		break;
 	case PLD_BUS_TYPE_SNOC:
 		ret = pld_snoc_power_off(dev);
@@ -1549,6 +1555,36 @@ void pld_get_msi_address(struct device *dev, uint32_t *msi_addr_low,
 		pr_err("Invalid device type %d\n", type);
 		break;
 	}
+}
+
+/**
+ * pld_is_drv_connected() - Check if DRV subsystem is connected
+ * @dev: device structure
+ *
+ *  Return: 1 DRV is connected
+ *          0 DRV is not connected
+ *          Non zero failure code for errors
+ */
+int pld_is_drv_connected(struct device *dev)
+{
+	enum pld_bus_type type = pld_get_bus_type(dev);
+	int ret = 0;
+
+	switch (type) {
+	case PLD_BUS_TYPE_PCIE:
+		ret = pld_pcie_is_drv_connected(dev);
+		break;
+	case PLD_BUS_TYPE_SNOC:
+	case PLD_BUS_TYPE_SDIO:
+	case PLD_BUS_TYPE_USB:
+		break;
+	default:
+		pr_err("Invalid device type %d\n", type);
+		ret = -EINVAL;
+		break;
+	}
+
+	return ret;
 }
 
 /**
@@ -1797,42 +1833,56 @@ void pld_block_shutdown(struct device *dev, bool status)
 	}
 }
 
-void pld_idle_shutdown(struct device *dev,
-		       void (*shutdown_cb)(struct device *dev))
+int pld_idle_shutdown(struct device *dev,
+		      int (*shutdown_cb)(struct device *dev))
 {
+	int errno = -EINVAL;
 	enum pld_bus_type type;
 
 	if (!shutdown_cb)
-		return;
+		return -EINVAL;
 
 	type = pld_get_bus_type(dev);
 	switch (type) {
+		case PLD_BUS_TYPE_SDIO:
+		case PLD_BUS_TYPE_USB:
 		case PLD_BUS_TYPE_SNOC:
-			shutdown_cb(dev);
+			errno = shutdown_cb(dev);
 			break;
 		case PLD_BUS_TYPE_PCIE:
+			errno = pld_pcie_idle_shutdown(dev);
 			break;
 		default:
+			pr_err("Invalid device type %d\n", type);
 			break;
 	}
+
+	return errno;
 }
 
-void pld_idle_restart(struct device *dev,
-		      void (*restart_cb)(struct device *dev))
+int pld_idle_restart(struct device *dev,
+		     int (*restart_cb)(struct device *dev))
 {
+	int errno = -EINVAL;
 	enum pld_bus_type type;
 
 	if (!restart_cb)
-		return;
+		return -EINVAL;
 
 	type = pld_get_bus_type(dev);
 	switch (type) {
+		case PLD_BUS_TYPE_SDIO:
+		case PLD_BUS_TYPE_USB:
 		case PLD_BUS_TYPE_SNOC:
-			restart_cb(dev);
+			errno = restart_cb(dev);
 			break;
 		case PLD_BUS_TYPE_PCIE:
+			errno = pld_pcie_idle_restart(dev);
 			break;
 		default:
+			pr_err("Invalid device type %d\n", type);
 			break;
 	}
+
+	return errno;
 }

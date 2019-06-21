@@ -49,6 +49,7 @@
 #include <wlan_utility.h>
 #include "wlan_reg_services_api.h"
 #include "sch_api.h"
+#include "wlan_blm_api.h"
 
 static void csr_set_cfg_valid_channel_list(struct mac_context *mac,
 					   uint8_t *pChannelList,
@@ -373,7 +374,7 @@ static void csr_scan_add_result(struct mac_context *mac_ctx,
 	struct wlan_frame_hdr *hdr;
 	struct wlan_bcn_frame *fixed_frame;
 	uint32_t buf_len, i;
-	tSirBssDescription *bss_desc;
+	struct bss_description *bss_desc;
 	enum mgmt_frame_type frm_type = MGMT_BEACON;
 
 	if (!pResult) {
@@ -426,33 +427,9 @@ static void csr_scan_add_result(struct mac_context *mac_ctx,
 					    frm_type);
 }
 
-/*
- * NOTE: This routine is being added to make
- * sure that scan results are not being flushed
- * while roaming. If the scan results are flushed,
- * we are unable to recover from
- * csr_roam_roaming_state_disassoc_rsp_processor.
- * If it is needed to remove this routine,
- * first ensure that we recover gracefully from
- * csr_roam_roaming_state_disassoc_rsp_processor if
- * csr_scan_get_result returns with a failure because
- * of not being able to find the roaming BSS.
- */
-static bool csr_scan_flush_denied(struct mac_context *mac)
-{
-	uint8_t sessionId;
-
-	for (sessionId = 0; sessionId < WLAN_MAX_VDEVS; sessionId++) {
-		if (CSR_IS_SESSION_VALID(mac, sessionId)) {
-			if (csr_neighbor_middle_of_roaming(mac, sessionId))
-				return 1;
-		}
-	}
-	return 0;
-}
-
-static bool csr_scan_save_bss_description(struct mac_context *mac,
-					  tSirBssDescription *pBSSDescription)
+static bool
+csr_scan_save_bss_description(struct mac_context *mac,
+			      struct bss_description *pBSSDescription)
 {
 	struct tag_csrscan_result *pCsrBssDescription = NULL;
 	uint32_t cbBSSDesc;
@@ -486,7 +463,7 @@ static bool csr_scan_save_bss_description(struct mac_context *mac,
 
 /* Append a Bss Description... */
 bool csr_scan_append_bss_description(struct mac_context *mac,
-				     tSirBssDescription *pSirBssDescription)
+				     struct bss_description *pSirBssDescription)
 {
 	return csr_scan_save_bss_description(mac, pSirBssDescription);
 }
@@ -889,7 +866,7 @@ bool csr_is_supported_channel(struct mac_context *mac, uint8_t channelId)
  * pAdapter->channels11d
  */
 bool csr_learn_11dcountry_information(struct mac_context *mac,
-				      tSirBssDescription *pSirBssDesc,
+				      struct bss_description *pSirBssDesc,
 				      tDot11fBeaconIEs *pIes, bool fForce)
 {
 	QDF_STATUS status;
@@ -1781,7 +1758,7 @@ QDF_STATUS csr_scan_create_entry_in_scan_cache(struct mac_context *mac,
 {
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	struct csr_roam_session *pSession = CSR_GET_SESSION(mac, sessionId);
-	tSirBssDescription *pNewBssDescriptor = NULL;
+	struct bss_description *pNewBssDescriptor = NULL;
 	uint32_t size = 0;
 
 	if (!pSession) {
@@ -1852,7 +1829,7 @@ csr_rso_save_ap_to_scan_cache(struct mac_context *mac,
 
 	qdf_mem_copy(&scan_res_ptr->Result.BssDescriptor,
 			bss_desc_ptr,
-			(sizeof(tSirBssDescription) + length));
+			(sizeof(struct bss_description) + length));
 
 	sme_debug("LFR3:Add BSSID to scan cache" QDF_MAC_ADDR_STR,
 		QDF_MAC_ADDR_ARRAY(scan_res_ptr->Result.BssDescriptor.bssId));
@@ -1909,9 +1886,9 @@ csr_get_fst_bssdescr_ptr(tScanResultHandle result_handle)
  *
  * Return: first bss descriptor from the scan handle.
  */
-tSirBssDescription *
+struct bss_description *
 csr_get_bssdescr_from_scan_handle(tScanResultHandle result_handle,
-				  tSirBssDescription *bss_descr)
+				  struct bss_description *bss_descr)
 {
 	tListElem *first_element = NULL;
 	struct tag_csrscan_result *scan_result = NULL;
@@ -1936,7 +1913,7 @@ csr_get_bssdescr_from_scan_handle(tScanResultHandle result_handle,
 				Link);
 		qdf_mem_copy(bss_descr,
 				&scan_result->Result.BssDescriptor,
-				sizeof(tSirBssDescription));
+				sizeof(struct bss_description));
 	}
 	return bss_descr;
 }
@@ -2396,6 +2373,8 @@ static QDF_STATUS csr_prepare_scan_filter(struct mac_context *mac_ctx,
 			pFilter->BSSIDs.bssid[i].bytes,
 			QDF_MAC_ADDR_SIZE);
 
+	filter->age_threshold = pFilter->age_threshold;
+
 	filter->num_of_ssid = pFilter->SSIDs.numOfSSIDs;
 	if (filter->num_of_ssid > WLAN_SCAN_FILTER_NUM_SSID)
 		filter->num_of_ssid = WLAN_SCAN_FILTER_NUM_SSID;
@@ -2516,7 +2495,7 @@ static QDF_STATUS csr_prepare_scan_filter(struct mac_context *mac_ctx,
  */
 static void csr_update_bss_with_fils_data(struct mac_context *mac_ctx,
 					  struct scan_cache_entry *scan_entry,
-					  tSirBssDescription *bss_descr)
+					  struct bss_description *bss_descr)
 {
 	int ret;
 	tDot11fIEfils_indication fils_indication = {0};
@@ -2555,7 +2534,7 @@ static void csr_update_bss_with_fils_data(struct mac_context *mac_ctx,
 #else
 static void csr_update_bss_with_fils_data(struct mac_context *mac_ctx,
 					  struct scan_cache_entry *scan_entry,
-					  tSirBssDescription *bss_descr)
+					  struct bss_description *bss_descr)
 { }
 #endif
 
@@ -2596,7 +2575,7 @@ static QDF_STATUS csr_fill_bss_from_scan_entry(struct mac_context *mac_ctx,
 					struct tag_csrscan_result **p_result)
 {
 	tDot11fBeaconIEs *bcn_ies;
-	tSirBssDescription *bss_desc;
+	struct bss_description *bss_desc;
 	tCsrScanResultInfo *result_info;
 	tpSirMacMgmtHdr hdr;
 	uint8_t *ie_ptr;
@@ -2609,7 +2588,7 @@ static QDF_STATUS csr_fill_bss_from_scan_entry(struct mac_context *mac_ctx,
 
 	hdr = (tpSirMacMgmtHdr)scan_entry->raw_frame.ptr;
 
-	bss_len = (uint16_t)(offsetof(tSirBssDescription,
+	bss_len = (uint16_t)(offsetof(struct bss_description,
 			   ieFields[0]) + ie_len);
 	alloc_len = sizeof(struct tag_csrscan_result) + bss_len;
 	bss = qdf_mem_malloc(alloc_len);
@@ -2635,7 +2614,7 @@ static QDF_STATUS csr_fill_bss_from_scan_entry(struct mac_context *mac_ctx,
 
 	bss_desc = &result_info->BssDescriptor;
 
-	bss_desc->length = (uint16_t) (offsetof(tSirBssDescription,
+	bss_desc->length = (uint16_t) (offsetof(struct bss_description,
 			   ieFields[0]) - sizeof(bss_desc->length) + ie_len);
 
 	qdf_mem_copy(bss_desc->bssId,
@@ -2756,130 +2735,6 @@ static QDF_STATUS csr_parse_scan_list(struct mac_context *mac_ctx,
 }
 
 /**
- * csr_remove_ap_due_to_rssi() - check if bss is present in
- * list of BSSID which rejected Assoc due to RSSI
- * @list: rssi based rejected BSS list
- * @bss_descr: pointer to bss description
- *
- * Check if the time interval indicated in last Assoc reject
- * has expired OR rssi has improved by margin indicated
- * in last Assoc reject. If any of the condition match remove
- * the AP from the avoid list, else do not try to conenct
- * to the AP
- *
- * Return: true if connection cannot be tried with AP else false
- */
-static bool csr_remove_ap_due_to_rssi(qdf_list_t *list,
-				      tSirBssDescription *bss_descr)
-{
-	QDF_STATUS status;
-	struct sir_rssi_disallow_lst *cur_node = NULL;
-	qdf_list_node_t *cur_lst = NULL, *next_lst = NULL;
-	qdf_time_t cur_time;
-	uint32_t time_diff;
-
-	if (!qdf_list_size(list))
-		return false;
-
-	cur_time = qdf_do_div(qdf_get_monotonic_boottime(),
-		QDF_MC_TIMER_TO_MS_UNIT);
-
-	qdf_list_peek_front(list, &cur_lst);
-	while (cur_lst) {
-		cur_node = qdf_container_of(cur_lst,
-				struct sir_rssi_disallow_lst, node);
-
-		qdf_list_peek_next(list, cur_lst, &next_lst);
-
-		time_diff = cur_time - cur_node->time_during_rejection;
-		if ((time_diff > cur_node->retry_delay)) {
-			sme_debug("Remove %pM as time diff %d is greater retry delay %d",
-				cur_node->bssid.bytes, time_diff,
-				cur_node->retry_delay);
-			status = qdf_list_remove_node(list, cur_lst);
-			if (QDF_IS_STATUS_SUCCESS(status))
-				qdf_mem_free(cur_node);
-			cur_lst = next_lst;
-			next_lst = NULL;
-			cur_node = NULL;
-			continue;
-		}
-
-		if (!qdf_mem_cmp(cur_node->bssid.bytes,
-		    bss_descr->bssId, QDF_MAC_ADDR_SIZE))
-			break;
-		cur_lst = next_lst;
-		next_lst = NULL;
-		cur_node = NULL;
-	}
-
-	if (cur_node) {
-		time_diff = cur_time - cur_node->time_during_rejection;
-		if (!(time_diff > cur_node->retry_delay ||
-		   bss_descr->rssi_raw >= cur_node->expected_rssi)) {
-			sme_err("Don't Attempt to connect %pM (time diff %d retry delay %d rssi %d expected rssi %d)",
-				cur_node->bssid.bytes, time_diff,
-				cur_node->retry_delay, bss_descr->rssi_raw,
-				cur_node->expected_rssi);
-			return true;
-		}
-		sme_debug("Remove %pM as time diff %d is greater retry delay %d or RSSI %d is greater than expected %d",
-				cur_node->bssid.bytes, time_diff,
-				cur_node->retry_delay,
-				bss_descr->rssi_raw,
-				cur_node->expected_rssi);
-		status = qdf_list_remove_node(list, cur_lst);
-		if (QDF_IS_STATUS_SUCCESS(status))
-			qdf_mem_free(cur_node);
-	}
-
-	return false;
-}
-
-/**
- * csr_filter_ap_due_to_rssi_reject() - filter the AP who has sent
- * assoc reject due to RSSI if condition has not improved
- * @mac_ctx: mac context
- * @scan_list: candidate list for the connection
- *
- * Return: void
- */
-static void csr_filter_ap_due_to_rssi_reject(struct mac_context *mac_ctx,
-					     struct scan_result_list *scan_list)
-{
-	tListElem *cur_entry;
-	tListElem *next_entry;
-	struct tag_csrscan_result *scan_res;
-	bool remove;
-
-	if (!scan_list ||
-	   !qdf_list_size(&mac_ctx->roam.rssi_disallow_bssid))
-		return;
-
-	cur_entry = csr_ll_peek_head(&scan_list->List, LL_ACCESS_NOLOCK);
-	while (cur_entry) {
-		scan_res = GET_BASE_ADDR(cur_entry, struct tag_csrscan_result,
-					Link);
-		next_entry = csr_ll_next(&scan_list->List,
-						cur_entry, LL_ACCESS_NOLOCK);
-
-		qdf_mutex_acquire(&mac_ctx->roam.rssi_disallow_bssid_lock);
-		remove = csr_remove_ap_due_to_rssi(
-			&mac_ctx->roam.rssi_disallow_bssid,
-			&scan_res->Result.BssDescriptor);
-		qdf_mutex_release(&mac_ctx->roam.rssi_disallow_bssid_lock);
-
-		if (remove) {
-			csr_ll_remove_entry(&scan_list->List,
-				cur_entry, LL_ACCESS_NOLOCK);
-			csr_free_scan_result_entry(mac_ctx, scan_res);
-		}
-		cur_entry = next_entry;
-		next_entry = NULL;
-	}
-}
-
-/**
  * csr_remove_ap_with_assoc_disallowed() - Remove APs with assoc
  * disallowed bit set
  * @mac_ctx: mac context
@@ -2955,8 +2810,12 @@ QDF_STATUS csr_scan_get_result(struct mac_context *mac_ctx,
 	if (list)
 		sme_debug("num_entries %d", qdf_list_size(list));
 
+	/* Filter the scan list with the blacklist, rssi reject, avoided APs */
+	if (pFilter && pFilter->csrPersona == QDF_STA_MODE)
+		wlan_blm_filter_bssid(pdev, list);
+
 	if (!list || (list && !qdf_list_size(list))) {
-		sme_debug("get scan result failed");
+		sme_debug("scan list empty");
 		status = QDF_STATUS_E_NULL_VALUE;
 		goto error;
 	}
@@ -2978,10 +2837,9 @@ QDF_STATUS csr_scan_get_result(struct mac_context *mac_ctx,
 		/* Fail or No one wants the result. */
 		csr_scan_result_purge(mac_ctx, (tScanResultHandle) ret_list);
 	else {
-		if (pFilter) {
-			csr_filter_ap_due_to_rssi_reject(mac_ctx, ret_list);
+		if (pFilter && pFilter->csrPersona == QDF_STA_MODE)
 			csr_remove_ap_with_assoc_disallowed(mac_ctx, ret_list);
-		}
+
 		if (!csr_ll_count(&ret_list->List)) {
 			/* This mean that there is no match */
 			csr_ll_close(&ret_list->List);
@@ -3056,7 +2914,7 @@ QDF_STATUS csr_scan_get_result_for_bssid(struct mac_context *mac_ctx,
 			res->ssId.length);
 		res->timer = scan_result->timer;
 		qdf_mem_copy(&res->BssDescriptor, &scan_result->BssDescriptor,
-			sizeof(tSirBssDescription));
+			sizeof(struct bss_description));
 		status = QDF_STATUS_SUCCESS;
 	} else {
 		status = QDF_STATUS_E_FAILURE;
@@ -3089,17 +2947,6 @@ csr_flush_scan_results(struct mac_context *mac_ctx,
 
 	wlan_objmgr_pdev_release_ref(pdev, WLAN_LEGACY_MAC_ID);
 	return status;
-}
-
-QDF_STATUS csr_scan_flush_result(struct mac_context *mac_ctx)
-{
-
-	if (csr_scan_flush_denied(mac_ctx)) {
-		sme_err("scan flush denied in roam state");
-		return QDF_STATUS_E_FAILURE;
-	}
-
-	return csr_flush_scan_results(mac_ctx, NULL);
 }
 
 static inline void csr_flush_bssid(struct mac_context *mac_ctx,

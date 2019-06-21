@@ -73,6 +73,7 @@
 #include <wlan_tdls_cfg_api.h>
 #include "cfg_ucfg_api.h"
 #include "wlan_mlme_public_struct.h"
+#include "wlan_scan_utils_api.h"
 
 static void __lim_init_bss_vars(struct mac_context *mac)
 {
@@ -601,9 +602,6 @@ static void pe_shutdown_notifier_cb(void *ctx)
 			if (LIM_IS_AP_ROLE(session))
 				qdf_mc_timer_stop(&session->
 						 protection_fields_reset_timer);
-#ifdef WLAN_FEATURE_11W
-			qdf_mc_timer_stop(&session->pmfComebackTimer);
-#endif
 		}
 	}
 }
@@ -1815,7 +1813,7 @@ void lim_ps_offload_handle_missed_beacon_ind(struct mac_context *mac,
 {
 	struct missed_beacon_ind *missed_beacon_ind = msg->bodyptr;
 	struct pe_session *pe_session =
-		pe_find_session_by_bss_idx(mac, missed_beacon_ind->bssIdx);
+		pe_find_session_by_bss_idx(mac, missed_beacon_ind->bss_idx);
 
 	if (!pe_session) {
 		pe_err("session does not exist for given BSSId");
@@ -1897,89 +1895,277 @@ static void sir_parse_bcn_fixed_fields(struct mac_context *mac_ctx,
 }
 
 static QDF_STATUS
+lim_roam_gen_mbssid_beacon(struct mac_context *mac,
+			   struct roam_offload_synch_ind *roam_ind,
+			   tpSirProbeRespBeacon parsed_frm,
+			   uint8_t **ie, uint32_t *ie_len)
+{
+	qdf_list_t *scan_list;
+	struct mgmt_rx_event_params rx_param;
+	uint8_t list_count = 0, i;
+	QDF_STATUS status = QDF_STATUS_E_FAILURE;
+	qdf_list_node_t *next_node = NULL, *cur_node = NULL;
+	struct scan_cache_node *scan_node;
+	struct scan_cache_entry *scan_entry;
+	uint8_t *bcn_prb_ptr;
+	uint32_t nontx_bcn_prbrsp_len = 0, offset, length;
+	uint8_t *nontx_bcn_prbrsp = NULL;
+	uint8_t ie_offset;
+
+	ie_offset = SIR_MAC_HDR_LEN_3A + SIR_MAC_B_PR_SSID_OFFSET;
+	bcn_prb_ptr = (uint8_t *)roam_ind +
+				roam_ind->beaconProbeRespOffset;
+
+	rx_param.channel = wlan_freq_to_chan(roam_ind->chan_freq);
+	rx_param.pdev_id = wlan_objmgr_pdev_get_pdev_id(mac->pdev);
+	rx_param.rssi = roam_ind->rssi;
+
+	scan_list = util_scan_unpack_beacon_frame(mac->pdev, bcn_prb_ptr,
+						  roam_ind->beaconProbeRespLength,
+						  MGMT_SUBTYPE_BEACON, &rx_param);
+	if (!scan_list) {
+		pe_err("failed to parse");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	list_count = qdf_list_size(scan_list);
+	status = qdf_list_peek_front(scan_list, &cur_node);
+	if (QDF_IS_STATUS_ERROR(status) || !cur_node) {
+		pe_debug("list peek front failure. list size %d", list_count);
+		goto error;
+	}
+
+	for (i = 1; i < list_count; i++) {
+		scan_node = qdf_container_of(cur_node,
+					     struct scan_cache_node, node);
+		scan_entry = scan_node->entry;
+		if (qdf_is_macaddr_equal(&roam_ind->bssid,
+					 &scan_entry->bssid)) {
+			pe_debug("matched BSSID %pM bcn len %d profiles %d",
+				 scan_entry->bssid.bytes,
+				 scan_entry->raw_frame.len,
+				 list_count);
+			nontx_bcn_prbrsp = scan_entry->raw_frame.ptr;
+			nontx_bcn_prbrsp_len = scan_entry->raw_frame.len;
+			QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_PE,
+					   QDF_TRACE_LEVEL_DEBUG,
+					   scan_entry->raw_frame.ptr,
+					   nontx_bcn_prbrsp_len);
+			break;
+		}
+		status = qdf_list_peek_next(scan_list, cur_node, &next_node);
+		if (QDF_IS_STATUS_ERROR(status) || !next_node) {
+			pe_debug("list remove failure i:%d, lsize:%d",
+				 i, list_count);
+			goto error;
+		}
+		cur_node = next_node;
+	}
+
+	if (!nontx_bcn_prbrsp_len) {
+		pe_debug("failed to generate/find MBSSID beacon");
+		goto error;
+	}
+
+	if (roam_ind->isBeacon) {
+		offset = SIR_MAC_HDR_LEN_3A + SIR_MAC_B_PR_SSID_OFFSET;
+		length = nontx_bcn_prbrsp_len - SIR_MAC_HDR_LEN_3A;
+		if (sir_parse_beacon_ie(mac, parsed_frm,
+					&nontx_bcn_prbrsp[offset],
+					length) != QDF_STATUS_SUCCESS ||
+			!parsed_frm->ssidPresent) {
+			pe_err("Parse error Beacon, length: %d",
+			       roam_ind->beaconProbeRespLength);
+			status =  QDF_STATUS_E_FAILURE;
+			goto error;
+		}
+	} else {
+		offset = SIR_MAC_HDR_LEN_3A;
+		length = nontx_bcn_prbrsp_len - SIR_MAC_HDR_LEN_3A;
+		if (sir_convert_probe_frame2_struct(mac,
+					    &nontx_bcn_prbrsp[offset],
+					    length,
+					    parsed_frm) != QDF_STATUS_SUCCESS ||
+			!parsed_frm->ssidPresent) {
+			pe_err("Parse error ProbeResponse, length: %d",
+			       roam_ind->beaconProbeRespLength);
+			status = QDF_STATUS_E_FAILURE;
+			goto error;
+		}
+	}
+
+	*ie_len = nontx_bcn_prbrsp_len - ie_offset;
+	if (*ie_len) {
+		*ie = qdf_mem_malloc(*ie_len);
+		if (!*ie)
+			return QDF_STATUS_E_NOMEM;
+		qdf_mem_copy(*ie, nontx_bcn_prbrsp + ie_offset, *ie_len);
+		pe_debug("beacon/probe Ie length: %d", *ie_len);
+	}
+error:
+	for (i = 0; i < list_count; i++) {
+		status = qdf_list_remove_front(scan_list, &next_node);
+		if (QDF_IS_STATUS_ERROR(status) || !next_node) {
+			pe_debug("list remove failure i:%d, lsize:%d",
+				 i, list_count);
+			break;
+		}
+		scan_node = qdf_container_of(next_node,
+					     struct scan_cache_node, node);
+		util_scan_free_cache_entry(scan_node->entry);
+		qdf_mem_free(scan_node);
+	}
+	qdf_mem_free(scan_list);
+
+	return status;
+}
+
+static QDF_STATUS
+lim_roam_gen_beacon_descr(struct mac_context *mac,
+			  struct roam_offload_synch_ind *roam_ind,
+			  tpSirProbeRespBeacon parsed_frm,
+			  uint8_t **ie, uint32_t *ie_len)
+{
+	QDF_STATUS status;
+	uint8_t *bcn_prb_ptr;
+	tpSirMacMgmtHdr mac_hdr;
+	uint8_t ie_offset;
+
+	bcn_prb_ptr = (uint8_t *)roam_ind +
+		roam_ind->beaconProbeRespOffset;
+	mac_hdr = (tpSirMacMgmtHdr)bcn_prb_ptr;
+	ie_offset = SIR_MAC_HDR_LEN_3A + SIR_MAC_B_PR_SSID_OFFSET;
+
+	if (qdf_is_macaddr_zero((struct qdf_mac_addr *)mac_hdr->bssId)) {
+		pe_debug("bssid is 0 in beacon/probe update it with bssId %pM in sync ind",
+			roam_ind->bssid.bytes);
+		qdf_mem_copy(mac_hdr->bssId, roam_ind->bssid.bytes,
+			     sizeof(tSirMacAddr));
+	}
+
+	if (qdf_mem_cmp(&roam_ind->bssid.bytes,
+			&mac_hdr->bssId, QDF_MAC_ADDR_SIZE) != 0) {
+		pe_debug("LFR3:MBSSID Beacon/Prb Rsp: %d bssid %pM",
+			 roam_ind->isBeacon,
+			 mac_hdr->bssId);
+		/*
+		 * Its a MBSSID non-tx BSS roaming scenario.
+		 * Generate non tx BSS beacon/probe response
+		 */
+		status = lim_roam_gen_mbssid_beacon(mac,
+						    roam_ind,
+						    parsed_frm,
+						    ie, ie_len);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			pe_err("failed to gen mbssid beacon");
+			return QDF_STATUS_E_FAILURE;
+		}
+	} else {
+		if (roam_ind->isBeacon) {
+			if (sir_parse_beacon_ie(mac, parsed_frm,
+				&bcn_prb_ptr[SIR_MAC_HDR_LEN_3A +
+				SIR_MAC_B_PR_SSID_OFFSET],
+				roam_ind->beaconProbeRespLength -
+				SIR_MAC_HDR_LEN_3A) != QDF_STATUS_SUCCESS ||
+				!parsed_frm->ssidPresent) {
+				pe_err("Parse error Beacon, length: %d",
+				       roam_ind->beaconProbeRespLength);
+				return QDF_STATUS_E_FAILURE;
+			}
+		} else {
+			if (sir_convert_probe_frame2_struct(mac,
+				&bcn_prb_ptr[SIR_MAC_HDR_LEN_3A],
+				roam_ind->beaconProbeRespLength -
+				SIR_MAC_HDR_LEN_3A, parsed_frm) !=
+				QDF_STATUS_SUCCESS ||
+				!parsed_frm->ssidPresent) {
+				pe_err("Parse error ProbeResponse, length: %d",
+				       roam_ind->beaconProbeRespLength);
+				return QDF_STATUS_E_FAILURE;
+			}
+		}
+		/* 24 byte MAC header and 12 byte to ssid IE */
+		if (roam_ind->beaconProbeRespLength > ie_offset) {
+			*ie_len = roam_ind->beaconProbeRespLength - ie_offset;
+			*ie = qdf_mem_malloc(*ie_len);
+			if (!*ie)
+				return QDF_STATUS_E_NOMEM;
+			qdf_mem_copy(*ie, bcn_prb_ptr + ie_offset, *ie_len);
+			pe_debug("beacon/probe Ie length: %d", *ie_len);
+		}
+	}
+	/*
+	 * For probe response, unpack core parses beacon interval, capabilities,
+	 * timestamp. For beacon IEs, these fields are not parsed.
+	 */
+	if (roam_ind->isBeacon)
+		sir_parse_bcn_fixed_fields(mac, parsed_frm,
+			&bcn_prb_ptr[SIR_MAC_HDR_LEN_3A]);
+
+	return QDF_STATUS_SUCCESS;
+}
+
+static QDF_STATUS
 lim_roam_fill_bss_descr(struct mac_context *mac,
-			struct roam_offload_synch_ind *roam_offload_synch_ind_ptr,
+			struct roam_offload_synch_ind *roam_synch_ind_ptr,
 			struct bss_description *bss_desc_ptr)
 {
 	uint32_t ie_len = 0;
 	tpSirProbeRespBeacon parsed_frm_ptr;
 	tpSirMacMgmtHdr mac_hdr;
 	uint8_t *bcn_proberesp_ptr;
+	QDF_STATUS status;
+	uint8_t *ie = NULL;
 
-	bcn_proberesp_ptr = (uint8_t *)roam_offload_synch_ind_ptr +
-		roam_offload_synch_ind_ptr->beaconProbeRespOffset;
+	bcn_proberesp_ptr = (uint8_t *)roam_synch_ind_ptr +
+		roam_synch_ind_ptr->beaconProbeRespOffset;
 	mac_hdr = (tpSirMacMgmtHdr)bcn_proberesp_ptr;
 	parsed_frm_ptr = qdf_mem_malloc(sizeof(tSirProbeRespBeacon));
 	if (!parsed_frm_ptr)
 		return QDF_STATUS_E_NOMEM;
 
-	if (roam_offload_synch_ind_ptr->beaconProbeRespLength <=
+	if (roam_synch_ind_ptr->beaconProbeRespLength <=
 			SIR_MAC_HDR_LEN_3A) {
-		pe_err("%s: very few bytes in synchInd beacon / probe resp frame! length: %d",
-		__func__, roam_offload_synch_ind_ptr->beaconProbeRespLength);
+		pe_err("very few bytes in synchInd beacon / probe resp frame! length: %d",
+		       roam_synch_ind_ptr->beaconProbeRespLength);
+		qdf_mem_free(parsed_frm_ptr);
+		return QDF_STATUS_E_FAILURE;
+	}
+	pe_debug("LFR3:Beacon/Prb Rsp: %d bssid %pM beacon %pM",
+		 roam_synch_ind_ptr->isBeacon,
+		 roam_synch_ind_ptr->bssid.bytes,
+		 mac_hdr->bssId);
+	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_DEBUG,
+			   bcn_proberesp_ptr,
+			   roam_synch_ind_ptr->beaconProbeRespLength);
+
+	status = lim_roam_gen_beacon_descr(mac,
+					   roam_synch_ind_ptr,
+					   parsed_frm_ptr,
+					   &ie, &ie_len);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		pe_err("Failed to parse beacon");
 		qdf_mem_free(parsed_frm_ptr);
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	pe_debug("LFR3:Beacon/Prb Rsp: %d", roam_offload_synch_ind_ptr->isBeacon);
-	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_DEBUG,
-	bcn_proberesp_ptr, roam_offload_synch_ind_ptr->beaconProbeRespLength);
-	if (roam_offload_synch_ind_ptr->isBeacon) {
-		if (sir_parse_beacon_ie(mac, parsed_frm_ptr,
-			&bcn_proberesp_ptr[SIR_MAC_HDR_LEN_3A +
-			SIR_MAC_B_PR_SSID_OFFSET],
-			roam_offload_synch_ind_ptr->beaconProbeRespLength -
-			SIR_MAC_HDR_LEN_3A) != QDF_STATUS_SUCCESS ||
-			!parsed_frm_ptr->ssidPresent) {
-			pe_err("Parse error Beacon, length: %d",
-			roam_offload_synch_ind_ptr->beaconProbeRespLength);
-			qdf_mem_free(parsed_frm_ptr);
-			return QDF_STATUS_E_FAILURE;
-		}
-	} else {
-		if (sir_convert_probe_frame2_struct(mac,
-			&bcn_proberesp_ptr[SIR_MAC_HDR_LEN_3A],
-			roam_offload_synch_ind_ptr->beaconProbeRespLength -
-			SIR_MAC_HDR_LEN_3A, parsed_frm_ptr) != QDF_STATUS_SUCCESS ||
-			!parsed_frm_ptr->ssidPresent) {
-			pe_err("Parse error ProbeResponse, length: %d",
-			roam_offload_synch_ind_ptr->beaconProbeRespLength);
-			qdf_mem_free(parsed_frm_ptr);
-			return QDF_STATUS_E_FAILURE;
-		}
-	}
-
-	/*
-	 * For probe response, unpack core parses beacon interval, capabilities,
-	 * timestamp. For beacon IEs, these fields are not parsed.
-	 */
-	if (roam_offload_synch_ind_ptr->isBeacon)
-		sir_parse_bcn_fixed_fields(mac, parsed_frm_ptr,
-			&bcn_proberesp_ptr[SIR_MAC_HDR_LEN_3A]);
-
-	/* 24 byte MAC header and 12 byte to ssid IE */
-	if (roam_offload_synch_ind_ptr->beaconProbeRespLength >
-		(SIR_MAC_HDR_LEN_3A + SIR_MAC_B_PR_SSID_OFFSET)) {
-		ie_len = roam_offload_synch_ind_ptr->beaconProbeRespLength -
-			(SIR_MAC_HDR_LEN_3A + SIR_MAC_B_PR_SSID_OFFSET);
-	}
 	/*
 	 * Length of BSS desription is without length of
 	 * length itself and length of pointer
 	 * that holds ieFields
 	 *
-	 * tSirBssDescription
+	 * struct bss_description
 	 * +--------+---------------------------------+---------------+
 	 * | length | other fields                    | pointer to IEs|
 	 * +--------+---------------------------------+---------------+
 	 *                                            ^
 	 *                                            ieFields
 	 */
-	bss_desc_ptr->length = (uint16_t) (offsetof(tSirBssDescription,
+	bss_desc_ptr->length = (uint16_t) (offsetof(struct bss_description,
 					   ieFields[0]) -
 				sizeof(bss_desc_ptr->length) + ie_len);
 
-	bss_desc_ptr->fProbeRsp = !roam_offload_synch_ind_ptr->isBeacon;
+	bss_desc_ptr->fProbeRsp = !roam_synch_ind_ptr->isBeacon;
 	/* Copy Timestamp */
 	bss_desc_ptr->scansystimensec = qdf_get_monotonic_boottime_ns();
 	if (parsed_frm_ptr->dsParamsPresent) {
@@ -1992,7 +2178,7 @@ lim_roam_fill_bss_descr(struct mac_context *mac,
 		 * beacon, then use the channel frequency provided by firmware
 		 * to fill the channel in the BSS descriptor.*/
 		bss_desc_ptr->channelId =
-			cds_freq_to_chan(roam_offload_synch_ind_ptr->chan_freq);
+			cds_freq_to_chan(roam_synch_ind_ptr->chan_freq);
 	}
 	bss_desc_ptr->channelIdSelf = bss_desc_ptr->channelId;
 
@@ -2007,17 +2193,9 @@ lim_roam_fill_bss_descr(struct mac_context *mac,
 	qdf_mem_copy(&bss_desc_ptr->capabilityInfo,
 	&bcn_proberesp_ptr[SIR_MAC_HDR_LEN_3A + SIR_MAC_B_PR_CAPAB_OFFSET], 2);
 
-	if (qdf_is_macaddr_zero((struct qdf_mac_addr *)mac_hdr->bssId)) {
-		pe_debug("bssid is 0 in beacon/probe update it with bssId %pM in sync ind",
-			roam_offload_synch_ind_ptr->bssid.bytes);
-		qdf_mem_copy(mac_hdr->bssId,
-			roam_offload_synch_ind_ptr->bssid.bytes,
-			sizeof(tSirMacAddr));
-	}
-
 	qdf_mem_copy((uint8_t *) &bss_desc_ptr->bssId,
-			(uint8_t *) mac_hdr->bssId,
-			sizeof(tSirMacAddr));
+		     (uint8_t *)roam_synch_ind_ptr->bssid.bytes,
+		     sizeof(tSirMacAddr));
 	bss_desc_ptr->received_time =
 		      (uint64_t)qdf_mc_timer_get_system_time();
 	if (parsed_frm_ptr->mdiePresent) {
@@ -2029,13 +2207,12 @@ lim_roam_fill_bss_descr(struct mac_context *mac,
 	pe_debug("LFR3: BssDescr Info:");
 	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_DEBUG,
 			bss_desc_ptr->bssId, sizeof(tSirMacAddr));
-	pe_debug("chan: %d rssi: %d", bss_desc_ptr->channelId,
-			bss_desc_ptr->rssi);
+	pe_debug("chan: %d rssi: %d ie_len %d", bss_desc_ptr->channelId,
+		 bss_desc_ptr->rssi, ie_len);
 	if (ie_len) {
 		qdf_mem_copy(&bss_desc_ptr->ieFields,
-			bcn_proberesp_ptr +
-			(SIR_MAC_HDR_LEN_3A + SIR_MAC_B_PR_SSID_OFFSET),
-			ie_len);
+			     ie, ie_len);
+		qdf_mem_free(ie);
 	}
 	qdf_mem_free(parsed_frm_ptr);
 	return QDF_STATUS_SUCCESS;
@@ -2257,10 +2434,10 @@ pe_roam_synch_callback(struct mac_context *mac_ctx,
 		return status;
 	}
 
-	add_bss_params->bssIdx = roam_sync_ind_ptr->roamed_vdev_id;
-	ft_session_ptr->bssIdx = (uint8_t) add_bss_params->bssIdx;
+	add_bss_params->bss_idx = roam_sync_ind_ptr->roamed_vdev_id;
+	ft_session_ptr->bss_idx = (uint8_t)add_bss_params->bss_idx;
 
-	curr_sta_ds->bssId = add_bss_params->bssIdx;
+	curr_sta_ds->bssId = add_bss_params->bss_idx;
 	curr_sta_ds->staIndex = add_bss_params->staContext.staIdx;
 	rrm_cache_mgmt_tx_power(mac_ctx, add_bss_params->txMgmtPower,
 				ft_session_ptr);

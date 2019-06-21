@@ -228,7 +228,7 @@ static void pe_reset_protection_callback(void *ptr)
 		pe_debug("protection changed, update beacon template");
 		/* update beacon fix params and send update to FW */
 		qdf_mem_zero(&beacon_params, sizeof(tUpdateBeaconParams));
-		beacon_params.bssIdx = pe_session_entry->bssIdx;
+		beacon_params.bss_idx = pe_session_entry->bss_idx;
 		beacon_params.fShortPreamble =
 				pe_session_entry->beaconParams.fShortPreamble;
 		beacon_params.beaconInterval =
@@ -268,36 +268,6 @@ restart_timer:
 		pe_err("cannot create or start protectionFieldsResetTimer");
 	}
 }
-
-#ifdef WLAN_FEATURE_11W
-/**
- * pe_init_pmf_comeback_timer: init PMF comeback timer
- * @mac_ctx: pointer to global adapter context
- * @session: pe session
- * @session_id: session ID
- *
- * Return: void
- */
-static void pe_init_pmf_comeback_timer(struct mac_context *mac_ctx,
-struct pe_session *session, uint8_t session_id)
-{
-	QDF_STATUS status;
-
-	session->pmfComebackTimerInfo.mac = mac_ctx;
-	session->pmfComebackTimerInfo.session_id = session_id;
-	status = qdf_mc_timer_init(&session->pmfComebackTimer,
-			QDF_TIMER_TYPE_SW, lim_pmf_comeback_timer_callback,
-			(void *)&session->pmfComebackTimerInfo);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		pe_err("cannot init pmf comeback timer");
-}
-#else
-static inline void
-pe_init_pmf_comeback_timer(struct mac_context *mac_ctx,
-	struct pe_session *session, uint8_t session_id)
-{
-}
-#endif
 
 #ifdef WLAN_FEATURE_FILS_SK
 /**
@@ -391,7 +361,7 @@ static void pe_init_fils_info(struct pe_session *session) { }
  */
 #ifdef FEATURE_WLAN_TDLS
 static inline uint8_t
-lim_get_peer_idxpool_size(uint16_t num_sta, tSirBssType bss_type)
+lim_get_peer_idxpool_size(uint16_t num_sta, enum bss_type bss_type)
 {
 	/*
 	 * In station role, index 1 is reserved for peer
@@ -406,7 +376,7 @@ lim_get_peer_idxpool_size(uint16_t num_sta, tSirBssType bss_type)
 }
 #else
 static inline uint8_t
-lim_get_peer_idxpool_size(uint16_t num_sta, tSirBssType bss_type)
+lim_get_peer_idxpool_size(uint16_t num_sta, enum bss_type bss_type)
 {
 	return num_sta + 1;
 }
@@ -418,7 +388,7 @@ void lim_set_bcn_probe_filter(struct mac_context *mac_ctx,
 				uint8_t sap_channel)
 {
 	struct mgmt_beacon_probe_filter *filter;
-	tSirBssType bss_type;
+	enum bss_type bss_type;
 	uint8_t session_id;
 	tSirMacAddr *bssid;
 
@@ -477,7 +447,7 @@ void lim_reset_bcn_probe_filter(struct mac_context *mac_ctx,
 				struct pe_session *session)
 {
 	struct mgmt_beacon_probe_filter *filter;
-	tSirBssType bss_type;
+	enum bss_type bss_type;
 	uint8_t session_id;
 
 	if (!session) {
@@ -525,7 +495,7 @@ void lim_update_bcn_probe_filter(struct mac_context *mac_ctx,
 					struct pe_session *session)
 {
 	struct mgmt_beacon_probe_filter *filter;
-	tSirBssType bss_type;
+	enum bss_type bss_type;
 	uint8_t session_id;
 
 	if (!session) {
@@ -561,7 +531,7 @@ void lim_update_bcn_probe_filter(struct mac_context *mac_ctx,
 struct pe_session *pe_create_session(struct mac_context *mac,
 			      uint8_t *bssid,
 			      uint8_t *sessionId,
-			      uint16_t numSta, tSirBssType bssType,
+			      uint16_t numSta, enum bss_type bssType,
 			      uint8_t sme_session_id)
 {
 	QDF_STATUS status;
@@ -701,7 +671,6 @@ struct pe_session *pe_create_session(struct mac_context *mac,
 			pe_err("cannot create ap_ecsa_timer");
 	}
 	pe_init_fils_info(session_ptr);
-	pe_init_pmf_comeback_timer(mac, session_ptr, *sessionId);
 	session_ptr->ht_client_cnt = 0;
 	/* following is invalid value since seq number is 12 bit */
 	session_ptr->prev_auth_seq_num = 0xFFFF;
@@ -764,28 +733,28 @@ struct pe_session *pe_find_session_by_bssid(struct mac_context *mac, uint8_t *bs
 
 }
 
-/*--------------------------------------------------------------------------
-   \brief pe_find_session_by_bss_idx() - looks up the PE session given the bssIdx.
-
-   This function returns the session context  if the session
-   corresponding to the given bssIdx is found in the PE session table.
-   \param mac                   - pointer to global adapter context
-   \param bssIdx                   - bss index of the session
-   \return struct pe_session *         - pointer to the session context or NULL if session is not found.
-   \sa
-   --------------------------------------------------------------------------*/
-struct pe_session *pe_find_session_by_bss_idx(struct mac_context *mac, uint8_t bssIdx)
+/**
+ * pe_find_session_by_bss_idx() - looks up the PE session given the bss_idx.
+ *
+ * This function returns the session context  if the session
+ * corresponding to the given bss_idx is found in the PE session table.
+ * @mac:             pointer to global adapter context
+ * @bss_idx:         bss index of the session
+ *
+ * Return: pointer to the session context or NULL if session is not found.
+ */
+struct pe_session *pe_find_session_by_bss_idx(struct mac_context *mac,
+					      uint8_t bss_idx)
 {
 	uint8_t i;
 
 	for (i = 0; i < mac->lim.maxBssId; i++) {
 		/* If BSSID matches return corresponding tables address */
-		if ((mac->lim.gpSession[i].valid)
-		    && (mac->lim.gpSession[i].bssIdx == bssIdx)) {
+		if ((mac->lim.gpSession[i].valid) &&
+		    (mac->lim.gpSession[i].bss_idx == bss_idx))
 			return &mac->lim.gpSession[i];
-		}
 	}
-	pe_debug("Session lookup fails for bssIdx: %d", bssIdx);
+	pe_debug("Session lookup fails for bss_idx: %d", bss_idx);
 	return NULL;
 }
 
@@ -878,7 +847,7 @@ void pe_delete_session(struct mac_context *mac_ctx, struct pe_session *session)
 
 	pe_debug("Trying to delete PE session: %d Opmode: %d BssIdx: %d BSSID: "QDF_MAC_ADDR_STR,
 		session->peSessionId, session->operMode,
-		session->bssIdx,
+		session->bss_idx,
 		QDF_MAC_ADDR_ARRAY(session->bssId));
 
 	lim_reset_bcn_probe_filter(mac_ctx, session);
@@ -1032,12 +1001,6 @@ void pe_delete_session(struct mac_context *mac_ctx, struct pe_session *session)
 		session->add_ie_params.probeRespBCNData_buff = NULL;
 		session->add_ie_params.probeRespBCNDataLen = 0;
 	}
-#ifdef WLAN_FEATURE_11W
-	if (QDF_TIMER_STATE_RUNNING ==
-	    qdf_mc_timer_get_current_state(&session->pmfComebackTimer))
-		qdf_mc_timer_stop(&session->pmfComebackTimer);
-	qdf_mc_timer_destroy(&session->pmfComebackTimer);
-#endif
 	pe_delete_fils_info(session);
 	session->valid = false;
 

@@ -90,14 +90,12 @@
 /**
  * enum sap_fsm_state - SAP FSM states for Access Point role
  * @SAP_INIT: init state
- * @SAP_DFS_CAC_WAIT: cac wait
  * @SAP_STARTING: starting phase
  * @SAP_STARTED: up and running
  * @SAP_STOPPING: about to stop and transitions to init
  */
 enum sap_fsm_state {
 	SAP_INIT,
-	SAP_DFS_CAC_WAIT,
 	SAP_STARTING,
 	SAP_STARTED,
 	SAP_STOPPING
@@ -175,6 +173,8 @@ struct sap_context {
 	uint32_t auto_channel_select_weight;
 	bool enableOverLapCh;
 	struct sap_acs_cfg *acs_cfg;
+
+	qdf_time_t acs_req_timestamp;
 
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
 	uint8_t cc_switch_mode;
@@ -283,7 +283,7 @@ QDF_STATUS wlansap_pre_start_bss_acs_scan_callback(mac_handle_t mac_handle,
  * sap_select_channel() - select SAP channel
  * @mac_handle: Opaque handle to the global MAC context
  * @sap_ctx: Sap context
- * @scan_result: Handle to scan results
+ * @scan_list: scan entry list
  *
  * Runs a algorithm to select the best channel to operate in based on BSS
  * rssi and bss count on each channel
@@ -291,7 +291,7 @@ QDF_STATUS wlansap_pre_start_bss_acs_scan_callback(mac_handle_t mac_handle,
  * Returns: channel number if success, 0 otherwise
  */
 uint8_t sap_select_channel(mac_handle_t mac_handle, struct sap_context *sap_ctx,
-			   tScanResultHandle scan_result);
+			   qdf_list_t *scan_list);
 
 QDF_STATUS
 sap_signal_hdd_event(struct sap_context *sap_ctx,
@@ -460,7 +460,6 @@ uint8_t sap_select_default_oper_chan(struct sap_acs_cfg *acs_cfg);
  *
  * Return: true if sap is in cac wait state
  */
-#ifdef CONFIG_VDEV_SM
 static inline bool sap_is_dfs_cac_wait_state(struct sap_context *sap_ctx)
 {
 	if (!sap_ctx)
@@ -468,15 +467,6 @@ static inline bool sap_is_dfs_cac_wait_state(struct sap_context *sap_ctx)
 
 	return  QDF_IS_STATUS_SUCCESS(wlan_vdev_is_dfs_cac_wait(sap_ctx->vdev));
 }
-#else
-static inline bool sap_is_dfs_cac_wait_state(struct sap_context *sap_ctx)
-{
-	if (!sap_ctx)
-		return false;
-
-	return (sap_ctx->fsm_state == SAP_DFS_CAC_WAIT);
-}
-#endif
 
 /**
  * sap_channel_in_acs_channel_list() - check if channel in acs channel list

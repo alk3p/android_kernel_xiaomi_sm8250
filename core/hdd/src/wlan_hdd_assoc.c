@@ -63,10 +63,13 @@
 #include "wlan_hdd_stats.h"
 #include "wlan_hdd_scan.h"
 #include "wlan_crypto_global_api.h"
+#include "wlan_hdd_bcn_recv.h"
 
 #include "wlan_hdd_nud_tracking.h"
 #include <wlan_cfg80211_crypto.h>
 #include <wlan_crypto_global_api.h>
+#include "wlan_blm_ucfg_api.h"
+
 /* These are needed to recognize WPA and RSN suite types */
 #define HDD_WPA_OUI_SIZE 4
 #define HDD_RSN_OUI_SIZE 4
@@ -442,13 +445,7 @@ static int hdd_remove_beacon_filter(struct hdd_adapter *adapter)
 	return 0;
 }
 
-/**
- * hdd_add_beacon_filter() - add beacon filter
- * @adapter: Pointer to the hdd adapter
- *
- * Return: 0 on success and errno on failure
- */
-static int hdd_add_beacon_filter(struct hdd_adapter *adapter)
+int hdd_add_beacon_filter(struct hdd_adapter *adapter)
 {
 	int i;
 	uint32_t ie_map[SIR_BCN_FLT_MAX_ELEMS_IE_LIST] = {0};
@@ -1803,12 +1800,25 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 		ucfg_p2p_status_disconnect(adapter->vdev);
 	}
 
+	/* Inform BLM about the disconnection with the AP */
+	if (adapter->device_mode == QDF_STA_MODE)
+		ucfg_blm_update_bssid_connect_params(hdd_ctx->pdev,
+						     sta_ctx->conn_info.bssid,
+						     BLM_AP_DISCONNECTED);
+
 	hdd_wmm_adapter_clear(adapter);
 	mac_handle = hdd_ctx->mac_handle;
 	sme_ft_reset(mac_handle, adapter->vdev_id);
 	sme_reset_key(mac_handle, adapter->vdev_id);
-	if (hdd_remove_beacon_filter(adapter) != 0)
-		hdd_err("hdd_remove_beacon_filter() failed");
+	if (!hdd_remove_beacon_filter(adapter)) {
+		if (sme_is_beacon_report_started(mac_handle,
+						 adapter->vdev_id)) {
+			hdd_beacon_recv_pause_indication((hdd_handle_t)hdd_ctx,
+							 adapter->vdev_id,
+							 SCAN_EVENT_TYPE_MAX,
+							 true);
+		}
+	}
 
 	if (eCSR_ROAM_IBSS_LEAVE == roam_status) {
 		uint8_t i;
@@ -3322,6 +3332,11 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 		qdf_mem_zero(&adapter->hdd_stats.hdd_pmf_stats,
 			     sizeof(adapter->hdd_stats.hdd_pmf_stats));
 #endif
+		if (adapter->device_mode == QDF_STA_MODE)
+			ucfg_blm_update_bssid_connect_params(hdd_ctx->pdev,
+							     roam_info->bssid,
+							     BLM_AP_CONNECTED);
+
 		policy_mgr_check_n_start_opportunistic_timer(hdd_ctx->psoc);
 		hdd_debug("check for SAP restart");
 		policy_mgr_check_concurrent_intf_and_restart_sap(
@@ -3372,7 +3387,21 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 		 */
 		if (eCSR_ROAM_ASSOCIATION_FAILURE == roam_status
 		    && !hddDisconInProgress) {
+			u8 *assoc_rsp = NULL;
+			u8 *assoc_req = NULL;
+
 			if (roam_info) {
+				if (roam_info->pbFrames) {
+				/* Association Request */
+					assoc_req =
+						(u8 *)(roam_info->pbFrames +
+						      roam_info->nBeaconLength);
+					/* Association Response */
+					assoc_rsp =
+						(u8 *)(roam_info->pbFrames +
+						      roam_info->nBeaconLength +
+						    roam_info->nAssocReqLength);
+				}
 				hdd_err("send connect failure to nl80211: for bssid "
 					QDF_MAC_ADDR_STR
 					" result: %d and Status: %d reasoncode: %d",
@@ -3397,7 +3426,10 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 				if (roam_info)
 					hdd_connect_result(dev,
 						roam_info->bssid.bytes,
-						roam_info, NULL, 0, NULL, 0,
+						roam_info, assoc_req,
+						roam_info->nAssocReqLength,
+						assoc_rsp,
+						roam_info->nAssocRspLength,
 						WLAN_STATUS_ASSOC_DENIED_UNSPEC,
 						GFP_KERNEL,
 						connect_timeout,
@@ -3414,7 +3446,10 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 				if (roam_info)
 					hdd_connect_result(dev,
 						roam_info->bssid.bytes,
-						roam_info, NULL, 0, NULL, 0,
+						roam_info, assoc_req,
+						roam_info->nAssocReqLength,
+						assoc_rsp,
+						roam_info->nAssocRspLength,
 						roam_info->reasonCode ?
 						roam_info->reasonCode :
 						WLAN_STATUS_UNSPECIFIED_FAILURE,
@@ -3442,6 +3477,14 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 					   GFP_KERNEL,
 					   connect_timeout,
 					   timeout_reason);
+		}
+
+		/* Check to change TDLS state in FW
+		 * as connection failed.
+		 */
+		if (roam_status == eCSR_ROAM_ASSOCIATION_FAILURE ||
+		    roam_status == eCSR_ROAM_CANCELLED) {
+			ucfg_tdls_notify_connect_failure(hdd_ctx->psoc);
 		}
 
 		/*

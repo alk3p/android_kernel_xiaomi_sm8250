@@ -466,6 +466,80 @@ static void lim_stop_reassoc_retry_timer(struct mac_context *mac_ctx)
 	lim_deactivate_and_change_timer(mac_ctx, eLIM_REASSOC_FAIL_TIMER);
 }
 
+#ifdef WLAN_FEATURE_11W
+static void
+lim_handle_assoc_reject_status(struct mac_context *mac_ctx,
+				struct pe_session *session_entry,
+				tpSirAssocRsp assoc_rsp,
+				tSirMacAddr source_addr)
+{
+	struct sir_rssi_disallow_lst ap_info = {{0}};
+	uint32_t timeout_value =
+		assoc_rsp->TimeoutInterval.timeoutValue;
+
+	if (!(session_entry->limRmfEnabled &&
+		    assoc_rsp->statusCode == eSIR_MAC_TRY_AGAIN_LATER &&
+		   (assoc_rsp->TimeoutInterval.present &&
+			(assoc_rsp->TimeoutInterval.timeoutType ==
+				SIR_MAC_TI_TYPE_ASSOC_COMEBACK))))
+		return;
+
+	/*
+	 * Add to rssi reject list, which takes care of retry
+	 * delay too. Fill the RSSI as 0, so the only param
+	 * which will allow the bssid to connect is retry delay.
+	 */
+	ap_info.retry_delay = timeout_value;
+	qdf_mem_copy(ap_info.bssid.bytes, source_addr, QDF_MAC_ADDR_SIZE);
+	ap_info.expected_rssi = LIM_MIN_RSSI;
+	lim_add_bssid_to_reject_list(mac_ctx->pdev, &ap_info);
+
+	pe_debug("ASSOC res with eSIR_MAC_TRY_AGAIN_LATER recvd. Add to time reject list(rssi reject in mac_ctx %d",
+		timeout_value);
+}
+#else
+static void
+lim_handle_assoc_reject_status(struct mac_context *mac_ctx,
+				struct pe_session *session_entry,
+				tpSirAssocRsp assoc_rsp,
+				tSirMacAddr source_addr)
+{
+}
+#endif
+
+/**
+ * lim_get_nss_supported_by_ap() - finds out nss from AP's beacons
+ * @vht_caps: VHT capabilities
+ * @ht_caps: HT capabilities
+ *
+ * Return: nss advertised by AP in beacon
+ */
+static uint8_t lim_get_nss_supported_by_ap(tDot11fIEVHTCaps *vht_caps,
+					   tDot11fIEHTCaps *ht_caps)
+{
+	if (vht_caps->present) {
+		if ((vht_caps->rxMCSMap & 0xC0) != 0xC0)
+			return NSS_4x4_MODE;
+
+		if ((vht_caps->rxMCSMap & 0x30) != 0x30)
+			return NSS_3x3_MODE;
+
+		if ((vht_caps->rxMCSMap & 0x0C) != 0x0C)
+			return NSS_2x2_MODE;
+	} else if (ht_caps->present) {
+		if (ht_caps->supportedMCSSet[3])
+			return NSS_4x4_MODE;
+
+		if (ht_caps->supportedMCSSet[2])
+			return NSS_3x3_MODE;
+
+		if (ht_caps->supportedMCSSet[1])
+			return NSS_2x2_MODE;
+	}
+
+	return NSS_1x1_MODE;
+}
+
 /**
  * lim_process_assoc_rsp_frame() - Processes assoc response
  * @mac_ctx: Pointer to Global MAC structure
@@ -497,6 +571,8 @@ lim_process_assoc_rsp_frame(struct mac_context *mac_ctx,
 	uint8_t sme_sessionid = 0;
 	struct csr_roam_session *roam_session;
 #endif
+	uint8_t ap_nss;
+
 	/* Initialize status code to success. */
 	if (lim_is_roam_synch_in_progress(session_entry))
 		hdr = (tpSirMacMgmtHdr) mac_ctx->roam.pReassocResp;
@@ -697,19 +773,22 @@ lim_process_assoc_rsp_frame(struct mac_context *mac_ctx,
 	else
 		lim_stop_reassoc_retry_timer(mac_ctx);
 
+	lim_handle_assoc_reject_status(mac_ctx, session_entry, assoc_rsp,
+				       hdr->sa);
+
 	if (eSIR_MAC_XS_FRAME_LOSS_POOR_CHANNEL_RSSI_STATUS ==
 	   assoc_rsp->statusCode &&
-	    assoc_rsp->rssi_assoc_rej.present)
-		lim_assoc_rej_add_to_rssi_based_reject_list(mac_ctx,
-			&assoc_rsp->rssi_assoc_rej, hdr->sa,
-			WMA_GET_RX_RSSI_NORMALIZED(rx_pkt_info));
+	    assoc_rsp->rssi_assoc_rej.present) {
+		struct sir_rssi_disallow_lst ap_info = {{0}};
 
-	if (assoc_rsp->statusCode != eSIR_MAC_SUCCESS_STATUS
-#ifdef WLAN_FEATURE_11W
-		&& (!session_entry->limRmfEnabled ||
-			assoc_rsp->statusCode != eSIR_MAC_TRY_AGAIN_LATER)
-#endif
-	    ) {
+		ap_info.retry_delay = assoc_rsp->rssi_assoc_rej.retry_delay *
+							QDF_MC_TIMER_TO_MS_UNIT;
+		qdf_mem_copy(ap_info.bssid.bytes, hdr->sa, QDF_MAC_ADDR_SIZE);
+		ap_info.expected_rssi = assoc_rsp->rssi_assoc_rej.delta_rssi +
+					WMA_GET_RX_RSSI_NORMALIZED(rx_pkt_info);
+		lim_add_bssid_to_reject_list(mac_ctx->pdev, &ap_info);
+	}
+	if (assoc_rsp->statusCode != eSIR_MAC_SUCCESS_STATUS) {
 		/*
 		 *Re/Association response was received
 		 * either with failure code.
@@ -765,63 +844,6 @@ lim_process_assoc_rsp_frame(struct mac_context *mac_ctx,
 	 * NOTE: for BTAMP case, it is being handled in
 	 * lim_process_mlm_assoc_req
 	 */
-#ifdef WLAN_FEATURE_11W
-	if (session_entry->limRmfEnabled &&
-		assoc_rsp->statusCode == eSIR_MAC_TRY_AGAIN_LATER) {
-		if (assoc_rsp->TimeoutInterval.present &&
-		(assoc_rsp->TimeoutInterval.timeoutType ==
-			SIR_MAC_TI_TYPE_ASSOC_COMEBACK)) {
-			uint16_t timeout_value =
-				assoc_rsp->TimeoutInterval.timeoutValue;
-			if (timeout_value < 10) {
-				/*
-				 * if this value is less than 10 then our timer
-				 * will fail to start and due to this we will
-				 * never re-attempt. Better modify the timer
-				 * value here.
-				 */
-				timeout_value = 10;
-			}
-			pe_debug("ASSOC res with eSIR_MAC_TRY_AGAIN_LATER recvd.Starting timer to wait timeout: %d",
-				timeout_value);
-			if (QDF_STATUS_SUCCESS !=
-				qdf_mc_timer_start(
-					&session_entry->pmfComebackTimer,
-					timeout_value)) {
-				pe_err("Failed to start comeback timer");
-
-				assoc_cnf.resultCode = eSIR_SME_ASSOC_REFUSED;
-				assoc_cnf.protStatusCode =
-					eSIR_MAC_UNSPEC_FAILURE_STATUS;
-
-				/*
-				 * Delete Pre-auth context for the
-				 * associated BSS
-				 */
-				if (lim_search_pre_auth_list(mac_ctx, hdr->sa))
-					lim_delete_pre_auth_node(mac_ctx,
-						hdr->sa);
-
-				goto assocReject;
-			}
-		} else {
-			pe_warn("ASSOC resp with try again event recvd, but try again time interval IE is wrong");
-
-			assoc_cnf.resultCode = eSIR_SME_ASSOC_REFUSED;
-			assoc_cnf.protStatusCode =
-				eSIR_MAC_UNSPEC_FAILURE_STATUS;
-
-			/* Delete Pre-auth context for the associated BSS */
-			if (lim_search_pre_auth_list(mac_ctx, hdr->sa))
-				lim_delete_pre_auth_node(mac_ctx, hdr->sa);
-
-			goto assocReject;
-		}
-		qdf_mem_free(beacon);
-		qdf_mem_free(assoc_rsp);
-		return;
-	}
-#endif
 	if (!lim_is_roam_synch_in_progress(session_entry)) {
 		if (lim_set_link_state
 			(mac_ctx, eSIR_LINK_POSTASSOC_STATE,
@@ -850,6 +872,9 @@ lim_process_assoc_rsp_frame(struct mac_context *mac_ctx,
 	lim_diag_event_report(mac_ctx, WLAN_PE_DIAG_ROAM_ASSOC_COMP_EVENT,
 			session_entry, assoc_rsp->statusCode ? QDF_STATUS_E_FAILURE :
 			QDF_STATUS_SUCCESS, assoc_rsp->statusCode);
+
+	ap_nss = lim_get_nss_supported_by_ap(&assoc_rsp->VHTCaps,
+					     &assoc_rsp->HTCaps);
 
 	if (subtype == LIM_REASSOC) {
 		pe_debug("Successfully Reassociated with BSS");
@@ -886,6 +911,14 @@ lim_process_assoc_rsp_frame(struct mac_context *mac_ctx,
 				session_entry, false);
 			goto assocReject;
 		}
+
+		if (ap_nss < session_entry->nss) {
+			session_entry->nss = ap_nss;
+			lim_objmgr_update_vdev_nss(mac_ctx->psoc,
+						   session_entry->smeSessionId,
+						   ap_nss);
+		}
+
 		if ((session_entry->limMlmState ==
 		    eLIM_MLM_WT_FT_REASSOC_RSP_STATE) ||
 			lim_is_roam_synch_in_progress(session_entry)) {
@@ -971,6 +1004,13 @@ lim_process_assoc_rsp_frame(struct mac_context *mac_ctx,
 	/* Delete Pre-auth context for the associated BSS */
 	if (lim_search_pre_auth_list(mac_ctx, hdr->sa))
 		lim_delete_pre_auth_node(mac_ctx, hdr->sa);
+
+	if (ap_nss < session_entry->nss) {
+		session_entry->nss = ap_nss;
+		lim_objmgr_update_vdev_nss(mac_ctx->psoc,
+					   session_entry->smeSessionId,
+					   ap_nss);
+	}
 
 	lim_update_assoc_sta_datas(mac_ctx, sta_ds, assoc_rsp, session_entry);
 	/*

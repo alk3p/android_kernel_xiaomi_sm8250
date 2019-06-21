@@ -926,40 +926,6 @@ QDF_STATUS sme_update_config(mac_handle_t mac_handle,
 }
 
 /**
- * sme_update_scan_roam_params() - Update the scan roaming params
- * @mac_ctx: mac ctx
- *
- * Return: void.
- */
-static void sme_update_scan_roam_params(struct mac_context *mac_ctx)
-{
-	struct roam_filter_params scan_params = {0};
-	struct roam_ext_params *roam_params_src;
-	uint8_t i;
-	QDF_STATUS status;
-
-	roam_params_src = &mac_ctx->roam.configParam.roam_params;
-
-	scan_params.num_bssid_avoid_list =
-		roam_params_src->num_bssid_avoid_list;
-
-	if (scan_params.num_bssid_avoid_list >
-	   MAX_AVOID_LIST_BSSID)
-		scan_params.num_bssid_avoid_list =
-			MAX_AVOID_LIST_BSSID;
-
-	for (i = 0; i < scan_params.num_bssid_avoid_list; i++) {
-		qdf_copy_macaddr(&scan_params.bssid_avoid_list[i],
-				&roam_params_src->bssid_avoid_list[i]);
-	}
-
-	status = ucfg_scan_update_roam_params(mac_ctx->psoc, &scan_params);
-	if (QDF_IS_STATUS_ERROR(status))
-		sme_err("ailed to update scan roam params with status=%d",
-			status);
-}
-
-/**
  * sme_update_roam_params() - Store/Update the roaming params
  * @mac_handle: Opaque handle to the global MAC context
  * @session_id:               SME Session ID
@@ -1049,8 +1015,6 @@ QDF_STATUS sme_update_roam_params(mac_handle_t mac_handle,
 		sme_release_global_lock(&mac_ctx->sme);
 	}
 
-	sme_update_scan_roam_params(mac_ctx);
-
 	return 0;
 }
 
@@ -1134,6 +1098,26 @@ QDF_STATUS sme_hdd_ready_ind(mac_handle_t mac_handle)
 
 	return status;
 }
+
+#ifdef WLAN_BCN_RECV_FEATURE
+QDF_STATUS
+sme_register_bcn_report_pe_cb(mac_handle_t mac_handle, beacon_report_cb cb)
+{
+	struct scheduler_msg msg = {0};
+	QDF_STATUS status;
+
+	msg.type = WNI_SME_REGISTER_BCN_REPORT_SEND_CB;
+	msg.callback = cb;
+
+	status = scheduler_post_message(QDF_MODULE_ID_SME,
+					QDF_MODULE_ID_PE,
+					QDF_MODULE_ID_PE, &msg);
+	if (QDF_IS_STATUS_ERROR(status))
+		sme_err("Failed to post message to LIM");
+
+	return status;
+}
+#endif
 
 QDF_STATUS sme_get_valid_channels(uint8_t *chan_list, uint32_t *list_len)
 {
@@ -2579,7 +2563,7 @@ QDF_STATUS sme_get_ap_channel_from_scan_cache(
 	struct mac_context *mac_ctx = sme_get_mac_context();
 	tCsrScanResultFilter *scan_filter = NULL;
 	tScanResultHandle filtered_scan_result = NULL;
-	tSirBssDescription first_ap_profile;
+	struct bss_description first_ap_profile;
 
 	if (!mac_ctx) {
 		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
@@ -2590,7 +2574,7 @@ QDF_STATUS sme_get_ap_channel_from_scan_cache(
 	if (!scan_filter)
 		return QDF_STATUS_E_FAILURE;
 
-	qdf_mem_zero(&first_ap_profile, sizeof(tSirBssDescription));
+	qdf_mem_zero(&first_ap_profile, sizeof(struct bss_description));
 	if (!profile) {
 		scan_filter->EncryptionType.numEntries = 1;
 		scan_filter->EncryptionType.encryptionType[0]
@@ -2656,30 +2640,6 @@ QDF_STATUS sme_get_ap_channel_from_scan_cache(
 		status = QDF_STATUS_E_FAILURE;
 	}
 	qdf_mem_free(scan_filter);
-	return status;
-}
-
-/*
- * sme_scan_flush_result() -
- * A wrapper function to request CSR to clear scan results.
- * This is a synchronous call
- *
- * Return QDF_STATUS
- */
-QDF_STATUS sme_scan_flush_result(mac_handle_t mac_handle)
-{
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	struct mac_context *mac = MAC_CONTEXT(mac_handle);
-
-	MTRACE(qdf_trace(QDF_MODULE_ID_SME,
-			 TRACE_CODE_SME_RX_HDD_MSG_SCAN_FLUSH_RESULTS,
-			 0, 0));
-	status = sme_acquire_global_lock(&mac->sme);
-	if (QDF_IS_STATUS_SUCCESS(status)) {
-		status = csr_scan_flush_result(mac);
-		sme_release_global_lock(&mac->sme);
-	}
-
 	return status;
 }
 
@@ -6492,6 +6452,10 @@ QDF_STATUS sme_stop_roaming(mac_handle_t mac_handle, uint8_t session_id,
 	else
 		csr_roam_reset_roam_params(mac_ctx);
 
+	/* Disable offload_11k_params for current vdev */
+	req->offload_11k_params.offload_11k_bitmask = 0;
+	req->offload_11k_params.vdev_id = session_id;
+
 	wma_msg.type = WMA_ROAM_SCAN_OFFLOAD_REQ;
 	wma_msg.bodyptr = req;
 
@@ -8969,7 +8933,6 @@ QDF_STATUS sme_roam_start_beacon_req(mac_handle_t mac_handle,
 	return status;
 }
 
-#ifdef CONFIG_VDEV_SM
 QDF_STATUS sme_csa_restart(struct mac_context *mac_ctx, uint8_t session_id)
 {
 	QDF_STATUS status = QDF_STATUS_E_FAILURE;
@@ -8982,7 +8945,6 @@ QDF_STATUS sme_csa_restart(struct mac_context *mac_ctx, uint8_t session_id)
 
 	return status;
 }
-#endif
 
 /**
  * sme_roam_csa_ie_request() - request CSA IE transmission from PE
@@ -12614,6 +12576,96 @@ QDF_STATUS sme_update_mimo_power_save(mac_handle_t mac_handle,
 	return QDF_STATUS_SUCCESS;
 }
 
+#ifdef WLAN_BCN_RECV_FEATURE
+QDF_STATUS sme_handle_bcn_recv_start(mac_handle_t mac_handle,
+				     uint32_t vdev_id)
+{
+	struct mac_context *mac_ctx = MAC_CONTEXT(mac_handle);
+	struct csr_roam_session *session;
+	QDF_STATUS status;
+
+	session = CSR_GET_SESSION(mac_ctx, vdev_id);
+	if (!session) {
+		sme_err("vdev_id %d not found", vdev_id);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	if (!CSR_IS_SESSION_VALID(mac_ctx, vdev_id)) {
+		sme_err("CSR session not valid: %d", vdev_id);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	status = sme_acquire_global_lock(&mac_ctx->sme);
+	if (QDF_IS_STATUS_SUCCESS(status)) {
+		if (session->is_bcn_recv_start) {
+			sme_release_global_lock(&mac_ctx->sme);
+			sme_err("Beacon receive already started");
+			return QDF_STATUS_SUCCESS;
+		}
+		session->is_bcn_recv_start = true;
+		sme_release_global_lock(&mac_ctx->sme);
+
+		/*
+		 * Remove beacon filter. It allows fw to send all
+		 * beacons of connected AP to driver.
+		 */
+		status = sme_remove_beacon_filter(mac_handle, vdev_id);
+		if (!QDF_IS_STATUS_SUCCESS(status)) {
+			status = sme_acquire_global_lock(&mac_ctx->sme);
+			if (QDF_IS_STATUS_SUCCESS(status)) {
+				session->is_bcn_recv_start = false;
+				sme_release_global_lock(&mac_ctx->sme);
+			}
+			sme_err("sme_remove_beacon_filter() failed");
+		}
+	}
+
+	return status;
+}
+
+void sme_stop_beacon_report(mac_handle_t mac_handle, uint32_t session_id)
+{
+	struct mac_context *mac_ctx = MAC_CONTEXT(mac_handle);
+	struct csr_roam_session *session;
+	QDF_STATUS status;
+
+	if (!CSR_IS_SESSION_VALID(mac_ctx, session_id)) {
+		sme_err("CSR session not valid: %d", session_id);
+		return;
+	}
+
+	session = CSR_GET_SESSION(mac_ctx, session_id);
+	if (!session) {
+		sme_err("vdev_id %d not found", session_id);
+		return;
+	}
+	status = sme_acquire_global_lock(&mac_ctx->sme);
+	if (QDF_IS_STATUS_SUCCESS(status)) {
+		session->is_bcn_recv_start = false;
+		sme_release_global_lock(&mac_ctx->sme);
+	}
+}
+
+bool sme_is_beacon_report_started(mac_handle_t mac_handle, uint32_t session_id)
+{
+	struct mac_context *mac_ctx = MAC_CONTEXT(mac_handle);
+	struct csr_roam_session *session;
+
+	if (!CSR_IS_SESSION_VALID(mac_ctx, session_id)) {
+		sme_err("CSR session not valid: %d", session_id);
+		return false;
+	}
+
+	session = CSR_GET_SESSION(mac_ctx, session_id);
+	if (!session) {
+		sme_err("vdev_id %d not found", session_id);
+		return false;
+	}
+
+	return session->is_bcn_recv_start;
+}
+#endif
+
 /**
  * sme_add_beacon_filter() - set the beacon filter configuration
  * @mac_handle: The handle returned by macOpen
@@ -13519,7 +13571,7 @@ QDF_STATUS sme_set_wow_pulse(struct wow_pulse_mode *wow_pulse_set_info)
  * Return: None
  */
 static void sme_prepare_beacon_from_bss_descp(uint8_t *frame_buf,
-					      tSirBssDescription *bss_descp,
+					      struct bss_description *bss_descp,
 					      const tSirMacAddr bssid,
 					      uint32_t ie_len)
 {
@@ -13560,7 +13612,7 @@ QDF_STATUS sme_get_rssi_snr_by_bssid(mac_handle_t mac_handle,
 				     const uint8_t *bssid,
 				     int8_t *rssi, int8_t *snr)
 {
-	tSirBssDescription *bss_descp;
+	struct bss_description *bss_descp;
 	tCsrScanResultFilter *scan_filter;
 	struct scan_result_list *bss_list;
 	tScanResultHandle result_handle = NULL;
@@ -13639,7 +13691,7 @@ QDF_STATUS sme_get_beacon_frm(mac_handle_t mac_handle,
 	tScanResultHandle result_handle = NULL;
 	tCsrScanResultFilter *scan_filter;
 	struct mac_context *mac_ctx = MAC_CONTEXT(mac_handle);
-	tSirBssDescription *bss_descp;
+	struct bss_description *bss_descp;
 	struct scan_result_list *bss_list;
 	uint32_t ie_len;
 
@@ -13688,7 +13740,7 @@ QDF_STATUS sme_get_beacon_frm(mac_handle_t mac_handle,
 	 * Length of BSS descriptor is without length of
 	 * length itself and length of pointer that holds ieFields.
 	 *
-	 * tSirBssDescription
+	 * struct bss_description
 	 * +--------+---------------------------------+---------------+
 	 * | length | other fields                    | pointer to IEs|
 	 * +--------+---------------------------------+---------------+
@@ -13696,7 +13748,7 @@ QDF_STATUS sme_get_beacon_frm(mac_handle_t mac_handle,
 	 *                                            ieFields
 	 */
 	ie_len = bss_descp->length + sizeof(bss_descp->length)
-		- (uint16_t)(offsetof(tSirBssDescription, ieFields[0]));
+		- (uint16_t)(offsetof(struct bss_description, ieFields[0]));
 	sme_debug("found bss_descriptor ie_len: %d channel %d",
 					ie_len, bss_descp->channelId);
 
@@ -13725,17 +13777,21 @@ free_scan_flter:
 }
 
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
-QDF_STATUS sme_fast_reassoc(mac_handle_t mac_handle,
-			    struct csr_roam_profile *profile,
-			    const tSirMacAddr bssid, int channel,
-			    uint8_t vdev_id, const tSirMacAddr connected_bssid)
+QDF_STATUS sme_roam_invoke_nud_fail(mac_handle_t mac_handle, uint8_t vdev_id)
 {
-	QDF_STATUS status;
-	struct wma_roam_invoke_cmd *fastreassoc;
+	struct wma_roam_invoke_cmd *roam_invoke_params;
 	struct scheduler_msg msg = {0};
+	QDF_STATUS status;
+	struct wlan_objmgr_vdev *vdev;
 	struct mac_context *mac_ctx = MAC_CONTEXT(mac_handle);
+	struct mlme_roam_after_data_stall *vdev_roam_params;
 	struct csr_roam_session *session;
 	struct csr_roam_profile *roam_profile;
+
+	if (!mac_ctx->mlme_cfg->gen.data_stall_recovery_fw_support) {
+		sme_debug("FW does not support data stall recovery, aborting roam invoke");
+		return QDF_STATUS_E_NOSUPPORT;
+	}
 
 	session = CSR_GET_SESSION(mac_ctx, vdev_id);
 	if (!session || !session->pCurRoamProfile) {
@@ -13749,10 +13805,114 @@ QDF_STATUS sme_fast_reassoc(mac_handle_t mac_handle,
 			  roam_profile->driver_disabled_roaming);
 		return QDF_STATUS_E_FAILURE;
 	}
-	fastreassoc = qdf_mem_malloc(sizeof(*fastreassoc));
-	if (!fastreassoc)
-		return QDF_STATUS_E_NOMEM;
 
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(mac_ctx->psoc, vdev_id,
+						    WLAN_LEGACY_SME_ID);
+
+	if (!vdev) {
+		sme_err("vdev is NULL, aborting roam invoke");
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+
+	vdev_roam_params = mlme_get_roam_invoke_params(vdev);
+
+	if (!vdev_roam_params) {
+		sme_err("Invalid vdev roam params, aborting roam invoke");
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+
+	if (vdev_roam_params->roam_invoke_in_progress) {
+		sme_debug("Roaming in progress set by source = %d, aborting this roam invoke",
+			  vdev_roam_params->source);
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
+		return QDF_STATUS_E_BUSY;
+	}
+
+	roam_invoke_params = qdf_mem_malloc(sizeof(*roam_invoke_params));
+	if (!roam_invoke_params) {
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
+		return QDF_STATUS_E_NOMEM;
+	}
+	roam_invoke_params->vdev_id = vdev_id;
+	/* Set forced roaming as true so that FW scans all ch, and connect */
+	roam_invoke_params->forced_roaming = true;
+
+	msg.type = eWNI_SME_ROAM_INVOKE;
+	msg.reserved = 0;
+	msg.bodyptr = roam_invoke_params;
+	status = scheduler_post_message(QDF_MODULE_ID_SME,
+					QDF_MODULE_ID_PE,
+					QDF_MODULE_ID_PE, &msg);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		sme_err("Not able to post ROAM_INVOKE_CMD message to PE");
+		qdf_mem_free(roam_invoke_params);
+	} else {
+		vdev_roam_params->roam_invoke_in_progress = true;
+		vdev_roam_params->source = CONNECTION_MGR_INITIATED;
+		sme_debug("Trigger roaming for vdev id %d source = CONNECTION_MGR_INITIATED",
+			  session->sessionId);
+	}
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
+
+	return status;
+}
+
+QDF_STATUS sme_fast_reassoc(mac_handle_t mac_handle,
+			    struct csr_roam_profile *profile,
+			    const tSirMacAddr bssid, int channel,
+			    uint8_t vdev_id, const tSirMacAddr connected_bssid)
+{
+	QDF_STATUS status;
+	struct wma_roam_invoke_cmd *fastreassoc;
+	struct scheduler_msg msg = {0};
+	struct mac_context *mac_ctx = MAC_CONTEXT(mac_handle);
+	struct csr_roam_session *session;
+	struct csr_roam_profile *roam_profile;
+	struct wlan_objmgr_vdev *vdev;
+	struct mlme_roam_after_data_stall *vdev_roam_params;
+
+	session = CSR_GET_SESSION(mac_ctx, vdev_id);
+	if (!session || !session->pCurRoamProfile) {
+		sme_err("session %d not found", vdev_id);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	roam_profile = session->pCurRoamProfile;
+	if (roam_profile->driver_disabled_roaming) {
+		sme_debug("roaming status in driver %d",
+			  roam_profile->driver_disabled_roaming);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(mac_ctx->psoc, vdev_id,
+						    WLAN_LEGACY_SME_ID);
+
+	if (!vdev) {
+		sme_err("vdev is NULL, aborting roam invoke");
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+
+	vdev_roam_params = mlme_get_roam_invoke_params(vdev);
+
+	if (!vdev_roam_params) {
+		sme_err("Invalid vdev roam params, aborting roam invoke");
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+
+	if (vdev_roam_params->roam_invoke_in_progress) {
+		sme_debug("Roaming in progress set by source = %d, aborting this roam invoke",
+			  vdev_roam_params->source);
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	fastreassoc = qdf_mem_malloc(sizeof(*fastreassoc));
+	if (!fastreassoc) {
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
+		return QDF_STATUS_E_NOMEM;
+	}
 	/* if both are same then set the flag */
 	if (!qdf_mem_cmp(connected_bssid, bssid, ETH_ALEN)) {
 		fastreassoc->is_same_bssid = true;
@@ -13773,13 +13933,18 @@ QDF_STATUS sme_fast_reassoc(mac_handle_t mac_handle,
 
 	if (!channel) {
 		sme_err("channel retrieval from BSS desc fails!");
+		qdf_mem_free(fastreassoc->frame_buf);
+		fastreassoc->frame_buf = NULL;
+		fastreassoc->frame_len = 0;
 		qdf_mem_free(fastreassoc);
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
 		return QDF_STATUS_E_FAULT;
 	}
 
 	fastreassoc->channel = channel;
 	if (QDF_STATUS_SUCCESS != status) {
 		sme_warn("sme_get_beacon_frm failed");
+		qdf_mem_free(fastreassoc->frame_buf);
 		fastreassoc->frame_buf = NULL;
 		fastreassoc->frame_len = 0;
 	}
@@ -13800,11 +13965,20 @@ QDF_STATUS sme_fast_reassoc(mac_handle_t mac_handle,
 	status = scheduler_post_message(QDF_MODULE_ID_SME,
 					QDF_MODULE_ID_PE,
 					QDF_MODULE_ID_PE, &msg);
-	if (QDF_STATUS_SUCCESS != status) {
+	if (QDF_IS_STATUS_ERROR(status)) {
 		sme_err("Not able to post ROAM_INVOKE_CMD message to PE");
+		qdf_mem_free(fastreassoc->frame_buf);
+		fastreassoc->frame_buf = NULL;
+		fastreassoc->frame_len = 0;
 		qdf_mem_free(fastreassoc);
+	} else {
+		vdev_roam_params->roam_invoke_in_progress = true;
+		vdev_roam_params->source = USERSPACE_INITIATED;
+		sme_debug("Trigger roaming for vdev id %d source = USERSPACE_INITIATED",
+			  session->sessionId);
 	}
 
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
 	return status;
 }
 #endif
@@ -14411,8 +14585,8 @@ uint32_t sme_unpack_rsn_ie(mac_handle_t mac_handle, uint8_t *buf,
  * @info->status. Otherwise returns false.
  */
 static bool sme_get_status_for_candidate(mac_handle_t mac_handle,
-					 tSirBssDescription *conn_bss_desc,
-					 tSirBssDescription *bss_desc,
+					 struct bss_description *conn_bss_desc,
+					 struct bss_description *bss_desc,
 					 struct bss_candidate_info *info,
 					 uint8_t trans_reason,
 					 bool is_bt_in_progress)
@@ -14507,7 +14681,7 @@ QDF_STATUS sme_get_bss_transition_status(mac_handle_t mac_handle,
 					 bool is_bt_in_progress)
 {
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
-	tSirBssDescription *bss_desc, *conn_bss_desc;
+	struct bss_description *bss_desc, *conn_bss_desc;
 	tCsrScanResultInfo *res, *conn_res;
 	uint16_t i;
 
@@ -15458,3 +15632,73 @@ sme_get_mws_coex_info(mac_handle_t mac_handle, uint32_t vdev_id,
 	return status;
 }
 #endif /* WLAN_MWS_INFO_DEBUGFS */
+
+#ifdef WLAN_BCN_RECV_FEATURE
+/**
+ * sme_scan_event_handler() - Scan complete event handler
+ * @vdev: vdev obj manager
+ * @event: scan event
+ * @arg: arg of scan event
+ *
+ * This function is getting called after Host receive scan start
+ *
+ * Return: None
+ */
+static void sme_scan_event_handler(struct wlan_objmgr_vdev *vdev,
+				   struct scan_event *event,
+				   void *arg)
+{
+	struct mac_context *mac = arg;
+	struct csr_roam_session *session;
+
+	if (!mac) {
+		sme_err("Invalid mac context");
+		return;
+	}
+
+	if (!CSR_IS_SESSION_VALID(mac, vdev->vdev_objmgr.vdev_id)) {
+		sme_err("Invalid vdev_id: %d", vdev->vdev_objmgr.vdev_id);
+		return;
+	}
+
+	session = CSR_GET_SESSION(mac, vdev->vdev_objmgr.vdev_id);
+
+	if (event->type == SCAN_EVENT_TYPE_STARTED) {
+		if (mac->sme.beacon_pause_cb)
+			mac->sme.beacon_pause_cb(mac->hdd_handle,
+				vdev->vdev_objmgr.vdev_id, event->type, false);
+	}
+}
+
+QDF_STATUS sme_register_bcn_recv_pause_ind_cb(mac_handle_t mac_handle,
+					      beacon_pause_cb cb)
+{
+	QDF_STATUS status;
+	struct mac_context *mac = MAC_CONTEXT(mac_handle);
+
+	if (!mac) {
+		sme_err("Invalid mac context");
+		return QDF_STATUS_E_NOMEM;
+	}
+
+	/* scan event de-registration */
+	if (!cb) {
+		ucfg_scan_unregister_event_handler(mac->pdev,
+						   sme_scan_event_handler, mac);
+		return QDF_STATUS_SUCCESS;
+	}
+	status = sme_acquire_global_lock(&mac->sme);
+	if (QDF_IS_STATUS_SUCCESS(status)) {
+		mac->sme.beacon_pause_cb = cb;
+		sme_release_global_lock(&mac->sme);
+	}
+
+	/* scan event registration */
+	status = ucfg_scan_register_event_handler(mac->pdev,
+						  sme_scan_event_handler, mac);
+	if (QDF_IS_STATUS_ERROR(status))
+		sme_err("scan event register failed ");
+
+	return status;
+}
+#endif

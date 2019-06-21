@@ -412,30 +412,6 @@ static void lim_send_mlm_assoc_req(struct mac_context *mac_ctx,
 		(uint32_t *) assoc_req);
 }
 
-#ifdef WLAN_FEATURE_11W
-/**
- * lim_pmf_comeback_timer_callback() -PMF callback handler
- * @context: Timer context
- *
- * This function is called to processes the PMF comeback
- * callback
- *
- * Return: None
- */
-void lim_pmf_comeback_timer_callback(void *context)
-{
-	struct comeback_timer_info *info = context;
-	struct mac_context *mac_ctx = info->mac;
-	struct pe_session *pe_session = &mac_ctx->lim.gpSession[info->session_id];
-
-	pe_err("comeback later timer expired. sending MLM ASSOC req");
-	/* set MLM state such that ASSOC REQ packet will be sent out */
-	pe_session->limPrevMlmState = info->lim_prev_mlm_state;
-	pe_session->limMlmState = info->lim_mlm_state;
-	lim_send_mlm_assoc_req(mac_ctx, pe_session);
-}
-#endif /* WLAN_FEATURE_11W */
-
 /**
  * lim_process_mlm_auth_cnf()-Process Auth confirmation
  * @mac_ctx:  Pointer to Global MAC structure
@@ -1271,7 +1247,6 @@ static void lim_join_result_callback(struct mac_context *mac, void *param,
 	qdf_mem_free(link_state_params);
 }
 
-#ifdef CONFIG_VDEV_SM
 QDF_STATUS lim_sta_send_down_link(join_params *param)
 {
 	struct pe_session *session;
@@ -1405,85 +1380,6 @@ void lim_handle_sme_join_result(struct mac_context *mac_ctx,
 					       sizeof(param), &param);
 	return;
 }
-#else
-void lim_handle_sme_join_result(struct mac_context *mac_ctx,
-	tSirResultCodes result_code, uint16_t prot_status_code,
-	struct pe_session *session_entry)
-{
-	tpDphHashNode sta_ds = NULL;
-	uint8_t sme_session_id;
-	join_params *param = NULL;
-
-	if (!session_entry) {
-		pe_err("pe_session is NULL");
-		return;
-	}
-	sme_session_id = session_entry->smeSessionId;
-	/*
-	 * When associations is failed , delete the session created
-	 * and pass NULL  to  limsendsmeJoinReassocRsp()
-	 */
-	if (result_code != eSIR_SME_SUCCESS) {
-		sta_ds =
-			dph_get_hash_entry(mac_ctx, DPH_STA_HASH_INDEX_PEER,
-				&session_entry->dph.dphHashTable);
-		if (sta_ds) {
-			sta_ds->mlmStaContext.disassocReason =
-				eSIR_MAC_UNSPEC_FAILURE_REASON;
-			sta_ds->mlmStaContext.cleanupTrigger =
-				eLIM_JOIN_FAILURE;
-			sta_ds->mlmStaContext.resultCode = result_code;
-			sta_ds->mlmStaContext.protStatusCode = prot_status_code;
-			/*
-			 * FIX_ME: at the end of lim_cleanup_rx_path,
-			 * make sure PE is sending eWNI_SME_JOIN_RSP
-			 * to SME
-			 */
-			lim_cleanup_rx_path(mac_ctx, sta_ds, session_entry);
-			qdf_mem_free(session_entry->pLimJoinReq);
-			session_entry->pLimJoinReq = NULL;
-			/* Cleanup if add bss failed */
-			if (session_entry->add_bss_failed) {
-				dph_delete_hash_entry(mac_ctx,
-					 sta_ds->staAddr, sta_ds->assocId,
-					 &session_entry->dph.dphHashTable);
-				goto error;
-			}
-			return;
-		}
-		qdf_mem_free(session_entry->pLimJoinReq);
-		session_entry->pLimJoinReq = NULL;
-	}
-error:
-	/* Delete the session if JOIN failure occurred.
-	 * if the peer is not created, then there is no
-	 * need to send down the set link state which will
-	 * try to delete the peer. Instead a join response
-	 * failure should be sent to the upper layers.
-	 */
-	if (result_code != eSIR_SME_SUCCESS &&
-	    result_code != eSIR_SME_PEER_CREATE_FAILED) {
-		param = qdf_mem_malloc(sizeof(join_params));
-		if (param) {
-			param->result_code = result_code;
-			param->prot_status_code = prot_status_code;
-			param->pe_session_id = session_entry->peSessionId;
-		}
-		if (lim_set_link_state(mac_ctx, eSIR_LINK_DOWN_STATE,
-				       session_entry->bssId,
-				       session_entry->selfMacAddr,
-				       lim_join_result_callback,
-				       param) != QDF_STATUS_SUCCESS) {
-			qdf_mem_free(param);
-			pe_err("Failed to set the LinkState");
-		}
-		return;
-	}
-
-	lim_send_sme_join_reassoc_rsp(mac_ctx, eWNI_SME_JOIN_RSP, result_code,
-		prot_status_code, session_entry, sme_session_id);
-}
-#endif
 
 
 /**
@@ -1722,7 +1618,7 @@ void lim_process_sta_mlm_del_bss_rsp(struct mac_context *mac,
 	}
 	if (QDF_STATUS_SUCCESS == pDelBssParams->status) {
 		pe_debug("STA received the DEL_BSS_RSP for BSSID: %X",
-			       pDelBssParams->bssIdx);
+			       pDelBssParams->bss_idx);
 		if (lim_set_link_state
 			    (mac, eSIR_LINK_IDLE_STATE, pe_session->bssId,
 			    pe_session->selfMacAddr, NULL,
@@ -1810,7 +1706,7 @@ void lim_process_ap_mlm_del_bss_rsp(struct mac_context *mac,
 	}
 	if (pDelBss->status != QDF_STATUS_SUCCESS) {
 		pe_err("BSS: DEL_BSS_RSP error (%x) Bss %d",
-			pDelBss->status, pDelBss->bssIdx);
+			pDelBss->status, pDelBss->bss_idx);
 		rc = eSIR_SME_STOP_BSS_FAILURE;
 		goto end;
 	}
@@ -2087,7 +1983,7 @@ void lim_process_ap_mlm_add_sta_rsp(struct mac_context *mac,
 				       pe_session);
 		goto end;
 	}
-	sta->bssId = pAddStaParams->bssIdx;
+	sta->bssId = pAddStaParams->bss_idx;
 	sta->staIndex = pAddStaParams->staIdx;
 	sta->nss = pAddStaParams->nss;
 	/* if the AssocRsp frame is not acknowledged, then keep alive timer will take care of the state */
@@ -2195,7 +2091,7 @@ static void lim_process_ap_mlm_add_bss_rsp(struct mac_context *mac,
 			pe_session->statypeForBss = STA_ENTRY_PEER; /* to know session created for self/peer */
 			limResetHBPktCount(pe_session);
 		}
-		pe_session->bssIdx = (uint8_t) pAddBssParams->bssIdx;
+		pe_session->bss_idx = (uint8_t)pAddBssParams->bss_idx;
 
 		pe_session->limSystemRole = eLIM_STA_IN_IBSS_ROLE;
 
@@ -2324,7 +2220,7 @@ lim_process_ibss_mlm_add_bss_rsp(struct mac_context *mac,
 		 */
 		pe_session->limIbssActive = false;
 		limResetHBPktCount(pe_session);
-		pe_session->bssIdx = (uint8_t) pAddBssParams->bssIdx;
+		pe_session->bss_idx = (uint8_t)pAddBssParams->bss_idx;
 		pe_session->limSystemRole = eLIM_STA_IN_IBSS_ROLE;
 		pe_session->statypeForBss = STA_ENTRY_SELF;
 		sch_edca_profile_update(mac, pe_session);
@@ -2417,9 +2313,9 @@ lim_process_sta_add_bss_rsp_pre_assoc(struct mac_context *mac_ctx,
 				pAddBssParams->staContext.staMac, LOGE);
 			goto joinFailure;
 		}
-		session_entry->bssIdx = (uint8_t) pAddBssParams->bssIdx;
+		session_entry->bss_idx = (uint8_t)pAddBssParams->bss_idx;
 		/* Success, handle below */
-		sta->bssId = pAddBssParams->bssIdx;
+		sta->bssId = pAddBssParams->bss_idx;
 		/* STA Index(genr by HAL) for the BSS entry is stored here */
 		sta->staIndex = pAddBssParams->staContext.staIdx;
 		/* Trigger Authentication with AP */
@@ -2571,10 +2467,10 @@ lim_process_sta_mlm_add_bss_rsp(struct mac_context *mac_ctx,
 			mlm_assoc_cnf.resultCode =
 				(tSirResultCodes) eSIR_SME_REFUSED;
 		} else {
-			session_entry->bssIdx =
-				(uint8_t) add_bss_params->bssIdx;
+			session_entry->bss_idx =
+				(uint8_t)add_bss_params->bss_idx;
 			/* Success, handle below */
-			sta_ds->bssId = add_bss_params->bssIdx;
+			sta_ds->bssId = add_bss_params->bss_idx;
 			/*
 			 * STA Index(genr by HAL) for the BSS
 			 * entry is stored here
@@ -2659,7 +2555,7 @@ void lim_process_mlm_add_bss_rsp(struct mac_context *mac_ctx,
 	tLimMlmStartCnf mlm_start_cnf;
 	struct pe_session *session_entry;
 	tpAddBssParams add_bss_param = (tpAddBssParams) (msg->bodyptr);
-	tSirBssType bss_type;
+	enum bss_type bss_type;
 
 	if (!add_bss_param) {
 		pe_err("Encountered NULL Pointer");
@@ -3103,7 +2999,7 @@ static void lim_process_switch_channel_join_req(
 	tSirMacSSid ssId;
 	tLimMlmJoinCnf join_cnf;
 	uint8_t nontx_bss_id = 0;
-	tSirBssDescription *bss;
+	struct bss_description *bss;
 
 	if (status != QDF_STATUS_SUCCESS) {
 		pe_err("Change channel failed!!");
@@ -3217,7 +3113,7 @@ static void lim_process_switch_channel_join_req(
 		&session_entry->pLimJoinReq->addIEScan.length,
 		session_entry->pLimJoinReq->addIEScan.addIEdata);
 
-	if (session_entry->pePersona == QDF_P2P_CLIENT_MODE) {
+	if (session_entry->opmode == QDF_P2P_CLIENT_MODE) {
 		/* Activate Join Periodic Probe Req timer */
 		if (tx_timer_activate
 			(&mac_ctx->lim.limTimers.gLimPeriodicJoinProbeReqTimer)
@@ -3324,7 +3220,7 @@ void lim_process_switch_channel_rsp(struct mac_context *mac, void *body)
 		 */
 		policy_mgr_update_connection_info(mac->psoc,
 			pe_session->smeSessionId);
-		if (pe_session->pePersona == QDF_P2P_CLIENT_MODE) {
+		if (pe_session->opmode == QDF_P2P_CLIENT_MODE) {
 			pe_debug("Send p2p operating channel change conf action frame once first beacon is received on new channel");
 			pe_session->send_p2p_conf_frame = true;
 		}

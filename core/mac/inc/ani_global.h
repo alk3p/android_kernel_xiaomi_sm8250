@@ -27,7 +27,6 @@
 #include "lim_global.h"
 #include "sch_global.h"
 #include "sys_global.h"
-#include "cfg_global.h"
 #include "sir_api.h"
 
 #include "csr_api.h"
@@ -104,13 +103,6 @@ static inline mac_handle_t MAC_HANDLE(struct mac_context *mac)
 #define HIGH_SEQ_NUM_MASK                               0x0FF0
 #define HIGH_SEQ_NUM_OFFSET                             4
 #define DEF_HE_AUTO_SGI_LTF                             0x0F07
-
-/* vendor element ID */
-#define IE_EID_VENDOR        (221) /* 0xDD */
-#define IE_LEN_SIZE          (1)
-#define IE_EID_SIZE          (1)
-/* Minimum size of vendor IE = 3 bytes of oui_data + 1 byte of data */
-#define IE_VENDOR_OUI_SIZE   (4)
 
 /**
  * enum log_event_type - Type of event initiating bug report
@@ -673,6 +665,8 @@ typedef struct sAniSirLim {
 	uint8_t retry_packet_cnt;
 	uint8_t beacon_probe_rsp_cnt_per_scan;
 	wlan_scan_requester req_id;
+	QDF_STATUS (*sme_bcn_rcv_callback)(hdd_handle_t hdd_handle,
+				struct wlan_beacon_report *beacon_report);
 } tAniSirLim, *tpAniSirLim;
 
 struct mgmt_frm_reg_info {
@@ -756,7 +750,6 @@ struct mgmt_beacon_probe_filter {
 struct mac_context {
 	enum qdf_driver_type gDriverType;
 	struct wlan_mlme_chain_cfg fw_chain_cfg;
-	tAniSirCfg cfg;
 	struct wlan_mlme_cfg *mlme_cfg;
 	tAniSirLim lim;
 	struct sch_context sch;

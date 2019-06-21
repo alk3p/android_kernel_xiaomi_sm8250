@@ -52,15 +52,8 @@
 #include <cdp_txrx_peer_ops.h>
 #include "dot11f.h"
 
-#define BA_DEFAULT_TX_BUFFER_SIZE 64
-
 static last_processed_msg rrm_link_action_frm;
 
-/* Note: The test passes if the STAUT stops sending any frames, and no further
-   frames are transmitted on this channel by the station when the AP has sent
-   the last 6 beacons, with the channel switch information elements as seen
-   with the sniffer.*/
-#define SIR_CHANSW_TX_STOP_MAX_COUNT 6
 /**-----------------------------------------------------------------
    \fn     lim_stop_tx_and_switch_channel
    \brief  Stops the transmission if channel switch mode is silent and
@@ -386,7 +379,7 @@ lim_process_ext_channel_switch_action_frame(struct mac_context *mac_ctx,
 		return;
 	}
 
-	if (session_entry->pePersona == QDF_P2P_GO_MODE) {
+	if (session_entry->opmode == QDF_P2P_GO_MODE) {
 
 		struct sir_sme_ext_cng_chan_ind *ext_cng_chan_ind;
 		struct scheduler_msg mmh_msg = {0};
@@ -1814,29 +1807,29 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 #endif
 
 	switch (action_hdr->category) {
-	case SIR_MAC_ACTION_QOS_MGMT:
+	case ACTION_CATEGORY_QOS:
 		if ((session->limQosEnabled) ||
-		    (action_hdr->actionID == SIR_MAC_QOS_MAP_CONFIGURE)) {
+		    (action_hdr->actionID == QOS_MAP_CONFIGURE)) {
 			switch (action_hdr->actionID) {
-			case SIR_MAC_QOS_ADD_TS_REQ:
+			case QOS_ADD_TS_REQ:
 				__lim_process_add_ts_req(mac_ctx,
 						(uint8_t *) rx_pkt_info,
 						session);
 				break;
 
-			case SIR_MAC_QOS_ADD_TS_RSP:
+			case QOS_ADD_TS_RSP:
 				__lim_process_add_ts_rsp(mac_ctx,
 						 (uint8_t *) rx_pkt_info,
 						 session);
 				break;
 
-			case SIR_MAC_QOS_DEL_TS_REQ:
+			case QOS_DEL_TS_REQ:
 				__lim_process_del_ts_req(mac_ctx,
 						(uint8_t *) rx_pkt_info,
 						session);
 				break;
 
-			case SIR_MAC_QOS_MAP_CONFIGURE:
+			case QOS_MAP_CONFIGURE:
 				__lim_process_qos_map_configure_frame(mac_ctx,
 						(uint8_t *)rx_pkt_info,
 						session);
@@ -1850,16 +1843,16 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 		}
 		break;
 
-	case SIR_MAC_ACTION_SPECTRUM_MGMT:
+	case ACTION_CATEGORY_SPECTRUM_MGMT:
 		switch (action_hdr->actionID) {
 #ifdef ANI_SUPPORT_11H
-		case SIR_MAC_ACTION_MEASURE_REQUEST_ID:
+		case ACTION_SPCT_MSR_REQ:
 			if (session->lim11hEnable)
 				__lim_process_measurement_request_frame(mac_ctx,
 							rx_pkt_info,
 							session);
 			break;
-		case SIR_MAC_ACTION_TPC_REQUEST_ID:
+		case ACTION_SPCT_TPC_REQ:
 			if ((LIM_IS_STA_ROLE(session) ||
 				LIM_IS_AP_ROLE(session)) &&
 				session->lim11hEnable)
@@ -1867,7 +1860,7 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 						rx_pkt_info, session);
 			break;
 #endif
-		case SIR_MAC_ACTION_CHANNEL_SWITCH_ID:
+		case ACTION_SPCT_CHL_SWITCH:
 			if (LIM_IS_STA_ROLE(session))
 				__lim_process_channel_switch_action_frame(
 					mac_ctx, rx_pkt_info, session);
@@ -1879,29 +1872,29 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 		}
 		break;
 
-	case SIR_MAC_ACTION_WME:
+	case ACTION_CATEGORY_WMM:
 		if (!session->limWmeEnabled) {
 			pe_warn("WME mode disabled - dropping frame: %d",
 				action_hdr->actionID);
 			break;
 		}
 		switch (action_hdr->actionID) {
-		case SIR_MAC_QOS_ADD_TS_REQ:
+		case QOS_ADD_TS_REQ:
 			__lim_process_add_ts_req(mac_ctx,
 				(uint8_t *) rx_pkt_info, session);
 			break;
 
-		case SIR_MAC_QOS_ADD_TS_RSP:
+		case QOS_ADD_TS_RSP:
 			__lim_process_add_ts_rsp(mac_ctx,
 				(uint8_t *) rx_pkt_info, session);
 			break;
 
-		case SIR_MAC_QOS_DEL_TS_REQ:
+		case QOS_DEL_TS_REQ:
 			__lim_process_del_ts_req(mac_ctx,
 				(uint8_t *) rx_pkt_info, session);
 			break;
 
-		case SIR_MAC_QOS_MAP_CONFIGURE:
+		case QOS_MAP_CONFIGURE:
 			__lim_process_qos_map_configure_frame(mac_ctx,
 				(uint8_t *)rx_pkt_info, session);
 			break;
@@ -1913,7 +1906,7 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 		}
 		break;
 
-	case SIR_MAC_ACTION_HT:
+	case ACTION_CATEGORY_HT:
 		/** Type of HT Action to be performed*/
 		switch (action_hdr->actionID) {
 		case SIR_MAC_SM_POWER_SAVE:
@@ -1929,7 +1922,7 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 		}
 		break;
 
-	case SIR_MAC_ACTION_WNM:
+	case ACTION_CATEGORY_WNM:
 		pe_debug("WNM Action category: %d action: %d",
 			action_hdr->category, action_hdr->actionID);
 		switch (action_hdr->actionID) {
@@ -1956,18 +1949,18 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 		}
 		break;
 
-	case SIR_MAC_ACTION_RRM:
+	case ACTION_CATEGORY_RRM:
 		/* Ignore RRM measurement request until DHCP is set */
 		if (mac_ctx->rrm.rrmPEContext.rrmEnable &&
 		    mac_ctx->roam.roamSession
 		    [session->smeSessionId].dhcp_done) {
 			switch (action_hdr->actionID) {
-			case SIR_MAC_RRM_RADIO_MEASURE_REQ:
+			case RRM_RADIO_MEASURE_REQ:
 				__lim_process_radio_measure_request(mac_ctx,
 						(uint8_t *)rx_pkt_info,
 						session);
 				break;
-			case SIR_MAC_RRM_LINK_MEASUREMENT_REQ:
+			case RRM_LINK_MEASUREMENT_REQ:
 				if (!lim_is_valid_frame(
 					&rrm_link_action_frm,
 					rx_pkt_info))
@@ -1982,7 +1975,7 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 							rx_pkt_info);
 
 				break;
-			case SIR_MAC_RRM_NEIGHBOR_RPT:
+			case RRM_NEIGHBOR_RPT:
 				__lim_process_neighbor_report(mac_ctx,
 						(uint8_t *)rx_pkt_info,
 						session);
@@ -2051,7 +2044,7 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 				GET_LIM_SYSTEM_ROLE(session));
 		}
 	break;
-	case SIR_MAC_ACTION_PUBLIC_USAGE:
+	case ACTION_CATEGORY_PUBLIC:
 		mac_hdr = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
 
 		switch (action_hdr->actionID) {
@@ -2106,7 +2099,7 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 		break;
 
 #ifdef WLAN_FEATURE_11W
-	case SIR_MAC_ACTION_SA_QUERY:
+	case ACTION_CATEGORY_SA_QUERY:
 		pe_debug("SA Query Action category: %d action: %d",
 			action_hdr->category, action_hdr->actionID);
 		switch (action_hdr->actionID) {
@@ -2129,7 +2122,7 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 		}
 		break;
 #endif
-	case SIR_MAC_ACTION_VHT:
+	case ACTION_CATEGORY_VHT:
 		if (!session->vhtCapability)
 			break;
 		switch (action_hdr->actionID) {
@@ -2147,7 +2140,7 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 			break;
 		}
 		break;
-	case SIR_MAC_ACTION_FST: {
+	case ACTION_CATEGORY_FST: {
 		tpSirMacMgmtHdr     hdr;
 
 		hdr = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
@@ -2164,7 +2157,7 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 					    rx_pkt_info), RXMGMT_FLAG_NONE);
 		break;
 	}
-	case SIR_MAC_ACTION_PROT_DUAL_PUB:
+	case ACTION_CATEGORY_PROTECTED_DUAL_OF_PUBLIC_ACTION:
 		pe_debug("Rcvd Protected Dual of Public Action: %d",
 			action_hdr->actionID);
 		switch (action_hdr->actionID) {
@@ -2186,14 +2179,14 @@ void lim_process_action_frame(struct mac_context *mac_ctx,
 			break;
 		}
 		break;
-	case SIR_MAC_ACTION_BLKACK:
+	case ACTION_CATEGORY_BACK:
 		pe_debug("Rcvd Block Ack for %pM; action: %d",
 			session->selfMacAddr, action_hdr->actionID);
 		switch (action_hdr->actionID) {
-		case SIR_MAC_ADDBA_REQ:
+		case ADDBA_REQUEST:
 			lim_process_addba_req(mac_ctx, rx_pkt_info, session);
 			break;
-		case SIR_MAC_DELBA_REQ:
+		case DELBA:
 			lim_process_delba_req(mac_ctx, rx_pkt_info, session);
 			break;
 		default:
@@ -2245,7 +2238,7 @@ void lim_process_action_frame_no_session(struct mac_context *mac, uint8_t *pBd)
 	}
 
 	switch (action_hdr->category) {
-	case SIR_MAC_ACTION_PUBLIC_USAGE:
+	case ACTION_CATEGORY_PUBLIC:
 		switch (action_hdr->actionID) {
 		case SIR_MAC_ACTION_VENDOR_SPECIFIC:
 			vendor_specific =

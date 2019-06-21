@@ -264,6 +264,23 @@ enum pld_driver_mode {
 	PLD_COLDBOOT_CALIBRATION = 7
 };
 
+/**
+ * struct pld_device_version - WLAN device version info
+ * @family_number: family number of WLAN SOC HW
+ * @device_number: device number of WLAN SOC HW
+ * @major_version: major version of WLAN SOC HW
+ * @minor_version: minor version of WLAN SOC HW
+ *
+ * pld_device_version is used to store WLAN device version info
+ */
+
+struct pld_device_version {
+	u32 family_number;
+	u32 device_number;
+	u32 major_version;
+	u32 minor_version;
+};
+
 #define PLD_MAX_TIMESTAMP_LEN 32
 
 /**
@@ -276,6 +293,7 @@ enum pld_driver_mode {
  * @soc_id: SOC ID
  * @fw_version: FW version
  * @fw_build_timestamp: FW build timestamp
+ * @device_version: WLAN device version info
  *
  * pld_soc_info is used to store WLAN SOC information.
  */
@@ -288,6 +306,7 @@ struct pld_soc_info {
 	u32 soc_id;
 	u32 fw_version;
 	char fw_build_timestamp[PLD_MAX_TIMESTAMP_LEN + 1];
+	struct pld_device_version device_version;
 };
 
 /**
@@ -335,9 +354,9 @@ struct pld_driver_ops {
 		     void *bdev, void *id);
 	void (*remove)(struct device *dev,
 		       enum pld_bus_type bus_type);
-	void (*idle_shutdown)(struct device *dev,
+	int (*idle_shutdown)(struct device *dev,
 			      enum pld_bus_type bus_type);
-	void (*idle_restart)(struct device *dev,
+	int (*idle_restart)(struct device *dev,
 			     enum pld_bus_type bus_type);
 	void (*shutdown)(struct device *dev,
 			 enum pld_bus_type bus_type);
@@ -606,6 +625,7 @@ int pld_get_user_msi_assignment(struct device *dev, char *user_name,
 int pld_get_msi_irq(struct device *dev, unsigned int vector);
 void pld_get_msi_address(struct device *dev, uint32_t *msi_addr_low,
 			 uint32_t *msi_addr_high);
+int pld_is_drv_connected(struct device *dev);
 unsigned int pld_socinfo_get_serial_number(struct device *dev);
 int pld_is_qmi_disable(struct device *dev);
 int pld_is_fw_down(struct device *dev);
@@ -649,20 +669,20 @@ bool pld_have_platform_driver_support(struct device *dev);
  * @dev: pointer to struct dev
  * @shutdown_cb: pointer to hdd psoc idle shutdown callback handler
  *
- * Return: none
+ * Return: 0 for success and non-zero negative error code for failure
  */
-void pld_idle_shutdown(struct device *dev,
-		       void (*shutdown_cb)(struct device *dev));
+int pld_idle_shutdown(struct device *dev,
+		      int (*shutdown_cb)(struct device *dev));
 
 /**
  * pld_idle_restart - request idle restart callback from platform driver
  * @dev: pointer to struct dev
  * @restart_cb: pointer to hdd psoc idle restart callback handler
  *
- * Return: none
+ * Return: 0 for success and non-zero negative error code for failure
  */
-void pld_idle_restart(struct device *dev,
-		      void (*restart_cb)(struct device *dev));
+int pld_idle_restart(struct device *dev,
+		     int (*restart_cb)(struct device *dev));
 
 #if defined(CONFIG_WCNSS_MEM_PRE_ALLOC) && defined(FEATURE_SKB_PRE_ALLOC)
 
