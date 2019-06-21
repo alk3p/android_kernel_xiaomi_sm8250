@@ -24,7 +24,6 @@
 #include "include/wlan_vdev_mlme.h"
 #include "vdev_mlme_sm.h"
 
-#ifdef CMN_VDEV_MLME_SM_ENABLE
 /**
  * mlme_vdev_set_state() - set mlme state
  * @vdev: VDEV object
@@ -1376,10 +1375,21 @@ static bool mlme_vdev_subst_suspend_csa_restart_event(void *ctx,
 		status = true;
 		break;
 	case WLAN_VDEV_SM_EV_CSA_COMPLETE:
-		mlme_vdev_sm_transition_to(vdev_mlme, WLAN_VDEV_S_START);
-		mlme_vdev_sm_deliver_event(vdev_mlme,
-					   WLAN_VDEV_SM_EV_RESTART_REQ,
-					   event_data_len, event_data);
+		if (mlme_vdev_is_newchan_no_cac(vdev_mlme) ==
+						QDF_STATUS_SUCCESS) {
+			mlme_vdev_sm_transition_to(vdev_mlme,
+						   WLAN_VDEV_S_START);
+			mlme_vdev_sm_deliver_event(vdev_mlme,
+						   WLAN_VDEV_SM_EV_RESTART_REQ,
+						   event_data_len, event_data);
+		} else {
+			mlme_vdev_sm_transition_to
+				(vdev_mlme,
+				 WLAN_VDEV_SS_SUSPEND_SUSPEND_RESTART);
+			mlme_vdev_sm_deliver_event
+				(vdev_mlme, WLAN_VDEV_SM_EV_SUSPEND_RESTART,
+				 event_data_len, event_data);
+		}
 		status = true;
 		break;
 
@@ -1892,31 +1902,6 @@ QDF_STATUS mlme_vdev_sm_create(struct vdev_mlme_obj *vdev_mlme)
 
 	return QDF_STATUS_SUCCESS;
 }
-
-#else
-
-QDF_STATUS mlme_vdev_sm_create(struct vdev_mlme_obj *vdev_mlme)
-{
-	struct wlan_sm *sm;
-	uint8_t name[WLAN_SM_ENGINE_MAX_NAME];
-
-	qdf_snprintf(name, sizeof(name), "VDEV%d-MLME",
-		     wlan_vdev_get_id(vdev_mlme->vdev));
-
-	sm = wlan_sm_create(name, vdev_mlme, 0, NULL, 0, NULL, 0);
-	if (!sm) {
-		mlme_err("VDEV MLME SM allocation failed");
-		return QDF_STATUS_E_FAILURE;
-	}
-	vdev_mlme->sm_hdl = sm;
-
-	mlme_vdev_sm_spinlock_create(vdev_mlme);
-
-	mlme_vdev_cmd_mutex_create(vdev_mlme);
-
-	return QDF_STATUS_SUCCESS;
-}
-#endif
 
 QDF_STATUS mlme_vdev_sm_destroy(struct vdev_mlme_obj *vdev_mlme)
 {

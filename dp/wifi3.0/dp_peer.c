@@ -34,6 +34,10 @@
 #include <cdp_txrx_handle.h>
 #include <wlan_cfg.h>
 
+#ifdef WLAN_TX_PKT_CAPTURE_ENH
+#include "dp_tx_capture.h"
+#endif
+
 #ifdef DP_LFR
 static inline void
 dp_set_ssn_valid_flag(struct hal_reo_cmd_params *params,
@@ -55,7 +59,6 @@ static inline int dp_peer_find_mac_addr_cmp(
 	union dp_align_mac_addr *mac_addr1,
 	union dp_align_mac_addr *mac_addr2)
 {
-	return !((mac_addr1->align4.bytes_abcd == mac_addr2->align4.bytes_abcd)
 		/*
 		 * Intentionally use & rather than &&.
 		 * because the operands are binary rather than generic boolean,
@@ -64,8 +67,8 @@ static inline int dp_peer_find_mac_addr_cmp(
 		 * but using & has the advantage of no conditional branching,
 		 * which is a more significant benefit.
 		 */
-		&
-		(mac_addr1->align4.bytes_ef == mac_addr2->align4.bytes_ef));
+	return !((mac_addr1->align4.bytes_abcd == mac_addr2->align4.bytes_abcd)
+		 & (mac_addr1->align4.bytes_ef == mac_addr2->align4.bytes_ef));
 }
 
 static int dp_peer_ast_table_attach(struct dp_soc *soc)
@@ -113,9 +116,9 @@ static int dp_peer_find_map_attach(struct dp_soc *soc)
 	return 0; /* success */
 }
 
-static int dp_log2_ceil(unsigned value)
+static int dp_log2_ceil(unsigned int value)
 {
-	unsigned tmp = value;
+	unsigned int tmp = value;
 	int log2 = -1;
 
 	while (tmp) {
@@ -622,6 +625,10 @@ int dp_peer_add_ast(struct dp_soc *soc,
 		ast_entry = dp_peer_ast_hash_find_by_pdevid(soc, mac_addr,
 							    pdev->pdev_id);
 		if (ast_entry) {
+			if ((type == CDP_TXRX_AST_TYPE_MEC) &&
+			    (ast_entry->type == CDP_TXRX_AST_TYPE_MEC))
+				ast_entry->is_active = TRUE;
+
 			qdf_spin_unlock_bh(&soc->ast_lock);
 			return 0;
 		}
@@ -831,6 +838,13 @@ void dp_peer_del_ast(struct dp_soc *soc, struct dp_ast_entry *ast_entry)
 	dp_peer_ast_send_wds_del(soc, ast_entry);
 
 	/*
+	 * release the reference only if it is mapped
+	 * to ast_table
+	 */
+	if (ast_entry->is_mapped)
+		soc->ast_table[ast_entry->ast_idx] = NULL;
+
+	/*
 	 * if peer map v2 is enabled we are not freeing ast entry
 	 * here and it is supposed to be freed in unmap event (after
 	 * we receive delete confirmation from target)
@@ -848,13 +862,6 @@ void dp_peer_del_ast(struct dp_soc *soc, struct dp_ast_entry *ast_entry)
 		    (ast_entry->type != CDP_TXRX_AST_TYPE_SELF))
 			return;
 	}
-
-	/*
-	 * release the reference only if it is mapped
-	 * to ast_table
-	 */
-	if (ast_entry->is_mapped)
-		soc->ast_table[ast_entry->ast_idx] = NULL;
 
 	/* SELF and STATIC entries are removed in teardown itself */
 	if (ast_entry->next_hop)
@@ -1035,12 +1042,18 @@ uint8_t dp_peer_ast_get_pdev_id(struct dp_soc *soc,
 	return 0xff;
 }
 
-
 uint8_t dp_peer_ast_get_next_hop(struct dp_soc *soc,
 				struct dp_ast_entry *ast_entry)
 {
 	return 0xff;
 }
+
+int dp_peer_update_ast(struct dp_soc *soc, struct dp_peer *peer,
+		       struct dp_ast_entry *ast_entry, uint32_t flags)
+{
+	return 1;
+}
+
 #endif
 
 void dp_peer_ast_send_wds_del(struct dp_soc *soc,
@@ -1274,62 +1287,70 @@ void dp_rx_tid_stats_cb(struct dp_soc *soc, void *cb_ctxt,
 	struct hal_reo_queue_status *queue_status = &(reo_status->queue_status);
 
 	if (queue_status->header.status != HAL_REO_CMD_SUCCESS) {
-		DP_TRACE_STATS(FATAL, "REO stats failure %d for TID %d\n",
-			queue_status->header.status, rx_tid->tid);
+		DP_PRINT_STATS("REO stats failure %d for TID %d\n",
+			       queue_status->header.status, rx_tid->tid);
 		return;
 	}
 
-	DP_TRACE_STATS(FATAL, "REO queue stats (TID: %d): \n"
-		"ssn: %d\n"
-		"curr_idx  : %d\n"
-		"pn_31_0   : %08x\n"
-		"pn_63_32  : %08x\n"
-		"pn_95_64  : %08x\n"
-		"pn_127_96 : %08x\n"
-		"last_rx_enq_tstamp : %08x\n"
-		"last_rx_deq_tstamp : %08x\n"
-		"rx_bitmap_31_0     : %08x\n"
-		"rx_bitmap_63_32    : %08x\n"
-		"rx_bitmap_95_64    : %08x\n"
-		"rx_bitmap_127_96   : %08x\n"
-		"rx_bitmap_159_128  : %08x\n"
-		"rx_bitmap_191_160  : %08x\n"
-		"rx_bitmap_223_192  : %08x\n"
-		"rx_bitmap_255_224  : %08x\n",
-		rx_tid->tid,
-		queue_status->ssn, queue_status->curr_idx,
-		queue_status->pn_31_0, queue_status->pn_63_32,
-		queue_status->pn_95_64, queue_status->pn_127_96,
-		queue_status->last_rx_enq_tstamp,
-		queue_status->last_rx_deq_tstamp,
-		queue_status->rx_bitmap_31_0, queue_status->rx_bitmap_63_32,
-		queue_status->rx_bitmap_95_64, queue_status->rx_bitmap_127_96,
-		queue_status->rx_bitmap_159_128,
-		queue_status->rx_bitmap_191_160,
-		queue_status->rx_bitmap_223_192,
-		queue_status->rx_bitmap_255_224);
+	DP_PRINT_STATS("REO queue stats (TID: %d):\n"
+		       "ssn: %d\n"
+		       "curr_idx  : %d\n"
+		       "pn_31_0   : %08x\n"
+		       "pn_63_32  : %08x\n"
+		       "pn_95_64  : %08x\n"
+		       "pn_127_96 : %08x\n"
+		       "last_rx_enq_tstamp : %08x\n"
+		       "last_rx_deq_tstamp : %08x\n"
+		       "rx_bitmap_31_0     : %08x\n"
+		       "rx_bitmap_63_32    : %08x\n"
+		       "rx_bitmap_95_64    : %08x\n"
+		       "rx_bitmap_127_96   : %08x\n"
+		       "rx_bitmap_159_128  : %08x\n"
+		       "rx_bitmap_191_160  : %08x\n"
+		       "rx_bitmap_223_192  : %08x\n"
+		       "rx_bitmap_255_224  : %08x\n",
+		       rx_tid->tid,
+		       queue_status->ssn, queue_status->curr_idx,
+		       queue_status->pn_31_0, queue_status->pn_63_32,
+		       queue_status->pn_95_64, queue_status->pn_127_96,
+		       queue_status->last_rx_enq_tstamp,
+		       queue_status->last_rx_deq_tstamp,
+		       queue_status->rx_bitmap_31_0,
+		       queue_status->rx_bitmap_63_32,
+		       queue_status->rx_bitmap_95_64,
+		       queue_status->rx_bitmap_127_96,
+		       queue_status->rx_bitmap_159_128,
+		       queue_status->rx_bitmap_191_160,
+		       queue_status->rx_bitmap_223_192,
+		       queue_status->rx_bitmap_255_224);
 
-	DP_TRACE_STATS(FATAL,
-		"curr_mpdu_cnt      : %d\n"
-		"curr_msdu_cnt      : %d\n"
-		"fwd_timeout_cnt    : %d\n"
-		"fwd_bar_cnt        : %d\n"
-		"dup_cnt            : %d\n"
-		"frms_in_order_cnt  : %d\n"
-		"bar_rcvd_cnt       : %d\n"
-		"mpdu_frms_cnt      : %d\n"
-		"msdu_frms_cnt      : %d\n"
-		"total_byte_cnt     : %d\n"
-		"late_recv_mpdu_cnt : %d\n"
-		"win_jump_2k 	    : %d\n"
-		"hole_cnt 	    : %d\n",
-		queue_status->curr_mpdu_cnt, queue_status->curr_msdu_cnt,
-		queue_status->fwd_timeout_cnt, queue_status->fwd_bar_cnt,
-		queue_status->dup_cnt, queue_status->frms_in_order_cnt,
-		queue_status->bar_rcvd_cnt, queue_status->mpdu_frms_cnt,
-		queue_status->msdu_frms_cnt, queue_status->total_cnt,
-		queue_status->late_recv_mpdu_cnt, queue_status->win_jump_2k,
-		queue_status->hole_cnt);
+	DP_PRINT_STATS(
+		       "curr_mpdu_cnt      : %d\n"
+		       "curr_msdu_cnt      : %d\n"
+		       "fwd_timeout_cnt    : %d\n"
+		       "fwd_bar_cnt        : %d\n"
+		       "dup_cnt            : %d\n"
+		       "frms_in_order_cnt  : %d\n"
+		       "bar_rcvd_cnt       : %d\n"
+		       "mpdu_frms_cnt      : %d\n"
+		       "msdu_frms_cnt      : %d\n"
+		       "total_byte_cnt     : %d\n"
+		       "late_recv_mpdu_cnt : %d\n"
+		       "win_jump_2k        : %d\n"
+		       "hole_cnt           : %d\n",
+		       queue_status->curr_mpdu_cnt,
+		       queue_status->curr_msdu_cnt,
+		       queue_status->fwd_timeout_cnt,
+		       queue_status->fwd_bar_cnt,
+		       queue_status->dup_cnt,
+		       queue_status->frms_in_order_cnt,
+		       queue_status->bar_rcvd_cnt,
+		       queue_status->mpdu_frms_cnt,
+		       queue_status->msdu_frms_cnt,
+		       queue_status->total_cnt,
+		       queue_status->late_recv_mpdu_cnt,
+		       queue_status->win_jump_2k,
+		       queue_status->hole_cnt);
 
 	DP_PRINT_STATS("Addba Req          : %d\n"
 			"Addba Resp         : %d\n"
@@ -1442,13 +1463,11 @@ dp_rx_peer_map_handler(void *soc_handle, uint16_t peer_id,
 					   hw_peer_id, vdev_id);
 
 		if (peer) {
-			/*
-			 * For every peer Map message search and set if bss_peer
-			 */
-			if (!(qdf_mem_cmp(peer->mac_addr.raw,
-					  peer->vdev->mac_addr.raw,
-					  QDF_MAC_ADDR_SIZE))) {
-				dp_info("vdev bss_peer!!!!");
+			if (wlan_op_mode_sta == peer->vdev->opmode &&
+			    qdf_mem_cmp(peer->mac_addr.raw,
+					peer->vdev->mac_addr.raw,
+					QDF_MAC_ADDR_SIZE) != 0) {
+				dp_info("STA vdev bss_peer!!!!");
 				peer->bss_peer = 1;
 				peer->vdev->vap_bss_peer = peer;
 			}
@@ -1474,7 +1493,6 @@ dp_rx_peer_map_handler(void *soc_handle, uint16_t peer_id,
 
 		}
 	}
-
 	dp_peer_map_ast(soc, peer, peer_mac_addr,
 			hw_peer_id, vdev_id, ast_hash);
 }
@@ -2061,6 +2079,62 @@ static void dp_peer_setup_remaining_tids(struct dp_peer *peer)
 #else
 static void dp_peer_setup_remaining_tids(struct dp_peer *peer) {};
 #endif
+
+#ifndef WLAN_TX_PKT_CAPTURE_ENH
+/*
+ * dp_peer_tid_queue_init() – Initialize ppdu stats queue per TID
+ * @peer: Datapath peer
+ *
+ */
+static inline void dp_peer_tid_queue_init(struct dp_peer *peer)
+{
+}
+
+/*
+ * dp_peer_tid_queue_cleanup() – remove ppdu stats queue per TID
+ * @peer: Datapath peer
+ *
+ */
+static inline void dp_peer_tid_queue_cleanup(struct dp_peer *peer)
+{
+}
+
+/*
+ * dp_peer_update_80211_hdr() – dp peer update 80211 hdr
+ * @vdev: Datapath vdev
+ * @peer: Datapath peer
+ *
+ */
+static inline void
+dp_peer_update_80211_hdr(struct dp_vdev *vdev, struct dp_peer *peer)
+{
+}
+#endif
+
+/*
+ * dp_peer_tx_init() – Initialize receive TID state
+ * @pdev: Datapath pdev
+ * @peer: Datapath peer
+ *
+ */
+void dp_peer_tx_init(struct dp_pdev *pdev, struct dp_peer *peer)
+{
+	dp_peer_tid_queue_init(peer);
+	dp_peer_update_80211_hdr(peer->vdev, peer);
+}
+
+/*
+ * dp_peer_tx_cleanup() – Deinitialize receive TID state
+ * @vdev: Datapath vdev
+ * @peer: Datapath peer
+ *
+ */
+static inline void
+dp_peer_tx_cleanup(struct dp_vdev *vdev, struct dp_peer *peer)
+{
+	dp_peer_tid_queue_cleanup(peer);
+}
+
 /*
  * dp_peer_rx_init() – Initialize receive TID state
  * @pdev: Datapath pdev
@@ -2126,7 +2200,7 @@ void dp_peer_rx_cleanup(struct dp_vdev *vdev, struct dp_peer *peer)
 		struct dp_rx_tid *rx_tid = &peer->rx_tid[tid];
 
 		qdf_spin_lock_bh(&rx_tid->tid_lock);
-		if (!peer->bss_peer) {
+		if (!peer->bss_peer && peer->vdev->opmode != wlan_op_mode_sta) {
 			/* Cleanup defrag related resource */
 			dp_rx_defrag_waitlist_remove(peer, tid);
 			dp_rx_reorder_flush_frag(peer, tid);
@@ -2158,9 +2232,7 @@ void dp_peer_rx_cleanup(struct dp_vdev *vdev, struct dp_peer *peer)
  */
 void dp_peer_cleanup(struct dp_vdev *vdev, struct dp_peer *peer)
 {
-	peer->last_assoc_rcvd = 0;
-	peer->last_disassoc_rcvd = 0;
-	peer->last_deauth_rcvd = 0;
+	dp_peer_tx_cleanup(vdev, peer);
 
 	/* cleanup the Rx reorder queues for this peer */
 	dp_peer_rx_cleanup(vdev, peer);
@@ -2243,13 +2315,26 @@ int dp_addba_resp_tx_completion_wifi3(void *peer_handle,
 	rx_tid = &peer->rx_tid[tid];
 	qdf_spin_lock_bh(&rx_tid->tid_lock);
 	if (status) {
+		struct ol_if_ops *ol_ops = NULL;
+		bool is_roaming = false;
+		uint8_t vdev_id = -1;
+
 		rx_tid->num_addba_rsp_failed++;
-		dp_rx_tid_update_wifi3(peer, tid, 1, 0);
-		rx_tid->ba_status = DP_RX_BA_INACTIVE;
+		ol_ops = peer->vdev->pdev->soc->cdp_soc.ol_ops;
+
+		if (ol_ops && ol_ops->is_roam_inprogress) {
+			dp_get_vdevid(peer, &vdev_id);
+			is_roaming = ol_ops->is_roam_inprogress(vdev_id);
+		}
+
+		if (!is_roaming) {
+			dp_rx_tid_update_wifi3(peer, tid, 1, IEEE80211_SEQ_MAX);
+			rx_tid->ba_status = DP_RX_BA_INACTIVE;
+		}
+
 		qdf_spin_unlock_bh(&rx_tid->tid_lock);
-		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
-			  "%s: Rx Tid- %d addba rsp tx completion failed!",
-			 __func__, tid);
+		dp_err("RxTid- %d addba rsp tx completion failed, is_roaming %d",
+		       tid, is_roaming);
 		return QDF_STATUS_SUCCESS;
 	}
 
@@ -2401,14 +2486,12 @@ int dp_addba_requestprocess_wifi3(void *peer_handle,
 	rx_tid->num_of_addba_req++;
 	if ((rx_tid->ba_status == DP_RX_BA_ACTIVE &&
 	     rx_tid->hw_qdesc_vaddr_unaligned)) {
-		dp_rx_tid_update_wifi3(peer, tid, 1, 0);
+		dp_rx_tid_update_wifi3(peer, tid, 1, IEEE80211_SEQ_MAX);
 		rx_tid->ba_status = DP_RX_BA_INACTIVE;
 		peer->active_ba_session_cnt--;
-		qdf_spin_unlock_bh(&rx_tid->tid_lock);
-		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
-			  "%s: Rx Tid- %d hw qdesc is already setup",
-			__func__, tid);
-		return QDF_STATUS_E_FAILURE;
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_DEBUG,
+			  "%s: Addba recvd for Rx Tid-%d hw qdesc is already setup",
+			  __func__, tid);
 	}
 
 	if (rx_tid->ba_status == DP_RX_BA_IN_PROGRESS) {
@@ -2482,7 +2565,7 @@ int dp_delba_process_wifi3(void *peer_handle,
 	 */
 	rx_tid->delba_rcode = reasoncode;
 	rx_tid->num_of_delba_req++;
-	dp_rx_tid_update_wifi3(peer, tid, 1, 0);
+	dp_rx_tid_update_wifi3(peer, tid, 1, IEEE80211_SEQ_MAX);
 
 	rx_tid->ba_status = DP_RX_BA_INACTIVE;
 	peer->active_ba_session_cnt--;
@@ -2534,12 +2617,12 @@ int dp_delba_tx_completion_wifi3(void *peer_handle,
 		rx_tid->delba_tx_status = 0;
 	}
 	if (rx_tid->ba_status == DP_RX_BA_ACTIVE) {
-		dp_rx_tid_update_wifi3(peer, tid, 1, 0);
+		dp_rx_tid_update_wifi3(peer, tid, 1, IEEE80211_SEQ_MAX);
 		rx_tid->ba_status = DP_RX_BA_INACTIVE;
 		peer->active_ba_session_cnt--;
 	}
 	if (rx_tid->ba_status == DP_RX_BA_IN_PROGRESS) {
-		dp_rx_tid_update_wifi3(peer, tid, 1, 0);
+		dp_rx_tid_update_wifi3(peer, tid, 1, IEEE80211_SEQ_MAX);
 		rx_tid->ba_status = DP_RX_BA_INACTIVE;
 	}
 	qdf_spin_unlock_bh(&rx_tid->tid_lock);
@@ -2735,7 +2818,7 @@ dp_rx_sec_ind_handler(void *soc_handle, uint16_t peer_id,
 	dp_peer_unref_del_find_by_id(peer);
 }
 
-#ifndef CONFIG_WIN
+#ifdef CONFIG_MCL
 /**
  * dp_register_peer() - Register peer into physical device
  * @pdev - data path device instance

@@ -34,9 +34,9 @@
 #include "qdf_types.h"
 #include "qdf_nbuf.h"
 #include "qdf_atomic.h"
-#ifndef CONFIG_WIN
+#ifdef CONFIG_MCL
 #include <cdp_txrx_mob_def.h>
-#endif /* CONFIG_WIN */
+#endif
 #include <cdp_txrx_handle.h>
 #include <cdp_txrx_stats_struct.h>
 #ifdef WLAN_RX_PKT_CAPTURE_ENH
@@ -95,6 +95,8 @@
 #define CDP_MU_MAX_USER_INDEX (CDP_MU_MAX_USERS - 1)
 #define CDP_INVALID_PEER 0xffff
 #define CDP_INVALID_TID	 31
+#define CDP_INVALID_TX_ENCAP_TYPE	 6
+#define CDP_INVALID_SEC_TYPE		12
 
 #define CDP_DATA_TID_MAX 8
 #define CDP_DATA_NON_QOS_TID 16
@@ -204,6 +206,7 @@ enum htt_cmn_dbg_stats_type {
  * @TXRX_SOC_CFG_PARAMS: Print soc cfg params info
  * @TXRX_PDEV_CFG_PARAMS: Print pdev cfg params info
  * @TXRX_NAPI_STATS: Print NAPI scheduling statistics
+ * @TXRX_SOC_INTERRUPT_STATS: Print soc interrupt stats
  */
 enum cdp_host_txrx_stats {
 	TXRX_HOST_STATS_INVALID  = -1,
@@ -219,6 +222,7 @@ enum cdp_host_txrx_stats {
 	TXRX_SOC_CFG_PARAMS   = 9,
 	TXRX_PDEV_CFG_PARAMS  = 10,
 	TXRX_NAPI_STATS       = 11,
+	TXRX_SOC_INTERRUPT_STATS = 12,
 	TXRX_HOST_STATS_MAX,
 };
 
@@ -404,6 +408,8 @@ enum cdp_sec_type {
  *  @tid: Transmit Identifier
  *  @tx_encap_type: Transmit encap type (i.e. Raw, Native Wi-Fi, Ethernet)
  *  @sec_type: sec_type to be passed to HAL
+ *  @is_tx_sniffer: Indicates if the packet has to be sniffed
+ *  @ppdu_cookie: 16-bit ppdu cookie that has to be replayed back in completions
  *
  *  This structure holds the parameters needed in the exception path of tx
  *
@@ -413,6 +419,8 @@ struct cdp_tx_exception_metadata {
 	uint8_t tid;
 	uint16_t tx_encap_type;
 	enum cdp_sec_type sec_type;
+	uint8_t is_tx_sniffer;
+	uint16_t ppdu_cookie;
 };
 
 typedef struct cdp_soc_t *ol_txrx_soc_handle;
@@ -843,6 +851,7 @@ enum cdp_pdev_param_type {
 	CDP_INGRESS_STATS,
 	CDP_OSIF_DROP,
 	CDP_CONFIG_ENH_RX_CAPTURE,
+	CDP_CONFIG_TX_CAPTURE,
 };
 
 /**
@@ -1041,6 +1050,7 @@ typedef void (*data_stall_detect_cb)(struct data_stall_event_info *);
  * @CDP_TXRX_STATS_28: Host Peer entry stats
  * @CDP_TXRX_STATS_29: Host Soc config params info
  * @CDP_TXRX_STATS_30: Host Pdev config params info
+ * @CDP_TXRX_STATS_31: Host DP Interrupt Stats
  */
 enum cdp_stats {
 	CDP_TXRX_STATS_0  = 0,
@@ -1074,6 +1084,7 @@ enum cdp_stats {
 	CDP_TXRX_STATS_28,
 	CDP_TXRX_STATS_29,
 	CDP_TXRX_STATS_30,
+	CDP_TXRX_STATS_31,
 	CDP_TXRX_STATS_HTT_MAX = 256,
 	CDP_TXRX_MAX_STATS = 265,
 };
@@ -1152,6 +1163,8 @@ struct cdp_tx_sojourn_stats {
  * @mu_group_id: mu group id
  * @rix: rate index
  * @cookie: cookie to used by upper layer
+ * @is_ppdu_cookie_valid : Indicates that ppdu_cookie is valid
+ * @ppdu_cookie: 16-bit ppdu_cookie
  */
 struct cdp_tx_completion_ppdu_user {
 	uint32_t completion_status:8,
@@ -1208,6 +1221,85 @@ struct cdp_tx_completion_ppdu_user {
 	uint32_t mu_group_id;
 	uint32_t rix;
 	struct cdp_stats_cookie *cookie;
+	uint8_t is_ppdu_cookie_valid;
+	uint16_t ppdu_cookie;
+};
+
+/**
+ * struct cdp_tx_indication_mpdu_info - Tx MPDU completion information
+ * @ppdu_id: PPDU id
+ * @duration: user duration in ppdu
+ * @frame_type: frame type MGMT/CTRL/DATA/BAR
+ * @frame_ctrl: frame control field in 802.11 header
+ * @qos_ctrl: QoS control field in 802.11 header
+ * @tid: TID number
+ * @num_msdu: number of msdu in MPDU
+ * @seq_no: Sequence number of first MPDU
+ * @ltf_size: ltf_size
+ * @stbc: stbc
+ * @he_re: he_re (range extension)
+ * @txbf: txbf
+ * @bw: Transmission bandwidth
+ *       <enum 2 transmit_bw_20_MHz>
+ *       <enum 3 transmit_bw_40_MHz>
+ *       <enum 4 transmit_bw_80_MHz>
+ *       <enum 5 transmit_bw_160_MHz>
+ * @nss: NSS 1,2, ...8
+ * @mcs: MCS index
+ * @preamble: preamble
+ * @gi: guard interval 800/400/1600/3200 ns
+ * @channel: frequency
+ * @channel_num: channel number
+ * @ack_rssi: ack rssi
+ * @ldpc: ldpc
+ * @tx_rate: Transmission Rate
+ * @mac_address: peer mac address
+ * @bss_mac_address: bss mac address
+ * @ppdu_start_timestamp: TSF at PPDU start
+ * @ppdu_end_timestamp: TSF at PPDU end
+ * @ba_start_seq: Block Ack sequence number
+ * @ba_bitmap: Block Ack bitmap
+ * @ppdu_cookie: 16-bit ppdu_cookie
+ */
+struct cdp_tx_indication_mpdu_info {
+	uint32_t ppdu_id;
+	uint32_t tx_duration;
+	uint16_t frame_type;
+	uint16_t frame_ctrl;
+	uint16_t qos_ctrl;
+	uint8_t tid;
+	uint32_t num_msdu;
+	uint32_t seq_no;
+	uint32_t ltf_size:2,
+		 he_re:1,
+		 txbf:4,
+		 bw:4,
+		 nss:4,
+		 mcs:4,
+		 preamble:4,
+		 gi:4;
+	uint32_t channel;
+	uint8_t channel_num;
+	uint32_t ack_rssi;
+	uint32_t ldpc;
+	uint32_t tx_rate;
+	uint8_t mac_address[QDF_MAC_ADDR_SIZE];
+	uint8_t bss_mac_address[QDF_MAC_ADDR_SIZE];
+	uint32_t ppdu_start_timestamp;
+	uint32_t ppdu_end_timestamp;
+	uint32_t ba_start_seq;
+	uint32_t ba_bitmap[CDP_BA_256_BIT_MAP_SIZE_DWORDS];
+	uint16_t ppdu_cookie;
+};
+
+/**
+ * struct cdp_tx_indication_info - Tx capture information
+ * @mpdu_info: Tx MPDU completion information
+ * @mpdu_nbuf: reconstructed mpdu packet
+ */
+struct cdp_tx_indication_info {
+	struct cdp_tx_indication_mpdu_info mpdu_info;
+	qdf_nbuf_t mpdu_nbuf;
 };
 
 /**
@@ -1228,6 +1320,7 @@ struct cdp_tx_completion_ppdu_user {
  * @ppdu_end_timestamp: TSF at PPDU end
  * @ack_timestamp: TSF at the reception of ACK
  * @user: per-User stats (array of per-user structures)
+ * @mpdu_q: queue of mpdu in a ppdu
  */
 struct cdp_tx_completion_ppdu {
 	uint32_t ppdu_id;
@@ -1247,6 +1340,7 @@ struct cdp_tx_completion_ppdu {
 	uint32_t ppdu_end_timestamp;
 	uint32_t ack_timestamp;
 	struct cdp_tx_completion_ppdu_user user[CDP_MU_MAX_USERS];
+	qdf_nbuf_queue_t mpdu_q;
 };
 
 /**
@@ -1458,6 +1552,9 @@ struct cdp_rx_indication_msdu {
  * @tx_flow_stop_queue_threshold: Value to Pause tx queues
  * @tx_flow_start_queue_offset: Available Tx descriptors to unpause
  *				tx queue
+ * @tx_comp_loop_pkt_limit: Max # of packets to be processed in 1 tx comp loop
+ * @rx_reap_loop_pkt_limit: Max # of packets to be processed in 1 rx reap loop
+ * @rx_hp_oos_update_limit: Max # of HP OOS (out of sync) updates
  */
 struct cdp_config_params {
 	unsigned int tso_enable:1;
@@ -1470,6 +1567,9 @@ struct cdp_config_params {
 	/* Set when QCA_LL_TX_FLOW_CONTROL_V2 is enabled */
 	uint8_t tx_flow_stop_queue_threshold;
 	uint8_t tx_flow_start_queue_offset;
+	uint32_t tx_comp_loop_pkt_limit;
+	uint32_t rx_reap_loop_pkt_limit;
+	uint32_t rx_hp_oos_update_limit;
 
 };
 

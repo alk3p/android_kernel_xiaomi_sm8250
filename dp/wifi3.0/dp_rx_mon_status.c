@@ -46,8 +46,7 @@ static void
 dp_rx_mon_enh_capture_process(struct dp_pdev *pdev, uint32_t tlv_status,
 			      qdf_nbuf_t status_nbuf,
 			      struct hal_rx_ppdu_info *ppdu_info,
-			      bool *nbuf_used,
-			      uint32_t rx_enh_capture_mode)
+			      bool *nbuf_used)
 {
 }
 #endif
@@ -281,7 +280,8 @@ static void dp_rx_stats_update(struct dp_pdev *pdev, struct dp_peer *peer,
 	if (is_invalid_peer)
 		return;
 
-	dp_rx_rate_stats_update(peer, ppdu);
+	if (dp_is_subtype_data(ppdu->frame_ctrl))
+		dp_rx_rate_stats_update(peer, ppdu);
 
 #if defined(FEATURE_PERPKT_INFO) && WDI_EVENT_ENABLE
 	dp_wdi_event_handler(WDI_EVENT_UPDATE_DP_STATS, pdev->soc,
@@ -588,7 +588,7 @@ dp_rx_mon_status_process_tlv(struct dp_soc *soc, uint32_t mac_id,
 
 				dp_rx_mon_enh_capture_process(pdev, tlv_status,
 					status_nbuf, ppdu_info,
-					&nbuf_used, rx_enh_capture_mode);
+					&nbuf_used);
 
 				rx_tlv = hal_rx_status_get_next_tlv(rx_tlv);
 
@@ -597,7 +597,8 @@ dp_rx_mon_status_process_tlv(struct dp_soc *soc, uint32_t mac_id,
 
 			} while ((tlv_status == HAL_TLV_STATUS_PPDU_NOT_DONE) ||
 				 (tlv_status == HAL_TLV_STATUS_HEADER) ||
-				 (tlv_status == HAL_TLV_STATUS_MPDU_END));
+				 (tlv_status == HAL_TLV_STATUS_MPDU_END) ||
+				 (tlv_status == HAL_TLV_STATUS_MSDU_END));
 		}
 		if (pdev->dp_peer_based_pktlog) {
 			dp_rx_process_peer_based_pktlog(soc, ppdu_info,
@@ -887,9 +888,10 @@ dp_rx_pdev_mon_status_detach(struct dp_pdev *pdev, int mac_id)
 	rx_desc_pool = &soc->rx_desc_status[mac_id];
 	if (rx_desc_pool->pool_size != 0) {
 		if (!dp_is_soc_reinit(soc))
-			dp_rx_desc_pool_free(soc, mac_id, rx_desc_pool);
+			dp_rx_desc_nbuf_and_pool_free(soc, mac_id,
+						      rx_desc_pool);
 		else
-			dp_rx_desc_nbuf_pool_free(soc, rx_desc_pool);
+			dp_rx_desc_nbuf_free(soc, rx_desc_pool);
 	}
 
 	return QDF_STATUS_SUCCESS;
@@ -1007,7 +1009,7 @@ QDF_STATUS dp_rx_mon_status_buffers_replenish(struct dp_soc *dp_soc,
 					"[%s][%d] rxdma_ring_entry is NULL, count - %d",
 					__func__, __LINE__, count);
 			qdf_nbuf_unmap_single(dp_soc->osdev, rx_netbuf,
-					      QDF_DMA_BIDIRECTIONAL);
+					      QDF_DMA_FROM_DEVICE);
 			qdf_nbuf_free(rx_netbuf);
 			break;
 		}

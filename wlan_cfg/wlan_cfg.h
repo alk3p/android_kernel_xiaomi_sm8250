@@ -24,6 +24,7 @@
  * or platform configuration
  */
 #if defined(CONFIG_MCL)
+#define WLAN_CFG_DST_RING_CACHED_DESC 0
 #define MAX_PDEV_CNT 1
 #define WLAN_CFG_INT_NUM_CONTEXTS 7
 #define WLAN_CFG_RXDMA1_ENABLE 1
@@ -38,6 +39,7 @@
 
 #define NUM_RXDMA_RINGS_PER_PDEV 2
 #else
+#define WLAN_CFG_DST_RING_CACHED_DESC 1
 #define MAX_PDEV_CNT 3
 #define WLAN_CFG_INT_NUM_CONTEXTS 11
 #define WLAN_CFG_RXDMA1_ENABLE 1
@@ -137,6 +139,16 @@ struct wlan_cfg_dp_pdev_ctxt;
  * @rxdma_refill_ring: rxdma refill ring size
  * @rxdma_err_dst_ring: rxdma error detination ring size
  * @raw_mode_war: enable/disable raw mode war
+ * @enable_data_stall_detection: flag to enable data stall detection
+ * @disable_intra_bss_fwd: flag to disable intra bss forwarding
+ * @rxdma1_enable: flag to indicate if rxdma1 is enabled
+ * @tx_comp_loop_pkt_limit: Max # of packets to be processed in 1 tx comp loop
+ * @rx_reap_loop_pkt_limit: Max # of packets to be processed in 1 rx reap loop
+ * @rx_hp_oos_update_limit: Max # of HP OOS (out of sync) updates
+ * @rx_enable_eol_data_check: flag to enable check for more ring data at end of
+ *                            dp_rx_process loop
+ * tx_comp_enable_eol_data_check: flag to enable/disable checking for more data
+ *                                at end of tx_comp_handler loop.
  */
 struct wlan_cfg_dp_soc_ctxt {
 	int num_int_ctxts;
@@ -211,6 +223,13 @@ struct wlan_cfg_dp_soc_ctxt {
 	bool disable_intra_bss_fwd;
 	bool rxdma1_enable;
 	int max_ast_idx;
+#ifdef WLAN_FEATURE_RX_SOFTIRQ_TIME_LIMIT
+	uint32_t tx_comp_loop_pkt_limit;
+	uint32_t rx_reap_loop_pkt_limit;
+	uint32_t rx_hp_oos_update_limit;
+	bool rx_enable_eol_data_check;
+	bool tx_comp_enable_eol_data_check;
+#endif /* WLAN_FEATURE_RX_SOFTIRQ_TIME_LIMIT */
 };
 
 /**
@@ -1001,4 +1020,5 @@ int wlan_cfg_get_tx_flow_start_queue_offset(struct wlan_cfg_dp_soc_ctxt *cfg);
 int wlan_cfg_get_rx_defrag_min_timeout(struct wlan_cfg_dp_soc_ctxt *cfg);
 
 int wlan_cfg_get_defrag_timeout_check(struct wlan_cfg_dp_soc_ctxt *cfg);
+
 #endif

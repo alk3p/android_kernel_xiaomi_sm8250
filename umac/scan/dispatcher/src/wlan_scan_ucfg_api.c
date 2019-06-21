@@ -992,6 +992,8 @@ wlan_scan_global_init(struct wlan_objmgr_psoc *psoc,
 			cfg_get(psoc, CFG_ADAPTIVE_SCAN_DWELL_MODE);
 	scan_obj->scan_def.adaptive_dwell_time_mode_nc =
 			cfg_get(psoc, CFG_ADAPTIVE_SCAN_DWELL_MODE_NC);
+	scan_obj->scan_def.honour_nl_scan_policy_flags =
+			cfg_get(psoc, CFG_HONOUR_NL_SCAN_POLICY_FLAGS);
 	scan_obj->scan_def.enable_mac_spoofing =
 			cfg_get(psoc, CFG_ENABLE_MAC_ADDR_SPOOFING);
 	scan_obj->scan_def.extscan_adaptive_dwell_mode =
@@ -1501,27 +1503,6 @@ QDF_STATUS ucfg_scan_update_user_config(struct wlan_objmgr_psoc *psoc,
 	qdf_mem_copy(&scan_def->score_config, &scan_cfg->score_config,
 		sizeof(struct scoring_config));
 	scm_validate_scoring_config(&scan_def->score_config);
-
-	return QDF_STATUS_SUCCESS;
-}
-
-QDF_STATUS ucfg_scan_update_roam_params(struct wlan_objmgr_psoc *psoc,
-	struct roam_filter_params *roam_params)
-{
-	struct scan_default_params *scan_def;
-
-	if (!psoc) {
-		scm_err("null psoc");
-		return QDF_STATUS_E_FAILURE;
-	}
-	scan_def = wlan_scan_psoc_get_def_params(psoc);
-	if (!scan_def) {
-		scm_err("Failed to get scan object");
-		return QDF_STATUS_E_FAILURE;
-	}
-
-	qdf_mem_copy(&scan_def->roam_params, roam_params,
-		sizeof(struct roam_filter_params));
 
 	return QDF_STATUS_SUCCESS;
 }

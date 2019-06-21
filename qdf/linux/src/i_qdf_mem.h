@@ -39,7 +39,7 @@
 #include <linux/cache.h> /* L1_CACHE_BYTES */
 
 #define __qdf_cache_line_sz L1_CACHE_BYTES
-#if CONFIG_MCL
+#if defined(CONFIG_MCL)
 #include <cds_queue.h>
 #else
 #include <sys/queue.h>
@@ -148,6 +148,25 @@ static inline uint32_t __qdf_mem_map_nbytes_single(qdf_device_t osdev,
 	return dma_mapping_error(osdev->dev, *phy_addr) ?
 	QDF_STATUS_E_FAILURE : QDF_STATUS_SUCCESS;
 }
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 20)
+static inline void __qdf_mem_dma_cache_sync(qdf_device_t osdev,
+					    qdf_dma_addr_t buf,
+					    qdf_dma_dir_t dir,
+					    int nbytes)
+{
+	dma_cache_sync(osdev->dev, buf, nbytes, __qdf_dma_dir_to_os(dir));
+}
+#else
+static inline void __qdf_mem_dma_cache_sync(qdf_device_t osdev,
+					    qdf_dma_addr_t buf,
+					    qdf_dma_dir_t dir,
+					    int nbytes)
+{
+	dma_sync_single_for_cpu(osdev->dev, buf, nbytes,
+				__qdf_dma_dir_to_os(dir));
+}
+#endif
 
 /**
  * __qdf_mem_unmap_nbytes_single() - un_map memory for DMA
@@ -269,8 +288,12 @@ __qdf_dma_get_sgtable_dma_addr(struct sg_table *sgt)
 	struct scatterlist *sg;
 	int i;
 
-	for_each_sg(sgt->sgl, sg, sgt->nents, i)
+	for_each_sg(sgt->sgl, sg, sgt->nents, i) {
+		if (!sg)
+			break;
+
 		sg->dma_address = sg_phys(sg);
+	}
 }
 
 /**

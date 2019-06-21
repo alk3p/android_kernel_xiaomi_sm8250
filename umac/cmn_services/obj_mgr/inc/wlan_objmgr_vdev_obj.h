@@ -484,6 +484,25 @@ QDF_STATUS wlan_objmgr_iterate_peerobj_list(
 		void *arg, wlan_objmgr_ref_dbgid dbg_id);
 
 /**
+ * wlan_objmgr_vdev_get_log_del_peer_list() - vdev logically deleted peer list
+ * @vdev: vdev object
+ * @dbg_id: id of the caller
+ *
+ * API to be used for populating the list of logically deleted peers from the
+ * vdev's peer list
+ *
+ * The caller of this function should free the memory allocated for the
+ * peerlist and the peer member in the list
+ * Also the peer ref release is handled by the caller
+ *
+ * Return: list of peer pointers
+ *         NULL on FAILURE
+ */
+qdf_list_t *wlan_objmgr_vdev_get_log_del_peer_list(
+		struct wlan_objmgr_vdev *vdev,
+		wlan_objmgr_ref_dbgid dbg_id);
+
+/**
  * wlan_objmgr_trigger_vdev_comp_priv_object_creation() - vdev
  * comp object creation
  * @vdev: VDEV object
@@ -1306,7 +1325,6 @@ static inline enum wlan_vdev_state wlan_vdev_mlme_get_state(
 	return vdev->vdev_mlme.mlme_state;
 }
 
-#ifdef CMN_VDEV_MLME_SM_ENABLE
 /**
  * wlan_vdev_mlme_get_substate() - get mlme substate
  * @vdev: VDEV object
@@ -1320,23 +1338,6 @@ static inline enum wlan_vdev_state wlan_vdev_mlme_get_substate(
 {
 	return vdev->vdev_mlme.mlme_substate;
 }
-#else
-/**
- * wlan_vdev_mlme_set_state() - set mlme state
- * @vdev: VDEV object
- * @state: MLME state
- *
- * API to set MLME state
- *
- * Return: void
- */
-static inline void wlan_vdev_mlme_set_state(struct wlan_objmgr_vdev *vdev,
-						enum wlan_vdev_state state)
-{
-	if (state < WLAN_VDEV_S_MAX)
-		vdev->vdev_mlme.mlme_state = state;
-}
-#endif
 
 /**
  * wlan_vdev_set_selfpeer() - set self peer
@@ -1387,7 +1388,9 @@ static inline void wlan_vdev_set_bsspeer(struct wlan_objmgr_vdev *vdev,
  * wlan_vdev_get_bsspeer() - get bss peer
  * @vdev: VDEV object
  *
- * API to get the BSS peer of VDEV
+ * API to get the BSS peer of VDEV, wlan_objmgr_vdev_try_get_bsspeer API
+ * preferred to use outside obj manager to take and handle ref count of
+ * bss_peer with ref debug ID.
  *
  * Return:
  * @peer: BSS peer pointer

@@ -270,6 +270,13 @@ static int init_deinit_service_ext_ready_event_handler(ol_scn_t scn_handle,
 			goto exit;
 	}
 
+	err_code = init_deinit_populate_rf_characterization_entries(
+						wmi_handle,
+						event,
+						&info->service_ext_param);
+	if (err_code)
+		goto exit;
+
 	err_code = init_deinit_populate_dbr_ring_cap(psoc, wmi_handle,
 						event, info);
 	if (err_code)
@@ -287,6 +294,8 @@ static int init_deinit_service_ext_ready_event_handler(ol_scn_t scn_handle,
 				scn_handle, event, data_len);
 
 	target_if_qwrap_cfg_enable(psoc, tgt_hdl, event);
+
+	target_if_set_twt_ap_pdev_count(info, tgt_hdl);
 
 	info->wlan_res_cfg.num_vdevs = (target_psoc_get_num_radios(tgt_hdl) *
 					info->wlan_res_cfg.num_vdevs);

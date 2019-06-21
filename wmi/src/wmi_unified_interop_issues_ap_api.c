@@ -15,23 +15,27 @@
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
-
 /**
- * DOC: declares driver FTM functions interfacing with linux kernel
+ * DOC: Implement API's specific to interop issues ap component.
  */
 
-#ifndef _WLAN_IOCTL_FTM_H_
-#define _WLAN_IOCTL_FTM_H_
+#include <wmi_unified_priv.h>
+#include <wmi_unified_interop_issues_ap_api.h>
 
-/**
- * wlan_ioctl_ftm_testmode_cmd() - handle the ftm ioctl command
- * @pdev: pdev object
- * @cmd: ftm command
- * @userdata: the content of the command
- *
- * Return: 0 on success, otherwise the error code.
- */
-int wlan_ioctl_ftm_testmode_cmd(struct wlan_objmgr_pdev *pdev, int cmd,
-				uint8_t *userdata);
+QDF_STATUS
+wmi_extract_interop_issues_ap_ev_param(wmi_unified_t wmi_handle, void *evt_buf,
+				    struct wlan_interop_issues_ap_event *param)
+{
+	if (wmi_handle->ops->extract_interop_issues_ap_ev_param)
+		return wmi_handle->ops->extract_interop_issues_ap_ev_param(
+						wmi_handle, evt_buf, param);
+	return QDF_STATUS_E_FAILURE;
+}
 
-#endif
+QDF_STATUS wmi_unified_set_rap_ps_cmd(wmi_unified_t wmi_handle,
+				      struct wlan_interop_issues_ap_info *rap)
+{
+	if (wmi_handle->ops->send_set_rap_ps_cmd)
+		return wmi_handle->ops->send_set_rap_ps_cmd(wmi_handle, rap);
+	return QDF_STATUS_E_FAILURE;
+}

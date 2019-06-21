@@ -117,6 +117,8 @@ struct dp_tx_queue {
  * @u.sg_info: Scatter Gather information for non-TSO SG frames
  * @meta_data: Mesh meta header information
  * @exception_fw: Duplicate frame to be sent to firmware
+ * @ppdu_cookie: 16-bit ppdu_cookie that has to be replayed back in completions
+ * @ix_tx_sniffer: Indicates if the packet has to be sniffed
  *
  * This structure holds the complete MSDU information needed to program the
  * Hardware TCL and MSDU extension descriptors for different frame types
@@ -131,8 +133,10 @@ struct dp_tx_msdu_info_s {
 		struct qdf_tso_info_t tso_info;
 		struct dp_tx_sg_info_s sg_info;
 	} u;
-	uint32_t meta_data[6];
+	uint32_t meta_data[7];
 	uint8_t exception_fw;
+	uint16_t ppdu_cookie;
+	uint8_t is_tx_sniffer;
 };
 
 QDF_STATUS dp_tx_vdev_attach(struct dp_vdev *vdev);
@@ -177,14 +181,27 @@ qdf_nbuf_t dp_tx_non_std(struct cdp_vdev *vdev_handle,
 		enum ol_tx_spec tx_spec, qdf_nbuf_t msdu_list);
 #endif
 
-uint32_t dp_tx_comp_handler(struct dp_soc *soc, void *hal_srng, uint32_t quota);
+/**
+ * dp_tx_comp_handler() - Tx completion handler
+ * @int_ctx: pointer to DP interrupt context
+ * @soc: core txrx main context
+ * @hal_srng: Opaque HAL SRNG pointer
+ * @ring_id: completion ring id
+ * @quota: No. of packets/descriptors that can be serviced in one loop
+ *
+ * This function will collect hardware release ring element contents and
+ * handle descriptor contents. Based on contents, free packet or handle error
+ * conditions
+ *
+ * Return: Number of TX completions processed
+ */
+uint32_t dp_tx_comp_handler(struct dp_intr *int_ctx, struct dp_soc *soc,
+			    void *hal_srng, uint8_t ring_id, uint32_t quota);
 
 QDF_STATUS
 dp_tx_prepare_send_me(struct dp_vdev *vdev, qdf_nbuf_t nbuf);
 
-#ifdef FEATURE_WDS
-void dp_tx_mec_handler(struct dp_vdev *vdev, uint8_t *status);
-#else
+#ifndef FEATURE_WDS
 static inline void dp_tx_mec_handler(struct dp_vdev *vdev, uint8_t *status)
 {
 	return;
@@ -229,8 +246,4 @@ static inline void dp_tx_comp_process_exception(struct dp_tx_desc_s *tx_desc)
 	return;
 }
 /* TODO TX_FEATURE_NOT_YET */
-
-void dp_tx_comp_free_buf(struct dp_soc *soc, struct dp_tx_desc_s *desc);
-void dp_tx_desc_release(struct dp_tx_desc_s *tx_desc, uint8_t desc_pool_id);
-
 #endif

@@ -189,6 +189,10 @@ static QDF_STATUS dfs_radar_add_channel_list_to_nol(struct wlan_dfs *dfs,
 				(uint16_t)utils_dfs_chan_to_freq(channels[i]),
 				dfs->wlan_dfs_nol_timeout);
 		nollist[num_ch++] = last_chan;
+		utils_dfs_deliver_event(dfs->dfs_pdev_obj,
+					(uint16_t)
+					utils_dfs_chan_to_freq(channels[i]),
+					WLAN_EV_NOL_STARTED);
 		dfs_info(dfs, WLAN_DEBUG_DFS_NOL, "ch=%d Added to NOL",
 			 last_chan);
 	}
@@ -654,6 +658,11 @@ void dfs_set_rcsa_flags(struct wlan_dfs *dfs, bool is_rcsa_ie_sent,
 	dfs->dfs_is_nol_ie_sent = is_nol_ie_sent;
 }
 
+static void dfs_reset_nol_ie_bitmap(struct wlan_dfs *dfs)
+{
+	dfs->dfs_nol_ie_bitmap = 0;
+}
+
 bool dfs_process_nol_ie_bitmap(struct wlan_dfs *dfs, uint8_t nol_ie_bandwidth,
 			       uint16_t nol_ie_startfreq, uint8_t nol_ie_bitmap)
 {
@@ -745,6 +754,10 @@ QDF_STATUS dfs_process_radar_ind(struct wlan_dfs *dfs,
 			 radarfound_freq, dfs->dfs_curchan->dfs_ch_ieee,
 			 dfs->dfs_curchan->dfs_ch_freq);
 
+	utils_dfs_deliver_event(dfs->dfs_pdev_obj,
+				radarfound_freq,
+				WLAN_EV_RADAR_DETECTED);
+
 	if (!dfs->dfs_use_nol) {
 		dfs_reset_bangradar(dfs);
 		dfs_send_csa_to_current_chan(dfs);
@@ -792,6 +805,7 @@ QDF_STATUS dfs_process_radar_ind(struct wlan_dfs *dfs,
 		(dfs->dfs_is_rcsa_ie_sent = false) :
 		(dfs->dfs_is_rcsa_ie_sent = true);
 	if (dfs->dfs_use_nol_subchannel_marking) {
+		dfs_reset_nol_ie_bitmap(dfs);
 		dfs_prepare_nol_ie_bitmap(dfs, radar_found, channels,
 					  num_channels);
 		dfs->dfs_is_nol_ie_sent = true;

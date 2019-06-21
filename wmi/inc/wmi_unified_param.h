@@ -872,9 +872,6 @@ struct hidden_ssid_vdev_restart_params {
 	uint32_t info;
 	uint32_t reg_info_1;
 	uint32_t reg_info_2;
-#ifndef CONFIG_VDEV_SM
-	qdf_atomic_t hidden_ssid_restart_in_progress;
-#endif
 };
 
 #ifdef WLAN_CFR_ENABLE
@@ -1457,9 +1454,7 @@ struct fw_hang_params {
 struct pdev_utf_params {
 	uint8_t *utf_payload;
 	uint32_t len;
-#ifndef CONFIG_MCL
 	bool is_ar900b;
-#endif
 };
 
 /*Adding this due to dependency on wmi_unified.h
@@ -1497,9 +1492,7 @@ struct dbglog_params {
 	uint32_t val;
 	uint32_t *module_id_bitmap;
 	uint32_t bitmap_len;
-#ifndef CONFIG_MCL
 	uint32_t cfgvalid[2];
-#endif
 };
 
 /**
@@ -4838,6 +4831,9 @@ typedef enum {
 	wmi_vdev_get_mws_coex_tdm_state_eventid,
 	wmi_vdev_get_mws_coex_idrx_state_eventid,
 	wmi_vdev_get_mws_coex_antenna_sharing_state_eventid,
+#ifdef WLAN_FEATURE_INTEROP_ISSUES_AP
+	wmi_pdev_interop_issues_ap_event_id,
+#endif
 	wmi_events_max,
 } wmi_conv_event_id;
 
@@ -4995,6 +4991,10 @@ typedef enum {
 	wmi_pdev_param_equal_ru_allocation_enable,
 	wmi_pdev_param_per_peer_prd_cfr_enable,
 	wmi_pdev_param_nav_override_config,
+	wmi_pdev_param_set_mgmt_ttl,
+	wmi_pdev_param_set_prb_rsp_ttl,
+	wmi_pdev_param_set_mu_ppdu_duration,
+	wmi_pdev_param_set_tbtt_ctrl,
 	wmi_pdev_param_max,
 } wmi_conv_pdev_params_id;
 
@@ -5124,8 +5124,6 @@ typedef enum {
 	wmi_vdev_param_ul_stbc,
 	wmi_vdev_param_ul_fixed_rate,
 	wmi_vdev_param_rawmode_open_war,
-
-	wmi_vdev_param_max,
 } wmi_conv_vdev_param_id;
 
 /**
@@ -5317,6 +5315,8 @@ typedef enum {
 	wmi_service_wpa3_ft_suite_b_support,
 	wmi_service_ft_fils,
 	wmi_service_adaptive_11r_support,
+	wmi_service_data_stall_recovery_support,
+	wmi_service_tx_compl_tsf64,
 	wmi_services_max,
 } wmi_conv_service_ids;
 #define WMI_SERVICE_UNAVAILABLE 0xFFFF
@@ -5519,6 +5519,7 @@ typedef struct {
 	uint32_t max_bssid_indicator;
 	uint32_t eapol_minrate_set:1,
 		 eapol_minrate_ac_set:2;
+	bool tstamp64_en;
 } target_resource_config;
 
 /**
@@ -6040,57 +6041,66 @@ typedef enum {
 
 /**
  * Peer param enum abstracted from target
+ * @WMI_HOST_PEER_MIMO_PS_STATE: mimo powersave state
+ * @WMI_HOST_PEER_AMPDU: enable/disable AMPDU . initial value (enabled)
+ * @WMI_HOST_PEER_AUTHORIZE: authorize/unauthorize peer.
+ *                           initial value is unauthorized (0)
+ * @WMI_HOST_PEER_CHWIDTH: Peer channel bandwidth
+ * @WMI_HOST_PEER_NSS: peer NSS
+ * @WMI_HOST_PEER_USE_4ADDR: USE 4 ADDR
+ * @WMI_HOST_PEER_EXT_STATS_ENABLE: Enable extended peer stats
+ * @WMI_HOST_PEER_USE_FIXED_PWR: Use FIXED Pwr,
+ * @WMI_HOST_PEER_PARAM_FIXED_RATE: Set peer fixed rate
+ * @WMI_HOST_PEER_SET_MU_WHITELIST: Whitelist peer TIDs
+ * @WMI_HOST_PEER_MEMBERSHIP: set group membership status
+ * @WMI_HOST_PEER_USERPOS: User POS
+ * @WMI_HOST_PEER_CRIT_PROTO_HINT_ENABLED: Critical Protocol Hint enabled
+ * @WMI_HOST_PEER_TX_FAIL_CNT_THR: Tx Fail count threshold
+ * @WMI_HOST_PEER_SET_HW_RETRY_CTS2S: Set hardware retry CTS to self
+ * @WMI_HOST_PEER_IBSS_ATIM_WINDOW_LENGTH: IBSS ATIM window length
+ * @WMI_HOST_PEER_PHYMODE: Peer Phymode
+ * @WMI_HOST_PEER_SET_MAC_TX_RATE: Set MAC Tx rate
+ * @WMI_HOST_PEER_SET_DEFAULT_ROUTING: Set default Rx routing
+ * @WMI_HOST_PEER_SET_MIN_TX_RATE: Set Minimum T rate
+ * @WMI_HOST_PEER_NSS_VHT160: peer NSS for 160Mhz
+ * @WMI_HOST_PEER_NSS_VHT80_80: peer NSS for 80+80MHz
+ * @WMI_HOST_PEER_PARAM_SU_TXBF_SOUNDING_INTERVAL: Set SU sounding interval
+ * @WMI_HOST_PEER_PARAM_MU_TXBF_SOUNDING_INTERVAL: Set MU sounding interval
+ * @WMI_HOST_PEER_PARAM_TXBF_SOUNDING_ENABLE: Enable sounding interval set
+ * @WMI_HOST_PEER_PARAM_MU_ENABLE: Enable MU support
+ * @WMI_HOST_PEER_PARAM_OFDMA_ENABLE: Enable OFDMA support
+ * @WMI_HOST_PEER_PARAM_ENABLE_FT: Notify FT roam
  */
-typedef enum {
-	/** mimo powersave state */
+enum {
 	WMI_HOST_PEER_MIMO_PS_STATE = 0x1,
-	/** enable/disable AMPDU . initial value (enabled) */
-	WMI_HOST_PEER_AMPDU = 0x2,
-	/** authorize/unauthorize peer. initial value is unauthorized (0)  */
-	WMI_HOST_PEER_AUTHORIZE = 0x3,
-	/** peer channel bandwidth */
-	WMI_HOST_PEER_CHWIDTH = 0x4,
-	/** peer NSS */
-	WMI_HOST_PEER_NSS = 0x5,
-	/** USE 4 ADDR */
-	WMI_HOST_PEER_USE_4ADDR = 0x6,
-	/** Enable extended peer stats */
-	WMI_HOST_PEER_EXT_STATS_ENABLE = 0x7,
-	/*Use FIXED Pwr */
-	WMI_HOST_PEER_USE_FIXED_PWR = 0x8,
-	/* Set peer fixed rate */
-	WMI_HOST_PEER_PARAM_FIXED_RATE = 0x9,
-	/* Whitelist peer TIDs */
-	WMI_HOST_PEER_SET_MU_WHITELIST = 0xa,
-	/* set group membership status */
-	WMI_HOST_PEER_MEMBERSHIP = 0xb,
-	WMI_HOST_PEER_USERPOS = 0xc,
-	WMI_HOST_PEER_CRIT_PROTO_HINT_ENABLED = 0xd,
-	WMI_HOST_PEER_TX_FAIL_CNT_THR = 0xe,
-	WMI_HOST_PEER_SET_HW_RETRY_CTS2S = 0xf,
-	WMI_HOST_PEER_IBSS_ATIM_WINDOW_LENGTH = 0x10,
-	WMI_HOST_PEER_PHYMODE = 0x11,
-	WMI_HOST_PEER_SET_MAC_TX_RATE = 0x12,
-	/* Set default Rx routing */
-	WMI_HOST_PEER_SET_DEFAULT_ROUTING = 0x13,
-	WMI_HOST_PEER_SET_MIN_TX_RATE = 0x14,
-	/* peer NSS for 160Mhx */
-	WMI_HOST_PEER_NSS_VHT160 = 0x15,
-	/* peer NSS for 160Mhx */
-	WMI_HOST_PEER_NSS_VHT80_80 = 0x16,
-	/* Set SU sounding interval */
-	WMI_HOST_PEER_PARAM_SU_TXBF_SOUNDING_INTERVAL = 0x17,
-	/* Set MU sounding interval */
-	WMI_HOST_PEER_PARAM_MU_TXBF_SOUNDING_INTERVAL = 0x18,
-	/* Enable sounding interval set */
-	WMI_HOST_PEER_PARAM_TXBF_SOUNDING_ENABLE = 0x19,
-	/* Enable MU support */
-	WMI_HOST_PEER_PARAM_MU_ENABLE = 0x1a,
-	/* Enable OFDMA support */
-	WMI_HOST_PEER_PARAM_OFDMA_ENABLE = 0x1b,
-	/* Notify FT roam */
-	WMI_HOST_PEER_PARAM_ENABLE_FT = 0x1c,
-} PEER_PARAM_ENUM;
+	WMI_HOST_PEER_AMPDU,
+	WMI_HOST_PEER_AUTHORIZE,
+	WMI_HOST_PEER_CHWIDTH,
+	WMI_HOST_PEER_NSS,
+	WMI_HOST_PEER_USE_4ADDR,
+	WMI_HOST_PEER_EXT_STATS_ENABLE,
+	WMI_HOST_PEER_USE_FIXED_PWR,
+	WMI_HOST_PEER_PARAM_FIXED_RATE,
+	WMI_HOST_PEER_SET_MU_WHITELIST,
+	WMI_HOST_PEER_MEMBERSHIP,
+	WMI_HOST_PEER_USERPOS,
+	WMI_HOST_PEER_CRIT_PROTO_HINT_ENABLED,
+	WMI_HOST_PEER_TX_FAIL_CNT_THR,
+	WMI_HOST_PEER_SET_HW_RETRY_CTS2S,
+	WMI_HOST_PEER_IBSS_ATIM_WINDOW_LENGTH,
+	WMI_HOST_PEER_PHYMODE,
+	WMI_HOST_PEER_SET_MAC_TX_RATE,
+	WMI_HOST_PEER_SET_DEFAULT_ROUTING,
+	WMI_HOST_PEER_SET_MIN_TX_RATE,
+	WMI_HOST_PEER_NSS_VHT160,
+	WMI_HOST_PEER_NSS_VHT80_80,
+	WMI_HOST_PEER_PARAM_SU_TXBF_SOUNDING_INTERVAL,
+	WMI_HOST_PEER_PARAM_MU_TXBF_SOUNDING_INTERVAL,
+	WMI_HOST_PEER_PARAM_TXBF_SOUNDING_ENABLE,
+	WMI_HOST_PEER_PARAM_MU_ENABLE,
+	WMI_HOST_PEER_PARAM_OFDMA_ENABLE,
+	WMI_HOST_PEER_PARAM_ENABLE_FT,
+};
 #define WMI_HOST_PEER_MIMO_PS_NONE	0x0
 #define WMI_HOST_PEER_MIMO_PS_STATIC	0x1
 #define WMI_HOST_PEER_MIMO_PS_DYNAMIC	0x2
@@ -7363,6 +7373,7 @@ struct coex_config_params {
 #define WMI_HOST_PDEV_ID_0   0
 #define WMI_HOST_PDEV_ID_1   1
 #define WMI_HOST_PDEV_ID_2   2
+#define WMI_HOST_PDEV_ID_INVALID 0xFFFFFFFF
 
 #ifndef CMN_VDEV_MGR_TGT_IF_ENABLE
 /**

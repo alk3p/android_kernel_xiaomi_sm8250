@@ -26,10 +26,11 @@
 #include "qdf_nbuf.h"
 #ifdef CONFIG_MCL
 #include <cds_ieee80211_common.h>
-#else
-#include <linux/ieee80211.h>
 #endif
 #include "dp_rx_defrag.h"
+#ifdef FEATURE_WDS
+#include "dp_txrx_wds.h"
+#endif
 #include <enet.h>	/* LLC_SNAP_HDR_LEN */
 #include "qdf_net_types.h"
 
@@ -51,7 +52,7 @@ static inline bool dp_rx_mcast_echo_check(struct dp_soc *soc,
 					qdf_nbuf_t nbuf)
 {
 	struct dp_vdev *vdev = peer->vdev;
-	struct dp_ast_entry *ase;
+	struct dp_ast_entry *ase = NULL;
 	uint16_t sa_idx = 0;
 	uint8_t *data;
 
@@ -120,10 +121,11 @@ static inline bool dp_rx_mcast_echo_check(struct dp_soc *soc,
 				ase->is_mapped = TRUE;
 			}
 		}
-	} else
+	} else {
 		ase = dp_peer_ast_hash_find_by_pdevid(soc,
 						      &data[QDF_MAC_ADDR_SIZE],
 						      vdev->pdev->pdev_id);
+	}
 
 	if (ase) {
 
@@ -282,7 +284,7 @@ static uint32_t dp_rx_msdus_drop(struct dp_soc *soc, void *ring_desc,
 		}
 
 		qdf_nbuf_unmap_single(soc->osdev,
-				      rx_desc->nbuf, QDF_DMA_BIDIRECTIONAL);
+				      rx_desc->nbuf, QDF_DMA_FROM_DEVICE);
 
 		rx_desc->rx_buf_start = qdf_nbuf_data(rx_desc->nbuf);
 
@@ -681,16 +683,20 @@ dp_rx_null_q_desc_handle(struct dp_soc *soc, qdf_nbuf_t nbuf,
 	qdf_ether_header_t *eh;
 
 	qdf_nbuf_set_rx_chfrag_start(nbuf,
-			hal_rx_msdu_end_first_msdu_get(rx_tlv_hdr));
+				hal_rx_msdu_end_first_msdu_get(rx_tlv_hdr));
 	qdf_nbuf_set_rx_chfrag_end(nbuf,
-			hal_rx_msdu_end_last_msdu_get(rx_tlv_hdr));
+				   hal_rx_msdu_end_last_msdu_get(rx_tlv_hdr));
+	qdf_nbuf_set_da_mcbc(nbuf, hal_rx_msdu_end_da_is_mcbc_get(rx_tlv_hdr));
+	qdf_nbuf_set_da_valid(nbuf,
+			      hal_rx_msdu_end_da_is_valid_get(rx_tlv_hdr));
+	qdf_nbuf_set_sa_valid(nbuf,
+			      hal_rx_msdu_end_sa_is_valid_get(rx_tlv_hdr));
 
 	l2_hdr_offset = hal_rx_msdu_end_l3_hdr_padding_get(rx_tlv_hdr);
 	msdu_len = hal_rx_msdu_start_msdu_len_get(rx_tlv_hdr);
 	pkt_len = msdu_len + l2_hdr_offset + RX_PKT_TLVS_LEN;
 
-
-	if (!qdf_nbuf_get_ext_list(nbuf)) {
+	if (qdf_likely(!qdf_nbuf_is_frag(nbuf))) {
 		if (dp_rx_null_q_check_pkt_len_exception(soc, pkt_len))
 			goto drop_nbuf;
 
@@ -749,7 +755,7 @@ dp_rx_null_q_desc_handle(struct dp_soc *soc, qdf_nbuf_t nbuf,
 	 * Advance the packet start pointer by total size of
 	 * pre-header TLV's
 	 */
-	if (qdf_nbuf_get_ext_list(nbuf))
+	if (qdf_nbuf_is_frag(nbuf))
 		qdf_nbuf_pull_head(nbuf, RX_PKT_TLVS_LEN);
 	else
 		qdf_nbuf_pull_head(nbuf, (l2_hdr_offset + RX_PKT_TLVS_LEN));
@@ -778,12 +784,10 @@ dp_rx_null_q_desc_handle(struct dp_soc *soc, qdf_nbuf_t nbuf,
 		goto drop_nbuf;
 	}
 
-	if (!dp_wds_rx_policy_check(rx_tlv_hdr, vdev, peer,
-				hal_rx_msdu_end_da_is_mcbc_get(rx_tlv_hdr))) {
+	if (!dp_wds_rx_policy_check(rx_tlv_hdr, vdev, peer)) {
 		dp_err_rl("mcast Policy Check Drop pkt");
 		goto drop_nbuf;
 	}
-
 	/* WDS Source Port Learning */
 	if (qdf_likely(vdev->rx_decap_type == htt_cmn_pkt_type_ethernet &&
 		vdev->wds_enabled))
@@ -804,13 +808,6 @@ dp_rx_null_q_desc_handle(struct dp_soc *soc, qdf_nbuf_t nbuf,
 		qdf_nbuf_set_next(nbuf, NULL);
 		dp_rx_deliver_raw(vdev, nbuf, peer);
 	} else {
-		if (qdf_unlikely(peer->bss_peer)) {
-			dp_info_rl("received pkt with same src MAC");
-			DP_STATS_INC_PKT(peer, rx.mec_drop, 1,
-					 qdf_nbuf_len(nbuf));
-			goto drop_nbuf;
-		}
-
 		if (vdev->osif_rx) {
 			qdf_nbuf_set_next(nbuf, NULL);
 			DP_STATS_INC_PKT(peer, rx.to_stack, 1,
@@ -1389,7 +1386,7 @@ dp_rx_wbm_err_process(struct dp_soc *soc, void *hal_ring, uint32_t quota)
 		}
 
 		nbuf = rx_desc->nbuf;
-		qdf_nbuf_unmap_single(soc->osdev, nbuf,	QDF_DMA_BIDIRECTIONAL);
+		qdf_nbuf_unmap_single(soc->osdev, nbuf,	QDF_DMA_FROM_DEVICE);
 
 		/*
 		 * save the wbm desc info in nbuf TLV. We will need this
@@ -1553,6 +1550,26 @@ done:
 }
 
 /**
+ * dup_desc_dbg() - dump and assert if duplicate rx desc found
+ *
+ * @soc: core DP main context
+ * @rxdma_dst_ring_desc: void pointer to monitor link descriptor buf addr info
+ * @rx_desc: void pointer to rx descriptor
+ *
+ * Return: void
+ */
+static void dup_desc_dbg(struct dp_soc *soc,
+			 void *rxdma_dst_ring_desc,
+			 void *rx_desc)
+{
+	DP_STATS_INC(soc, rx.err.hal_rxdma_err_dup, 1);
+	dp_rx_dump_info_and_assert(soc,
+				   soc->rx_rel_ring.hal_srng,
+				   rxdma_dst_ring_desc,
+				   rx_desc);
+}
+
+/**
  * dp_rx_err_mpdu_pop() - extract the MSDU's from link descs
  *
  * @soc: core DP main context
@@ -1584,6 +1601,7 @@ dp_rx_err_mpdu_pop(struct dp_soc *soc, uint32_t mac_id,
 	uint8_t rxdma_error_code = 0;
 	uint8_t bm_action = HAL_BM_ACTION_PUT_IN_IDLE_LIST;
 	struct dp_pdev *pdev = dp_get_pdev_for_mac_id(soc, mac_id);
+	void *ring_desc;
 
 	msdu = 0;
 
@@ -1628,6 +1646,25 @@ dp_rx_err_mpdu_pop(struct dp_soc *soc, uint32_t mac_id,
 							msdu_list.sw_cookie[i]);
 					qdf_assert_always(rx_desc);
 					msdu = rx_desc->nbuf;
+					/*
+					 * this is a unlikely scenario
+					 * where the host is reaping
+					 * a descriptor which
+					 * it already reaped just a while ago
+					 * but is yet to replenish
+					 * it back to HW.
+					 * In this case host will dump
+					 * the last 128 descriptors
+					 * including the software descriptor
+					 * rx_desc and assert.
+					 */
+					ring_desc = rxdma_dst_ring_desc;
+					if (qdf_unlikely(!rx_desc->in_use)) {
+						dup_desc_dbg(soc,
+							     ring_desc,
+							     rx_desc);
+						continue;
+					}
 
 					qdf_nbuf_unmap_single(soc->osdev, msdu,
 						QDF_DMA_FROM_DEVICE);

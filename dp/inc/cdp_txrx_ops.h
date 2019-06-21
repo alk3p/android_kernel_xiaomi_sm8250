@@ -731,7 +731,7 @@ struct cdp_host_stats_ops {
 	void (*txrx_host_ce_stats)(struct cdp_vdev *vdev);
 
 	int (*txrx_stats_publish)(struct cdp_pdev *pdev,
-			void *buf);
+			struct cdp_stats_extd *buf);
 	/**
 	 * @brief Enable enhanced stats functionality.
 	 *
@@ -850,12 +850,12 @@ struct cdp_raw_ops {
 				struct cdp_raw_ast *raw_ast);
 };
 
-#ifdef CONFIG_WIN
+#ifdef PEER_FLOW_CONTROL
 struct cdp_pflow_ops {
 	uint32_t(*pflow_update_pdev_params)(void *,
 			enum _ol_ath_param_t, uint32_t, void *);
 };
-#endif /* CONFIG_WIN */
+#endif /* PEER_FLOW_CONTROL */
 
 #define LRO_IPV4_SEED_ARR_SZ 5
 #define LRO_IPV6_SEED_ARR_SZ 11
@@ -917,10 +917,10 @@ struct ol_if_ops {
 			   struct cdp_lro_hash_config *rx_offld_hash);
 	void (*update_dp_stats)(void *soc, void *stats, uint16_t id,
 			uint8_t type);
-#ifdef CONFIG_WIN
-	uint8_t (*rx_invalid_peer)(void *ctrl_pdev, void *msg);
-#else
+#ifdef CONFIG_MCL
 	uint8_t (*rx_invalid_peer)(uint8_t vdev_id, void *wh);
+#else
+	uint8_t (*rx_invalid_peer)(void *ctrl_pdev, void *msg);
 #endif
 	int  (*peer_map_event)(void *ol_soc_handle, uint16_t peer_id, uint16_t hw_peer_id,
 			uint8_t vdev_id, uint8_t *peer_mac_addr,
@@ -965,10 +965,12 @@ struct ol_if_ops {
 						uint8_t *dest_macaddr,
 						uint8_t *peer_macaddr,
 						uint32_t flags);
+
+	bool (*is_roam_inprogress)(uint32_t vdev_id);
 	/* TODO: Add any other control path calls required to OL_IF/WMA layer */
 };
 
-#ifndef CONFIG_WIN
+#ifdef CONFIG_MCL
 /* From here MCL specific OPs */
 /**
  * struct cdp_misc_ops - mcl ops not classified
@@ -986,6 +988,8 @@ struct ol_if_ops {
  * @runtime_resume:
  * @register_packetdump_cb:
  * @unregister_packetdump_cb:
+ * @pdev_reset_driver_del_ack:
+ * @vdev_set_driver_del_ack_enable:
  */
 struct cdp_misc_ops {
 	uint16_t (*set_ibss_vdev_heart_beat_timer)(struct cdp_vdev *vdev,
@@ -1023,6 +1027,12 @@ struct cdp_misc_ops {
 	void (*register_pktdump_cb)(ol_txrx_pktdump_cb tx_cb,
 				    ol_txrx_pktdump_cb rx_cb);
 	void (*unregister_pktdump_cb)(void);
+	void (*pdev_reset_driver_del_ack)(struct cdp_pdev *ppdev);
+	void (*vdev_set_driver_del_ack_enable)(uint8_t vdev_id,
+					       unsigned long rx_packets,
+					       uint32_t time_in_ms,
+					       uint32_t high_th,
+					       uint32_t low_th);
 };
 
 /**
@@ -1055,19 +1065,28 @@ struct cdp_pmf_ops {
 
 /**
  * struct cdp_cfg_ops - mcl configuration ops
- * @set_cfg_rx_fwd_disabled:
- * @set_cfg_packet_log_enabled:
- * @cfg_attach:
- * @vdev_rx_set_intrabss_fwd:
- * @is_rx_fwd_disabled:
- * @tx_set_is_mgmt_over_wmi_enabled:
- * @is_high_latency:
- * @set_flow_control_parameters:
- * @set_flow_steering:
- * @set_ptp_rx_opt_enabled:
- * @set_new_htt_msg_format:
- * @set_peer_unmap_conf_support:
- * @get_peer_unmap_conf_support:
+ * @set_cfg_rx_fwd_disabled: set rx_fwd_disabled flag
+ * @set_cfg_packet_log_enabled: set is_packet_log_enabled flag
+ * @cfg_attach: hardcode the configuration parameters
+ * @vdev_rx_set_intrabss_fwd: set disable_intrabss_fwd flag
+ * @is_rx_fwd_disabled: get the rx_fwd_disabled flag,
+ *                      1 enabled, 0 disabled.
+ * @tx_set_is_mgmt_over_wmi_enabled: set is_mgmt_over_wmi_enabled flag to
+ *                                   indicate that mgmt over wmi is enabled
+ *                                   or not,
+ *                                   1 for enabled, 0 for disable
+ * @is_high_latency: get device is high or low latency device,
+ *                   1 high latency bus, 0 low latency bus
+ * @set_flow_control_parameters: set flow control parameters
+ * @set_flow_steering: set flow_steering_enabled flag
+ * @set_ptp_rx_opt_enabled: set is_ptp_rx_opt_enabled flag
+ * @set_new_htt_msg_format: set new_htt_msg_format flag
+ * @set_peer_unmap_conf_support: set enable_peer_unmap_conf_support flag
+ * @get_peer_unmap_conf_support: get enable_peer_unmap_conf_support flag
+ * @set_tx_compl_tsf64: set enable_tx_compl_tsf64 flag,
+ *                      1 enabled, 0 disabled.
+ * @get_tx_compl_tsf64: get enable_tx_compl_tsf64 flag,
+ *                      1 enabled, 0 disabled.
  */
 struct cdp_cfg_ops {
 	void (*set_cfg_rx_fwd_disabled)(struct cdp_cfg *cfg_pdev,
@@ -1086,6 +1105,8 @@ struct cdp_cfg_ops {
 	void (*set_new_htt_msg_format)(uint8_t val);
 	void (*set_peer_unmap_conf_support)(bool val);
 	bool (*get_peer_unmap_conf_support)(void);
+	void (*set_tx_compl_tsf64)(bool val);
+	bool (*get_tx_compl_tsf64)(void);
 };
 
 /**
@@ -1317,7 +1338,7 @@ struct cdp_mob_stats_ops {
 	void (*clear_stats)(uint16_t bitmap);
 	int (*stats)(uint8_t vdev_id, char *buffer, unsigned buf_len);
 };
-#endif /* CONFIG_WIN */
+#endif /* CONFIG_MCL */
 
 #ifdef RECEIVE_OFFLOAD
 /**
@@ -1340,7 +1361,7 @@ struct cdp_ops {
 	struct cdp_wds_ops          *wds_ops;
 	struct cdp_raw_ops          *raw_ops;
 	struct cdp_pflow_ops        *pflow_ops;
-#ifndef CONFIG_WIN
+#ifdef CONFIG_MCL
 	struct cdp_misc_ops         *misc_ops;
 	struct cdp_cfg_ops          *cfg_ops;
 	struct cdp_flowctl_ops      *flowctl_ops;
@@ -1358,6 +1379,6 @@ struct cdp_ops {
 	struct cdp_mob_stats_ops    *mob_stats_ops;
 	struct cdp_tx_delay_ops     *delay_ops;
 	struct cdp_pmf_ops          *pmf_ops;
-#endif /* CONFIG_WIN */
+#endif
 };
 #endif

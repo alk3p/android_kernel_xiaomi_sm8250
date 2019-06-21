@@ -673,7 +673,7 @@ static struct CE_attr host_ce_config_wlan_qca8074[] = {
 	/* host->target HTC control and raw streams */
 	{ /* CE0 */ CE_ATTR_FLAGS, 0, 16, 2048, 0, NULL,},
 	/* target->host HTT + HTC control */
-	{ /* CE1 */ CE_ATTR_FLAGS, 0, 0,  2048, 128, NULL,},
+	{ /* CE1 */ CE_ATTR_FLAGS, 0, 0,  2048, 512, NULL,},
 	/* target->host WMI */
 	{ /* CE2 */ CE_ATTR_FLAGS, 0, 0,  WMI_MAX_BUF_SIZE, 512, NULL,},
 	/* host->target WMI (mac0) */
@@ -693,7 +693,7 @@ static struct CE_attr host_ce_config_wlan_qca8074[] = {
 	/* host->target WMI (mac2) */
 	{ /* CE9 */ CE_ATTR_FLAGS, 0, 32,  WMI_MAX_BUF_SIZE, 0, NULL,},
 	/* target->host HTT */
-	{ /* CE10 */ CE_ATTR_FLAGS, 0, 0,  2048, 512, NULL,},
+	{ /* CE10 unused */ 0, 0, 0, 0, 0, NULL,},
 	{ /* CE11 unused */ 0, 0, 0, 0, 0, NULL,},
 };
 
@@ -722,7 +722,7 @@ static struct CE_pipe_config target_ce_config_wlan_qca8074[] = {
 	/* CE9 host->target WMI (mac2) */
 	{ /* CE9 */ 9, PIPEDIR_OUT,  32, WMI_MAX_BUF_SIZE, 8192, 0,},
 	/* CE10 target->host HTT */
-	{ /* CE10 */ 10, PIPEDIR_INOUT_H2H,  0, 0, 0, 0,},
+	{/* CE10 unused */10, PIPEDIR_NONE, 0, 0, 0, 0,},
 	{/* CE11 unused */11, PIPEDIR_NONE, 0, 0, 0, 0,},
 };
 
@@ -730,7 +730,7 @@ static struct CE_attr host_ce_config_wlan_qca8074_pci[] = {
 	/* host->target HTC control and raw streams */
 	{ /* CE0 */ EPPING_CE_FLAGS_POLL, 0, 16, 2048, 0, NULL,},
 	/* target->host HTT + HTC control */
-	{ /* CE1 */ EPPING_CE_FLAGS_POLL, 0, 0,  2048, 128, NULL,},
+	{ /* CE1 */ EPPING_CE_FLAGS_POLL, 0, 0,  2048, 512, NULL,},
 	/* target->host WMI */
 	{ /* CE2 */ EPPING_CE_FLAGS_POLL, 0, 0,  2048, 256, NULL,},
 	/* host->target WMI (mac0) */
@@ -749,7 +749,7 @@ static struct CE_attr host_ce_config_wlan_qca8074_pci[] = {
 	/* host->target WMI (mac2) */
 	{ /* CE9 */ EPPING_CE_FLAGS_POLL, 0, 32,  2048, 0, NULL,},
 	/* target->host HTT */
-	{ /* CE10 */ CE_ATTR_FLAGS, 0, 0,  2048, 512, NULL,},
+	{ /* CE10 unused */ 0, 0, 0, 0, 0, NULL,},
 	{ /* CE11 unused */ 0, 0, 0, 0, 0, NULL,},
 };
 

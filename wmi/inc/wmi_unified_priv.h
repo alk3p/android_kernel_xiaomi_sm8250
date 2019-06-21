@@ -60,6 +60,10 @@
 #include "wmi_unified_atf_param.h"
 #endif
 
+#ifdef WLAN_FEATURE_INTEROP_ISSUES_AP
+#include <wlan_interop_issues_ap_public_structs.h>
+#endif
+
 #define WMI_UNIFIED_MAX_EVENT 0x100
 
 #ifdef WMI_EXT_DBG
@@ -346,6 +350,12 @@ QDF_STATUS (*send_d0wow_enable_cmd)(wmi_unified_t wmi_handle,
 				uint8_t mac_id);
 QDF_STATUS (*send_d0wow_disable_cmd)(wmi_unified_t wmi_handle,
 				uint8_t mac_id);
+#endif
+
+#ifdef FEATURE_BLACKLIST_MGR
+QDF_STATUS
+(*send_reject_ap_list_cmd)(struct wmi_unified *wmi_handle,
+			   struct reject_ap_params *reject_params);
 #endif
 
 QDF_STATUS (*send_wow_enable_cmd)(wmi_unified_t wmi_handle,
@@ -1487,6 +1497,15 @@ QDF_STATUS
 					struct p2p_set_mac_filter_evt *param);
 #endif
 
+#ifdef WLAN_FEATURE_INTEROP_ISSUES_AP
+QDF_STATUS
+(*extract_interop_issues_ap_ev_param)(wmi_unified_t wmi_handle, void *evt_buf,
+				  struct wlan_interop_issues_ap_event *param);
+QDF_STATUS
+(*send_set_rap_ps_cmd)(wmi_unified_t wmi_handle,
+		       struct wlan_interop_issues_ap_info *interop_issues_ap);
+#endif
+
 QDF_STATUS (*extract_peer_sta_ps_statechange_ev)(wmi_unified_t wmi_handle,
 	void *evt_buf, wmi_host_peer_sta_ps_statechange_event *ev);
 
@@ -1718,6 +1737,12 @@ QDF_STATUS (*extract_reg_ch_avoid_event)(wmi_unified_t wmi_handle,
 		uint8_t *evt_buf,
 		struct ch_avoid_ind_type *ch_avoid_event,
 		uint32_t len);
+
+#ifdef WLAN_SUPPORT_RF_CHARACTERIZATION
+QDF_STATUS (*extract_rf_characterization_entries)(wmi_unified_t wmi_handle,
+	uint8_t *evt_buf,
+	struct wlan_psoc_host_rf_characterization_entry *rf_characterization_entries);
+#endif
 
 QDF_STATUS (*extract_chainmask_tables)(wmi_unified_t wmi_handle,
 		uint8_t *evt_buf,
@@ -2053,8 +2078,6 @@ struct wmi_soc {
 	/* WMI service bitmap received from target */
 	uint32_t *wmi_service_bitmap;
 	uint32_t *wmi_ext_service_bitmap;
-	uint32_t *pdev_param;
-	uint32_t *vdev_param;
 	uint32_t services[wmi_services_max];
 	uint16_t wmi_max_cmds;
 	uint32_t soc_idx;
@@ -2164,6 +2187,15 @@ void wmi_p2p_listen_offload_attach_tlv(wmi_unified_t wmi_handle)
 void wmi_p2p_attach_tlv(wmi_unified_t wmi_handle);
 #else
 static inline void wmi_p2p_attach_tlv(struct wmi_unified *wmi_handle)
+{
+}
+#endif
+
+#ifdef WLAN_FEATURE_INTEROP_ISSUES_AP
+void wmi_interop_issues_ap_attach_tlv(wmi_unified_t wmi_handle);
+#else
+static inline void
+wmi_interop_issues_ap_attach_tlv(struct wmi_unified *wmi_handle)
 {
 }
 #endif
@@ -2298,6 +2330,15 @@ void wmi_policy_mgr_attach_tlv(struct wmi_unified *wmi_handle);
 #else
 static inline
 void wmi_policy_mgr_attach_tlv(struct wmi_unified *wmi_handle)
+{
+}
+#endif
+
+#ifdef FEATURE_BLACKLIST_MGR
+void wmi_blacklist_mgr_attach_tlv(struct wmi_unified *wmi_handle);
+#else
+static inline
+void wmi_blacklist_mgr_attach_tlv(struct wmi_unified *wmi_handle)
 {
 }
 #endif

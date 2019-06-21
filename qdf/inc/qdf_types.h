@@ -269,6 +269,7 @@ typedef bool (*qdf_irqlocked_func_t)(void *);
 
 /**
  * typedef enum QDF_MODULE_ID  - Debug category level
+ * @QDF_MODULE_ID_MIN: The smallest/starting module id
  * @QDF_MODULE_ID_TDLS: TDLS
  * @QDF_MODULE_ID_ACS: auto channel selection
  * @QDF_MODULE_ID_SCAN_SM: scan state machine
@@ -363,11 +364,15 @@ typedef bool (*qdf_irqlocked_func_t)(void *);
  * @QDF_MODULE_ID_SM_ENGINE: SM engine module ID
  * @QDF_MODULE_ID_CMN_MLME: CMN MLME module ID
  * @QDF_MODULE_ID_CFR: CFR module ID
+ * @QDF_MODULE_ID_TX_CAPTURE: Tx capture enhancement feature ID
+ * @QDF_MODULE_ID_INTEROP_ISSUES_AP: interop issues ap module ID
+ * @QDF_MODULE_ID_BLACKLIST_MGR: Blacklist Manager module
  * @QDF_MODULE_ID_ANY: anything
  * @QDF_MODULE_ID_MAX: Max place holder module ID
  */
 typedef enum {
-	QDF_MODULE_ID_TDLS      = 0,
+	QDF_MODULE_ID_MIN       = 0,
+	QDF_MODULE_ID_TDLS      = QDF_MODULE_ID_MIN,
 	QDF_MODULE_ID_ACS,
 	QDF_MODULE_ID_SCAN_SM,
 	QDF_MODULE_ID_SCANENTRY,
@@ -475,6 +480,9 @@ typedef enum {
 	QDF_MODULE_ID_CMN_MLME,
 	QDF_MODULE_ID_BSSCOLOR,
 	QDF_MODULE_ID_CFR,
+	QDF_MODULE_ID_TX_CAPTURE,
+	QDF_MODULE_ID_INTEROP_ISSUES_AP,
+	QDF_MODULE_ID_BLACKLIST_MGR,
 	QDF_MODULE_ID_ANY,
 	QDF_MODULE_ID_MAX,
 } QDF_MODULE_ID;

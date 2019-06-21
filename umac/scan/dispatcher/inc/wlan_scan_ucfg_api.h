@@ -531,16 +531,6 @@ QDF_STATUS ucfg_scan_register_bcn_cb(struct wlan_objmgr_psoc *psoc,
 QDF_STATUS ucfg_scan_update_user_config(struct wlan_objmgr_psoc *psoc,
 	struct scan_user_cfg *scan_cfg);
 
-/**
- * ucfg_scan_update_roam_params() - Store/Update the roam params
- * @psoc: psoc
- * @roam_params: roam params
- *
- * Return: QDF_STATUS
- */
-QDF_STATUS ucfg_scan_update_roam_params(struct wlan_objmgr_psoc *psoc,
-	struct roam_filter_params *roam_params);
-
 /*
  * ucfg_scan_init() - Scan module initialization API
  *
@@ -804,6 +794,19 @@ void ucfg_scan_cfg_set_dfs_chan_scan_allowed(struct wlan_objmgr_psoc *psoc,
  * Return: true if wake lock in user scan is required
  */
 bool ucfg_scan_wake_lock_in_user_scan(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * ucfg_scan_cfg_honour_nl_scan_policy_flags() - API to get nl scan policy
+ * flags honoured.
+ * @psoc: pointer to psoc object
+ *
+ * Return: nl scan flags is honoured or not
+ */
+static inline
+bool ucfg_scan_cfg_honour_nl_scan_policy_flags(struct wlan_objmgr_psoc *psoc)
+{
+	return wlan_scan_cfg_honour_nl_scan_policy_flags(psoc);
+}
 
 /**
  * ucfg_scan_cfg_get_conc_max_resttime() - API to get max rest time

@@ -35,6 +35,64 @@
 /* Macro For NYSM value received in VHT TLV */
 #define VHT_SGI_NYSM 3
 
+/* PPDU STATS CFG */
+#define DP_PPDU_STATS_CFG_ALL 0xFFFF
+
+/* PPDU stats mask sent to FW to enable enhanced stats */
+#define DP_PPDU_STATS_CFG_ENH_STATS 0xE67
+/* PPDU stats mask sent to FW to support debug sniffer feature */
+#define DP_PPDU_STATS_CFG_SNIFFER 0x2FFF
+/* PPDU stats mask sent to FW to support BPR feature*/
+#define DP_PPDU_STATS_CFG_BPR 0x2000
+/* PPDU stats mask sent to FW to support BPR and enhanced stats feature */
+#define DP_PPDU_STATS_CFG_BPR_ENH (DP_PPDU_STATS_CFG_BPR | \
+				   DP_PPDU_STATS_CFG_ENH_STATS)
+/* PPDU stats mask sent to FW to support BPR and pcktlog stats feature */
+#define DP_PPDU_STATS_CFG_BPR_PKTLOG (DP_PPDU_STATS_CFG_BPR | \
+				      DP_PPDU_TXLITE_STATS_BITMASK_CFG)
+
+/**
+ * Bitmap of HTT PPDU TLV types for Default mode
+ */
+#define HTT_PPDU_DEFAULT_TLV_BITMAP \
+	(1 << HTT_PPDU_STATS_COMMON_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_COMMON_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_RATE_TLV) | \
+	(1 << HTT_PPDU_STATS_SCH_CMD_STATUS_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_COMPLTN_COMMON_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_COMPLTN_ACK_BA_STATUS_TLV)
+
+/**
+ * Bitmap of HTT PPDU TLV types for Sniffer mode bitmap 64
+ */
+#define HTT_PPDU_SNIFFER_AMPDU_TLV_BITMAP_64 \
+	((1 << HTT_PPDU_STATS_COMMON_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_COMMON_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_RATE_TLV) | \
+	(1 << HTT_PPDU_STATS_SCH_CMD_STATUS_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_COMPLTN_COMMON_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_COMPLTN_ACK_BA_STATUS_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_COMPLTN_BA_BITMAP_64_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_MPDU_ENQ_BITMAP_64_TLV))
+
+/**
+ * Bitmap of HTT PPDU TLV types for Sniffer mode bitmap 256
+ */
+#define HTT_PPDU_SNIFFER_AMPDU_TLV_BITMAP_256 \
+	((1 << HTT_PPDU_STATS_COMMON_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_COMMON_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_RATE_TLV) | \
+	(1 << HTT_PPDU_STATS_SCH_CMD_STATUS_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_COMPLTN_COMMON_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_COMPLTN_ACK_BA_STATUS_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_COMPLTN_BA_BITMAP_256_TLV) | \
+	(1 << HTT_PPDU_STATS_USR_MPDU_ENQ_BITMAP_256_TLV))
+
+#ifdef WLAN_TX_PKT_CAPTURE_ENH
+extern uint8_t
+dp_cpu_ring_map[DP_NSS_CPU_RING_MAP_MAX][WLAN_CFG_INT_NUM_CONTEXTS];
+#endif
+
 #if DP_PRINT_ENABLE
 #include <stdarg.h>       /* va_list */
 #include <qdf_types.h> /* qdf_vprint */
@@ -70,10 +128,6 @@ while (0)
 #endif /* DP_PRINT_ENABLE */
 
 #define DP_TRACE(LVL, fmt, args ...)                             \
-	QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_##LVL,       \
-		fmt, ## args)
-
-#define DP_TRACE_STATS(LVL, fmt, args ...)                             \
 	QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_##LVL,       \
 		fmt, ## args)
 
@@ -146,6 +200,18 @@ while (0)
 	_handle_a->stats._field = _handle_b->stats._field; \
 }
 
+#else
+#define DP_STATS_INC(_handle, _field, _delta)
+#define DP_STATS_INCC(_handle, _field, _delta, _cond)
+#define DP_STATS_DEC(_handle, _field, _delta)
+#define DP_STATS_UPD(_handle, _field, _delta)
+#define DP_STATS_INC_PKT(_handle, _field, _count, _bytes)
+#define DP_STATS_INCC_PKT(_handle, _field, _count, _bytes, _cond)
+#define DP_STATS_AGGR(_handle_a, _handle_b, _field)
+#define DP_STATS_AGGR_PKT(_handle_a, _handle_b, _field)
+#endif
+
+#ifdef ENABLE_DP_HIST_STATS
 #define DP_HIST_INIT() \
 	uint32_t num_of_packets[MAX_PDEV_CNT] = {0};
 
@@ -235,14 +301,6 @@ while (0)
 
 
 #else
-#define DP_STATS_INC(_handle, _field, _delta)
-#define DP_STATS_INCC(_handle, _field, _delta, _cond)
-#define DP_STATS_DEC(_handle, _field, _delta)
-#define DP_STATS_UPD(_handle, _field, _delta)
-#define DP_STATS_INC_PKT(_handle, _field, _count, _bytes)
-#define DP_STATS_INCC_PKT(_handle, _field, _count, _bytes, _cond)
-#define DP_STATS_AGGR(_handle_a, _handle_b, _field)
-#define DP_STATS_AGGR_PKT(_handle_a, _handle_b, _field)
 #define DP_HIST_INIT()
 #define DP_HIST_PACKET_COUNT_INC(_pdev_id)
 #define DP_TX_HISTOGRAM_UPDATE(_pdev, _p_cntrs)
@@ -318,6 +376,8 @@ static inline void dp_update_pdev_stats(struct dp_pdev *tgtobj,
 		srcobj->tx.nawds_mcast.bytes;
 	tgtobj->stats.tx.nawds_mcast_drop +=
 		srcobj->tx.nawds_mcast_drop;
+	tgtobj->stats.tx.num_ppdu_cookie_valid +=
+		srcobj->tx.num_ppdu_cookie_valid;
 	tgtobj->stats.tx.tx_failed += srcobj->tx.tx_failed;
 	tgtobj->stats.tx.ofdma += srcobj->tx.ofdma;
 	tgtobj->stats.tx.stbc += srcobj->tx.stbc;
@@ -424,6 +484,7 @@ static inline void dp_update_pdev_ingress_stats(struct dp_pdev *tgtobj,
 	DP_STATS_AGGR(tgtobj, srcobj, tx_i.dropped.headroom_insufficient);
 	DP_STATS_AGGR(tgtobj, srcobj, tx_i.cce_classified);
 	DP_STATS_AGGR(tgtobj, srcobj, tx_i.cce_classified_raw);
+	DP_STATS_AGGR_PKT(tgtobj, srcobj, tx_i.sniffer_rcvd);
 	DP_STATS_AGGR(tgtobj, srcobj, tx_i.mesh.exception_fw);
 	DP_STATS_AGGR(tgtobj, srcobj, tx_i.mesh.completion_fw);
 
@@ -504,6 +565,8 @@ static inline void dp_update_vdev_stats(struct cdp_vdev_stats *tgtobj,
 		srcobj->stats.tx.nawds_mcast.bytes;
 	tgtobj->tx.nawds_mcast_drop +=
 		srcobj->stats.tx.nawds_mcast_drop;
+	tgtobj->tx.num_ppdu_cookie_valid +=
+		srcobj->stats.tx.num_ppdu_cookie_valid;
 	tgtobj->tx.tx_failed += srcobj->stats.tx.tx_failed;
 	tgtobj->tx.ofdma += srcobj->stats.tx.ofdma;
 	tgtobj->tx.stbc += srcobj->stats.tx.stbc;
@@ -676,6 +739,7 @@ extern void dp_peer_find_hash_add(struct dp_soc *soc, struct dp_peer *peer);
 extern void dp_peer_find_hash_remove(struct dp_soc *soc, struct dp_peer *peer);
 extern void dp_peer_find_hash_erase(struct dp_soc *soc);
 extern void dp_peer_rx_init(struct dp_pdev *pdev, struct dp_peer *peer);
+void dp_peer_tx_init(struct dp_pdev *pdev, struct dp_peer *peer);
 extern void dp_peer_cleanup(struct dp_vdev *vdev, struct dp_peer *peer);
 extern void dp_peer_rx_cleanup(struct dp_vdev *vdev, struct dp_peer *peer);
 extern void dp_peer_unref_delete(void *peer_handle);
@@ -707,6 +771,12 @@ void dp_local_peer_id_pool_init(struct dp_pdev *pdev);
 void dp_local_peer_id_alloc(struct dp_pdev *pdev, struct dp_peer *peer);
 void dp_local_peer_id_free(struct dp_pdev *pdev, struct dp_peer *peer);
 #else
+static inline
+QDF_STATUS dp_get_vdevid(void *peer_handle, uint8_t *vdev_id)
+{
+	return QDF_STATUS_E_NOSUPPORT;
+}
+
 static inline void dp_local_peer_id_pool_init(struct dp_pdev *pdev)
 {
 }
@@ -753,7 +823,14 @@ extern QDF_STATUS dp_reo_send_cmd(struct dp_soc *soc,
 	void (*callback_fn), void *data);
 
 extern void dp_reo_cmdlist_destroy(struct dp_soc *soc);
-extern void dp_reo_status_ring_handler(struct dp_soc *soc);
+
+/**
+ * dp_reo_status_ring_handler - Handler for REO Status ring
+ * @soc: DP Soc handle
+ *
+ * Returns: Number of descriptors reaped
+ */
+uint32_t dp_reo_status_ring_handler(struct dp_soc *soc);
 void dp_aggregate_vdev_stats(struct dp_vdev *vdev,
 			     struct cdp_vdev_stats *vdev_stats);
 void dp_rx_tid_stats_cb(struct dp_soc *soc, void *cb_ctxt,
@@ -787,10 +864,153 @@ uint32_t dp_pdev_tid_stats_display(void *pdev_handle,
 			enum _ol_ath_param_t param, uint32_t value, void *buff);
 #endif
 
+/**
+ * dp_update_delay_stats() - Update delay statistics in structure
+ *                              and fill min, max and avg delay
+ * @pdev: pdev handle
+ * @delay: delay in ms
+ * @tid: tid value
+ * @mode: type of tx delay mode
+ * @ring id: ring number
+ *
+ * Return: none
+ */
 void dp_update_delay_stats(struct dp_pdev *pdev, uint32_t delay,
-			   uint8_t tid, uint8_t mode);
+			   uint8_t tid, uint8_t mode, uint8_t ring_id);
+
+/**
+ * dp_print_ring_stats(): Print tail and head pointer
+ * @pdev: DP_PDEV handle
+ *
+ * Return:void
+ */
+void dp_print_ring_stats(struct dp_pdev *pdev);
+
+/**
+ * dp_print_pdev_cfg_params() - Print the pdev cfg parameters
+ * @pdev_handle: DP pdev handle
+ *
+ * Return - void
+ */
+void dp_print_pdev_cfg_params(struct dp_pdev *pdev);
+
+/**
+ * dp_print_soc_cfg_params()- Dump soc wlan config parameters
+ * @soc_handle: Soc handle
+ *
+ * Return: void
+ */
+void dp_print_soc_cfg_params(struct dp_soc *soc);
+
+/**
+ * dp_srng_get_str_from_ring_type() - Return string name for a ring
+ * @ring_type: Ring
+ *
+ * Return: char const pointer
+ */
+const
+char *dp_srng_get_str_from_hal_ring_type(enum hal_ring_type ring_type);
 
 /*
+ * dp_txrx_path_stats() - Function to display dump stats
+ * @soc - soc handle
+ *
+ * return: none
+ */
+void dp_txrx_path_stats(struct dp_soc *soc);
+
+/*
+ * dp_print_per_ring_stats(): Packet count per ring
+ * @soc - soc handle
+ *
+ * Return - None
+ */
+void dp_print_per_ring_stats(struct dp_soc *soc);
+
+/**
+ * dp_aggregate_pdev_stats(): Consolidate stats at PDEV level
+ * @pdev: DP PDEV handle
+ *
+ * return: void
+ */
+void dp_aggregate_pdev_stats(struct dp_pdev *pdev);
+
+/**
+ * dp_print_rx_rates(): Print Rx rate stats
+ * @vdev: DP_VDEV handle
+ *
+ * Return:void
+ */
+void dp_print_rx_rates(struct dp_vdev *vdev);
+
+/**
+ * dp_print_tx_rates(): Print tx rates
+ * @vdev: DP_VDEV handle
+ *
+ * Return:void
+ */
+void dp_print_tx_rates(struct dp_vdev *vdev);
+
+/**
+ * dp_print_peer_stats():print peer stats
+ * @peer: DP_PEER handle
+ *
+ * return void
+ */
+void dp_print_peer_stats(struct dp_peer *peer);
+
+/**
+ * dp_print_pdev_tx_stats(): Print Pdev level TX stats
+ * @pdev: DP_PDEV Handle
+ *
+ * Return:void
+ */
+void
+dp_print_pdev_tx_stats(struct dp_pdev *pdev);
+
+/**
+ * dp_print_pdev_rx_stats(): Print Pdev level RX stats
+ * @pdev: DP_PDEV Handle
+ *
+ * Return: void
+ */
+void
+dp_print_pdev_rx_stats(struct dp_pdev *pdev);
+
+/**
+ * dp_print_pdev_rx_mon_stats(): Print Pdev level RX monitor stats
+ * @pdev: DP_PDEV Handle
+ *
+ * Return: void
+ */
+void
+dp_print_pdev_rx_mon_stats(struct dp_pdev *pdev);
+
+/**
+ * dp_print_soc_tx_stats(): Print SOC level  stats
+ * @soc DP_SOC Handle
+ *
+ * Return: void
+ */
+void dp_print_soc_tx_stats(struct dp_soc *soc);
+
+/**
+ * dp_print_soc_interrupt_stats() - Print interrupt stats for the soc
+ * @soc: dp_soc handle
+ *
+ * Return: None
+ */
+void dp_print_soc_interrupt_stats(struct dp_soc *soc);
+
+/**
+ * dp_print_soc_rx_stats: Print SOC level Rx stats
+ * @soc: DP_SOC Handle
+ *
+ * Return:void
+ */
+void dp_print_soc_rx_stats(struct dp_soc *soc);
+
+/**
  * dp_get_mac_id_for_pdev() -  Return mac corresponding to pdev for mac
  *
  * @mac_id: MAC id
@@ -836,6 +1056,30 @@ static inline int dp_get_mac_id_for_mac(struct dp_soc *soc, uint32_t mac_id)
 }
 
 bool dp_is_soc_reinit(struct dp_soc *soc);
+
+/*
+ * dp_is_subtype_data() - check if the frame subtype is data
+ *
+ * @frame_ctrl: Frame control field
+ *
+ * check the frame control field and verify if the packet
+ * is a data packet.
+ *
+ * Return: true or false
+ */
+static inline bool dp_is_subtype_data(uint16_t frame_ctrl)
+{
+	if (((qdf_cpu_to_le16(frame_ctrl) & QDF_IEEE80211_FC0_TYPE_MASK) ==
+	    QDF_IEEE80211_FC0_TYPE_DATA) &&
+	    (((qdf_cpu_to_le16(frame_ctrl) & QDF_IEEE80211_FC0_SUBTYPE_MASK) ==
+	    QDF_IEEE80211_FC0_SUBTYPE_DATA) ||
+	    ((qdf_cpu_to_le16(frame_ctrl) & QDF_IEEE80211_FC0_SUBTYPE_MASK) ==
+	    QDF_IEEE80211_FC0_SUBTYPE_QOS))) {
+		return true;
+	}
+
+	return false;
+}
 
 #ifdef WDI_EVENT_ENABLE
 QDF_STATUS dp_h2t_cfg_stats_msg_send(struct dp_pdev *pdev,
@@ -973,4 +1217,57 @@ void dp_pdev_print_delay_stats(struct dp_pdev *pdev);
  */
 void dp_pdev_print_tid_stats(struct dp_pdev *pdev);
 #endif /* CONFIG_WIN */
+
+void dp_soc_set_txrx_ring_map(struct dp_soc *soc);
+
+#ifndef WLAN_TX_PKT_CAPTURE_ENH
+/**
+ * dp_tx_ppdu_stats_attach - Initialize Tx PPDU stats and enhanced capture
+ * @pdev: DP PDEV
+ *
+ * Return: none
+ */
+static inline void dp_tx_ppdu_stats_attach(struct dp_pdev *pdev)
+{
+}
+
+/**
+ * dp_tx_ppdu_stats_detach - Cleanup Tx PPDU stats and enhanced capture
+ * @pdev: DP PDEV
+ *
+ * Return: none
+ */
+static inline void dp_tx_ppdu_stats_detach(struct dp_pdev *pdev)
+{
+}
+
+/**
+ * dp_tx_ppdu_stats_process - Deferred PPDU stats handler
+ * @context: Opaque work context (PDEV)
+ *
+ * Return: none
+ */
+static  inline void dp_tx_ppdu_stats_process(void *context)
+{
+}
+
+/**
+ * dp_tx_add_to_comp_queue() - add completion msdu to queue
+ * @soc: DP Soc handle
+ * @tx_desc: software Tx descriptor
+ * @ts : Tx completion status from HAL/HTT descriptor
+ * @peer: DP peer
+ *
+ * Return: none
+ */
+static inline
+QDF_STATUS dp_tx_add_to_comp_queue(struct dp_soc *soc,
+				   struct dp_tx_desc_s *desc,
+				   struct hal_tx_completion_status *ts,
+				   struct dp_peer *peer)
+{
+	return QDF_STATUS_E_FAILURE;
+}
+#endif
+
 #endif /* #ifndef _DP_INTERNAL_H_ */

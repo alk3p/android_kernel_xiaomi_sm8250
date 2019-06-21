@@ -466,13 +466,11 @@ static inline void hal_rx_mpdu_desc_info_get(void *desc_addr,
 				struct hal_rx_mpdu_desc_info *mpdu_desc_info)
 {
 	struct reo_destination_ring *reo_dst_ring;
-	uint32_t mpdu_info[NUM_OF_DWORDS_RX_MPDU_DESC_INFO];
+	uint32_t *mpdu_info;
 
 	reo_dst_ring = (struct reo_destination_ring *) desc_addr;
 
-	qdf_mem_copy(&mpdu_info,
-			(const void *)&reo_dst_ring->rx_mpdu_desc_info_details,
-			sizeof(struct rx_mpdu_desc_info));
+	mpdu_info = (uint32_t *)&reo_dst_ring->rx_mpdu_desc_info_details;
 
 	mpdu_desc_info->msdu_count = HAL_RX_MPDU_MSDU_COUNT_GET(mpdu_info);
 	mpdu_desc_info->mpdu_seq = HAL_RX_MPDU_SEQUENCE_NUMBER_GET(mpdu_info);
@@ -498,14 +496,11 @@ static inline void hal_rx_msdu_desc_info_get(void *desc_addr,
 			       struct hal_rx_msdu_desc_info *msdu_desc_info)
 {
 	struct reo_destination_ring *reo_dst_ring;
-	uint32_t msdu_info[NUM_OF_DWORDS_RX_MSDU_DESC_INFO];
+	uint32_t *msdu_info;
 
 	reo_dst_ring = (struct reo_destination_ring *) desc_addr;
 
-	qdf_mem_copy(&msdu_info,
-			(const void *)&reo_dst_ring->rx_msdu_desc_info_details,
-			sizeof(struct rx_msdu_desc_info));
-
+	msdu_info = (uint32_t *)&reo_dst_ring->rx_msdu_desc_info_details;
 	msdu_desc_info->msdu_flags = HAL_RX_MSDU_FLAGS_GET(msdu_info);
 	msdu_desc_info->msdu_len = HAL_RX_MSDU_PKT_LENGTH_GET(msdu_info);
 }
@@ -1941,6 +1936,8 @@ struct hal_rx_msdu_list {
 	struct hal_rx_msdu_desc_info msdu_info[HAL_RX_NUM_MSDU_DESC];
 	uint32_t sw_cookie[HAL_RX_NUM_MSDU_DESC];
 	uint8_t rbm[HAL_RX_NUM_MSDU_DESC];
+	/* physical address of the msdu */
+	uint64_t paddr[HAL_RX_NUM_MSDU_DESC];
 };
 
 struct hal_buf_info {
@@ -2038,8 +2035,12 @@ static inline void hal_rx_msdu_list_get(struct hal_soc *hal_soc,
 		msdu_list->sw_cookie[i] =
 			 HAL_RX_BUF_COOKIE_GET(
 				&msdu_details[i].buffer_addr_info_details);
-		 msdu_list->rbm[i] = HAL_RX_BUF_RBM_GET(
+		msdu_list->rbm[i] = HAL_RX_BUF_RBM_GET(
 				&msdu_details[i].buffer_addr_info_details);
+		msdu_list->paddr[i] = HAL_RX_BUFFER_ADDR_31_0_GET(
+			   &msdu_details[i].buffer_addr_info_details) |
+			   (uint64_t)HAL_RX_BUFFER_ADDR_39_32_GET(
+			   &msdu_details[i].buffer_addr_info_details) << 32;
 		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_DEBUG,
 			"[%s][%d] i=%d sw_cookie=%d",
 			__func__, __LINE__, i, msdu_list->sw_cookie[i]);
@@ -2111,6 +2112,11 @@ enum hal_rx_reo_buf_type {
 		(REO_DESTINATION_RING_7_REO_DEST_BUFFER_TYPE_OFFSET >> 2))) & \
 		REO_DESTINATION_RING_7_REO_DEST_BUFFER_TYPE_MASK) >> \
 		REO_DESTINATION_RING_7_REO_DEST_BUFFER_TYPE_LSB)
+
+#define HAL_RX_REO_QUEUE_NUMBER_GET(reo_desc) (((*(((uint32_t *)reo_desc) + \
+		(REO_DESTINATION_RING_7_RECEIVE_QUEUE_NUMBER_OFFSET >> 2))) & \
+		REO_DESTINATION_RING_7_RECEIVE_QUEUE_NUMBER_MASK) >> \
+		REO_DESTINATION_RING_7_RECEIVE_QUEUE_NUMBER_LSB)
 
 /**
  * enum hal_reo_error_code: Error code describing the type of error detected

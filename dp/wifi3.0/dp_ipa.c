@@ -80,6 +80,46 @@ QDF_STATUS dp_ipa_handle_rx_buf_smmu_mapping(struct dp_soc *soc,
 	return __dp_ipa_handle_buf_smmu_mapping(soc, nbuf, create);
 }
 
+#ifdef RX_DESC_MULTI_PAGE_ALLOC
+static QDF_STATUS dp_ipa_handle_rx_buf_pool_smmu_mapping(struct dp_soc *soc,
+							 struct dp_pdev *pdev,
+							 bool create)
+{
+	struct rx_desc_pool *rx_pool;
+	uint8_t pdev_id;
+	uint32_t num_desc, page_id, offset, i;
+	uint16_t num_desc_per_page;
+	union dp_rx_desc_list_elem_t *rx_desc_elem;
+	struct dp_rx_desc *rx_desc;
+	qdf_nbuf_t nbuf;
+
+	if (!qdf_mem_smmu_s1_enabled(soc->osdev))
+		return QDF_STATUS_SUCCESS;
+
+	pdev_id = pdev->pdev_id;
+	rx_pool = &soc->rx_desc_buf[pdev_id];
+
+	qdf_spin_lock_bh(&rx_pool->lock);
+	num_desc = rx_pool->pool_size;
+	num_desc_per_page = rx_pool->desc_pages.num_element_per_page;
+	for (i = 0; i < num_desc; i++) {
+		page_id = i / num_desc_per_page;
+		offset = i % num_desc_per_page;
+		if (qdf_unlikely(!(rx_pool->desc_pages.cacheable_pages)))
+			break;
+		rx_desc_elem = dp_rx_desc_find(page_id, offset, rx_pool);
+		rx_desc = &rx_desc_elem->rx_desc;
+		if ((!(rx_desc->in_use)) || rx_desc->unmapped)
+			continue;
+		nbuf = rx_desc->nbuf;
+
+		__dp_ipa_handle_buf_smmu_mapping(soc, nbuf, create);
+	}
+	qdf_spin_unlock_bh(&rx_pool->lock);
+
+	return QDF_STATUS_SUCCESS;
+}
+#else
 static QDF_STATUS dp_ipa_handle_rx_buf_pool_smmu_mapping(struct dp_soc *soc,
 							 struct dp_pdev *pdev,
 							 bool create)
@@ -109,6 +149,7 @@ static QDF_STATUS dp_ipa_handle_rx_buf_pool_smmu_mapping(struct dp_soc *soc,
 
 	return QDF_STATUS_SUCCESS;
 }
+#endif /* RX_DESC_MULTI_PAGE_ALLOC */
 
 /**
  * dp_tx_ipa_uc_detach - Free autonomy TX resources
@@ -1578,29 +1619,22 @@ static qdf_nbuf_t dp_ipa_intrabss_send(struct dp_pdev *pdev,
 				       struct dp_vdev *vdev,
 				       qdf_nbuf_t nbuf)
 {
-	struct cdp_tid_rx_stats *tid_stats;
 	struct dp_peer *vdev_peer;
 	uint16_t len;
-	uint8_t tid;
 
 	vdev_peer = vdev->vap_bss_peer;
 	if (qdf_unlikely(!vdev_peer))
 		return nbuf;
-
-	tid = qdf_nbuf_get_priority(nbuf);
-	tid_stats = &pdev->stats.tid_stats.tid_rx_stats[tid];
 
 	qdf_mem_zero(nbuf->cb, sizeof(nbuf->cb));
 	len = qdf_nbuf_len(nbuf);
 
 	if (dp_tx_send(vdev, nbuf)) {
 		DP_STATS_INC_PKT(vdev_peer, rx.intra_bss.fail, 1, len);
-		tid_stats->fail_cnt[INTRABSS_DROP]++;
 		return nbuf;
 	}
 
 	DP_STATS_INC_PKT(vdev_peer, rx.intra_bss.pkts, 1, len);
-	tid_stats->intrabss_cnt++;
 	return NULL;
 }
 
@@ -1685,5 +1719,17 @@ bool dp_ipa_rx_intrabss_fwd(struct cdp_vdev *pvdev, qdf_nbuf_t nbuf,
 
 	return true;
 }
+
+#ifdef MDM_PLATFORM
+bool dp_ipa_is_mdm_platform(void)
+{
+	return true;
+}
+#else
+bool dp_ipa_is_mdm_platform(void)
+{
+	return false;
+}
+#endif
 
 #endif

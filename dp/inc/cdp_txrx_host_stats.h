@@ -24,6 +24,7 @@
 #ifndef _CDP_TXRX_HOST_STATS_H_
 #define _CDP_TXRX_HOST_STATS_H_
 #include "cdp_txrx_handle.h"
+#include "cdp_txrx_extd_struct.h"
 /**
  * cdp_host_stats_get: cdp call to get host stats
  * @soc: SOC handle
@@ -121,7 +122,7 @@ cdp_host_ce_stats(ol_txrx_soc_handle soc, struct cdp_vdev *vdev)
 
 static inline int cdp_stats_publish
 	(ol_txrx_soc_handle soc, struct cdp_pdev *pdev,
-	struct ol_txrx_stats *buf)
+	struct cdp_stats_extd *buf)
 {
 	if (!soc || !soc->ops) {
 		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
@@ -460,6 +461,37 @@ cdp_update_pdev_host_stats(ol_txrx_soc_handle soc,
 	    soc->ops->host_stats_ops->txrx_update_pdev_stats)
 		return soc->ops->host_stats_ops->txrx_update_pdev_stats
 			(pdev, data, stats_id);
+}
+
+/**
+ * @brief Update vdev host stats
+ *
+ * @param soc	   - soc handle
+ * @param vdev     - the physical device object
+ * @param data     - pdev stats
+ * @param stats_id - type of stats
+ *
+ * @return - void
+ */
+static inline void
+cdp_update_vdev_host_stats(ol_txrx_soc_handle soc,
+			   struct cdp_vdev *vdev,
+			   void *data,
+			   uint16_t stats_id)
+{
+	if (!soc || !soc->ops) {
+		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
+			  "%s: Invalid Instance", __func__);
+		QDF_BUG(0);
+		return;
+	}
+
+	if (!soc->ops->host_stats_ops ||
+	    !soc->ops->host_stats_ops->txrx_update_vdev_stats)
+		return;
+
+	return soc->ops->host_stats_ops->txrx_update_vdev_stats(vdev, data,
+								stats_id);
 }
 
 /**

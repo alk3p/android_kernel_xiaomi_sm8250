@@ -76,6 +76,18 @@ enum verbose_debug_module {
 #define dp_info_rl(params...) QDF_TRACE_INFO_RL(QDF_MODULE_ID_DP, params)
 #define dp_debug_rl(params...) QDF_TRACE_DEBUG_RL(QDF_MODULE_ID_DP, params)
 
+/**
+ * @enum vdev_host_stats_id:
+ * host stats update from CDP have to set one of the following stats ID
+ *
+ * @DP_VDEV_STATS_PKT_CNT_ONLY: update Tx packet count only
+ * @DP_VDEV_STATS_TX_ME: update Tx ingress stats
+ */
+enum {
+	DP_VDEV_STATS_PKT_CNT_ONLY,
+	DP_VDEV_STATS_TX_ME,
+};
+
 static inline QDF_STATUS
 cdp_soc_attach_target(ol_txrx_soc_handle soc)
 {
@@ -146,7 +158,8 @@ cdp_vdev_attach(ol_txrx_soc_handle soc, struct cdp_pdev *pdev,
 	return soc->ops->cmn_drv_ops->txrx_vdev_attach(pdev,
 			vdev_mac_addr, vdev_id, op_mode);
 }
-#ifndef CONFIG_WIN
+
+#ifdef CONFIG_MCL
 /**
  * cdp_flow_pool_map() - Create flow pool for vdev
  * @soc - data path soc handle

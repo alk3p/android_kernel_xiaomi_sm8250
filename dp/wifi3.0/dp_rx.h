@@ -102,6 +102,30 @@ struct dp_rx_desc {
 	unmapped:1;
 };
 
+/* RX Descriptor Multi Page memory alloc related */
+#define DP_RX_DESC_OFFSET_NUM_BITS 8
+#define DP_RX_DESC_PAGE_ID_NUM_BITS 8
+#define DP_RX_DESC_POOL_ID_NUM_BITS 4
+
+#define DP_RX_DESC_PAGE_ID_SHIFT DP_RX_DESC_OFFSET_NUM_BITS
+#define DP_RX_DESC_POOL_ID_SHIFT \
+		(DP_RX_DESC_OFFSET_NUM_BITS + DP_RX_DESC_PAGE_ID_NUM_BITS)
+#define RX_DESC_MULTI_PAGE_COOKIE_POOL_ID_MASK \
+	(((1 << DP_RX_DESC_POOL_ID_NUM_BITS) - 1) << DP_RX_DESC_POOL_ID_SHIFT)
+#define RX_DESC_MULTI_PAGE_COOKIE_PAGE_ID_MASK	\
+			(((1 << DP_RX_DESC_PAGE_ID_NUM_BITS) - 1) << \
+			 DP_RX_DESC_PAGE_ID_SHIFT)
+#define RX_DESC_MULTI_PAGE_COOKIE_OFFSET_MASK \
+			((1 << DP_RX_DESC_OFFSET_NUM_BITS) - 1)
+#define DP_RX_DESC_MULTI_PAGE_COOKIE_GET_POOL_ID(_cookie)		\
+	(((_cookie) & RX_DESC_MULTI_PAGE_COOKIE_POOL_ID_MASK) >>	\
+			DP_RX_DESC_POOL_ID_SHIFT)
+#define DP_RX_DESC_MULTI_PAGE_COOKIE_GET_PAGE_ID(_cookie)		\
+	(((_cookie) & RX_DESC_MULTI_PAGE_COOKIE_PAGE_ID_MASK) >>	\
+			DP_RX_DESC_PAGE_ID_SHIFT)
+#define DP_RX_DESC_MULTI_PAGE_COOKIE_GET_OFFSET(_cookie)		\
+	((_cookie) & RX_DESC_MULTI_PAGE_COOKIE_OFFSET_MASK)
+
 #define RX_DESC_COOKIE_INDEX_SHIFT		0
 #define RX_DESC_COOKIE_INDEX_MASK		0x3ffff /* 18 bits */
 #define RX_DESC_COOKIE_POOL_ID_SHIFT		18
@@ -276,6 +300,84 @@ union dp_rx_desc_list_elem_t {
 	struct dp_rx_desc rx_desc;
 };
 
+#ifdef RX_DESC_MULTI_PAGE_ALLOC
+/**
+ * dp_rx_desc_find() - find dp rx descriptor from page ID and offset
+ * @page_id: Page ID
+ * @offset: Offset of the descriptor element
+ *
+ * Return: RX descriptor element
+ */
+union dp_rx_desc_list_elem_t *dp_rx_desc_find(uint16_t page_id, uint16_t offset,
+					      struct rx_desc_pool *rx_pool);
+
+static inline
+struct dp_rx_desc *dp_get_rx_desc_from_cookie(struct dp_soc *soc,
+					      struct rx_desc_pool *pool,
+					      uint32_t cookie)
+{
+	uint8_t pool_id = DP_RX_DESC_MULTI_PAGE_COOKIE_GET_POOL_ID(cookie);
+	uint16_t page_id = DP_RX_DESC_MULTI_PAGE_COOKIE_GET_PAGE_ID(cookie);
+	uint8_t offset = DP_RX_DESC_MULTI_PAGE_COOKIE_GET_OFFSET(cookie);
+	struct rx_desc_pool *rx_desc_pool;
+	union dp_rx_desc_list_elem_t *rx_desc_elem;
+
+	if (qdf_unlikely(pool_id >= MAX_RXDESC_POOLS))
+		return NULL;
+
+	rx_desc_pool = &pool[pool_id];
+	rx_desc_elem = (union dp_rx_desc_list_elem_t *)
+		(rx_desc_pool->desc_pages.cacheable_pages[page_id] +
+		rx_desc_pool->elem_size * offset);
+
+	return &rx_desc_elem->rx_desc;
+}
+
+/**
+ * dp_rx_cookie_2_va_rxdma_buf() - Converts cookie to a virtual address of
+ *			 the Rx descriptor on Rx DMA source ring buffer
+ * @soc: core txrx main context
+ * @cookie: cookie used to lookup virtual address
+ *
+ * Return: Pointer to the Rx descriptor
+ */
+static inline
+struct dp_rx_desc *dp_rx_cookie_2_va_rxdma_buf(struct dp_soc *soc,
+					       uint32_t cookie)
+{
+	return dp_get_rx_desc_from_cookie(soc, &soc->rx_desc_buf[0], cookie);
+}
+
+/**
+ * dp_rx_cookie_2_va_mon_buf() - Converts cookie to a virtual address of
+ *			 the Rx descriptor on monitor ring buffer
+ * @soc: core txrx main context
+ * @cookie: cookie used to lookup virtual address
+ *
+ * Return: Pointer to the Rx descriptor
+ */
+static inline
+struct dp_rx_desc *dp_rx_cookie_2_va_mon_buf(struct dp_soc *soc,
+					     uint32_t cookie)
+{
+	return dp_get_rx_desc_from_cookie(soc, &soc->rx_desc_mon[0], cookie);
+}
+
+/**
+ * dp_rx_cookie_2_va_mon_status() - Converts cookie to a virtual address of
+ *			 the Rx descriptor on monitor status ring buffer
+ * @soc: core txrx main context
+ * @cookie: cookie used to lookup virtual address
+ *
+ * Return: Pointer to the Rx descriptor
+ */
+static inline
+struct dp_rx_desc *dp_rx_cookie_2_va_mon_status(struct dp_soc *soc,
+						uint32_t cookie)
+{
+	return dp_get_rx_desc_from_cookie(soc, &soc->rx_desc_status[0], cookie);
+}
+#else
 /**
  * dp_rx_cookie_2_va_rxdma_buf() - Converts cookie to a virtual address of
  *			 the Rx descriptor on Rx DMA source ring buffer
@@ -337,6 +439,7 @@ void *dp_rx_cookie_2_va_mon_status(struct dp_soc *soc, uint32_t cookie)
 	/* Add sanity for pool_id & index */
 	return &(soc->rx_desc_status[pool_id].array[index].rx_desc);
 }
+#endif /* RX_DESC_MULTI_PAGE_ALLOC */
 
 void dp_rx_add_desc_list_to_free_list(struct dp_soc *soc,
 				union dp_rx_desc_list_elem_t **local_desc_list,
@@ -378,20 +481,57 @@ dp_rx_wbm_err_process(struct dp_soc *soc, void *hal_ring, uint32_t quota);
  */
 qdf_nbuf_t dp_rx_sg_create(qdf_nbuf_t nbuf, uint8_t *rx_tlv_hdr);
 
-QDF_STATUS dp_rx_desc_pool_alloc(struct dp_soc *soc,
-				uint32_t pool_id,
-				uint32_t pool_size,
-				struct rx_desc_pool *rx_desc_pool);
+/*
+ * dp_rx_desc_pool_alloc() - create a pool of software rx_descs
+ *			     at the time of dp rx initialization
+ *
+ * @soc: core txrx main context
+ * @pool_id: pool_id which is one of 3 mac_ids
+ * @pool_size: number of Rx descriptor in the pool
+ * @rx_desc_pool: rx descriptor pool pointer
+ *
+ * Return: QDF status
+ */
+QDF_STATUS dp_rx_desc_pool_alloc(struct dp_soc *soc, uint32_t pool_id,
+				 uint32_t pool_size, struct rx_desc_pool *pool);
 
+/*
+ * dp_rx_desc_nbuf_and_pool_free() - free the sw rx desc pool called during
+ *				     de-initialization of wifi module.
+ *
+ * @soc: core txrx main context
+ * @pool_id: pool_id which is one of 3 mac_ids
+ * @rx_desc_pool: rx descriptor pool pointer
+ *
+ * Return: None
+ */
+void dp_rx_desc_nbuf_and_pool_free(struct dp_soc *soc, uint32_t pool_id,
+				   struct rx_desc_pool *rx_desc_pool);
+
+/*
+ * dp_rx_desc_nbuf_free() - free the sw rx desc nbufs called during
+ *			    de-initialization of wifi module.
+ *
+ * @soc: core txrx main context
+ * @pool_id: pool_id which is one of 3 mac_ids
+ * @rx_desc_pool: rx descriptor pool pointer
+ *
+ * Return: None
+ */
+void dp_rx_desc_nbuf_free(struct dp_soc *soc,
+			  struct rx_desc_pool *rx_desc_pool);
+
+/*
+ * dp_rx_desc_pool_free() - free the sw rx desc array called during
+ *			    de-initialization of wifi module.
+ *
+ * @soc: core txrx main context
+ * @rx_desc_pool: rx descriptor pool pointer
+ *
+ * Return: None
+ */
 void dp_rx_desc_pool_free(struct dp_soc *soc,
-				uint32_t pool_id,
-				struct rx_desc_pool *rx_desc_pool);
-
-void dp_rx_desc_nbuf_pool_free(struct dp_soc *soc,
-			       struct rx_desc_pool *rx_desc_pool);
-
-void dp_rx_desc_free_array(struct dp_soc *soc,
-			   struct rx_desc_pool *rx_desc_pool);
+			  struct rx_desc_pool *rx_desc_pool);
 
 void dp_rx_deliver_raw(struct dp_vdev *vdev, qdf_nbuf_t nbuf_list,
 				struct dp_peer *peer);
@@ -421,244 +561,6 @@ void dp_rx_add_to_free_desc_list(union dp_rx_desc_list_elem_t **head,
 		*tail = *head;
 
 }
-
-/**
- * dp_rx_wds_add_or_update_ast() - Add or update the ast entry.
- *
- * @soc: core txrx main context
- * @ta_peer: WDS repeater peer
- * @mac_addr: mac address of the peer
- * @is_ad4_valid: 4-address valid flag
- * @is_sa_valid: source address valid flag
- * @is_chfrag_start: frag start flag
- * @sa_idx: source-address index for peer
- * @sa_sw_peer_id: software source-address peer-id
- *
- * Return: void:
- */
-#ifdef FEATURE_WDS
-static inline void
-dp_rx_wds_add_or_update_ast(struct dp_soc *soc, struct dp_peer *ta_peer,
-			    uint8_t *wds_src_mac, uint8_t is_ad4_valid,
-			    uint8_t is_sa_valid, uint8_t is_chfrag_start,
-			    uint16_t sa_idx, uint16_t sa_sw_peer_id)
-{
-	struct dp_peer *sa_peer;
-	struct dp_ast_entry *ast;
-	uint32_t flags = IEEE80211_NODE_F_WDS_HM;
-	uint32_t ret = 0;
-	struct dp_neighbour_peer *neighbour_peer = NULL;
-	struct dp_pdev *pdev = ta_peer->vdev->pdev;
-
-	/* For AP mode : Do wds source port learning only if it is a
-	 * 4-address mpdu
-	 *
-	 * For STA mode : Frames from RootAP backend will be in 3-address mode,
-	 * till RootAP does the WDS source port learning; Hence in repeater/STA
-	 * mode, we enable learning even in 3-address mode , to avoid RootAP
-	 * backbone getting wrongly learnt as MEC on repeater
-	 */
-	if (ta_peer->vdev->opmode != wlan_op_mode_sta) {
-		if (!(is_chfrag_start && is_ad4_valid))
-			return;
-	} else {
-		/* For HKv2 Source port learing is not needed in STA mode
-		 * as we have support in HW
-		 */
-		if (soc->ast_override_support)
-			return;
-	}
-
-	if (qdf_unlikely(!is_sa_valid)) {
-		ret = dp_peer_add_ast(soc,
-					ta_peer,
-					wds_src_mac,
-					CDP_TXRX_AST_TYPE_WDS,
-					flags);
-		return;
-	}
-
-	qdf_spin_lock_bh(&soc->ast_lock);
-	ast = soc->ast_table[sa_idx];
-	qdf_spin_unlock_bh(&soc->ast_lock);
-
-	if (!ast) {
-		/*
-		 * In HKv1, it is possible that HW retains the AST entry in
-		 * GSE cache on 1 radio , even after the AST entry is deleted
-		 * (on another radio).
-		 *
-		 * Due to this, host might still get sa_is_valid indications
-		 * for frames with SA not really present in AST table.
-		 *
-		 * So we go ahead and send an add_ast command to FW in such
-		 * cases where sa is reported still as valid, so that FW will
-		 * invalidate this GSE cache entry and new AST entry gets
-		 * cached.
-		 */
-		if (!soc->ast_override_support) {
-			ret = dp_peer_add_ast(soc,
-					      ta_peer,
-					      wds_src_mac,
-					      CDP_TXRX_AST_TYPE_WDS,
-					      flags);
-			return;
-		} else {
-			/* In HKv2 smart monitor case, when NAC client is
-			 * added first and this client roams within BSS to
-			 * connect to RE, since we have an AST entry for
-			 * NAC we get sa_is_valid bit set. So we check if
-			 * smart monitor is enabled and send add_ast command
-			 * to FW.
-			 */
-			if (pdev->neighbour_peers_added) {
-				qdf_spin_lock_bh(&pdev->neighbour_peer_mutex);
-				TAILQ_FOREACH(neighbour_peer,
-					      &pdev->neighbour_peers_list,
-					      neighbour_peer_list_elem) {
-					if (!qdf_mem_cmp(&neighbour_peer->neighbour_peers_macaddr,
-							 wds_src_mac,
-							 QDF_MAC_ADDR_SIZE)) {
-						ret = dp_peer_add_ast(soc,
-								      ta_peer,
-								      wds_src_mac,
-								      CDP_TXRX_AST_TYPE_WDS,
-								      flags);
-						QDF_TRACE(QDF_MODULE_ID_DP,
-							  QDF_TRACE_LEVEL_INFO,
-							  "sa valid and nac roamed to wds");
-						break;
-					}
-				}
-				qdf_spin_unlock_bh(&pdev->neighbour_peer_mutex);
-			}
-			return;
-		}
-	}
-
-
-	if ((ast->type == CDP_TXRX_AST_TYPE_WDS_HM) ||
-	    (ast->type == CDP_TXRX_AST_TYPE_WDS_HM_SEC))
-		return;
-
-	/*
-	 * Ensure we are updating the right AST entry by
-	 * validating ast_idx.
-	 * There is a possibility we might arrive here without
-	 * AST MAP event , so this check is mandatory
-	 */
-	if (ast->is_mapped && (ast->ast_idx == sa_idx))
-		ast->is_active = TRUE;
-
-	if (sa_sw_peer_id != ta_peer->peer_ids[0]) {
-		sa_peer = ast->peer;
-
-		if ((ast->type != CDP_TXRX_AST_TYPE_STATIC) &&
-		    (ast->type != CDP_TXRX_AST_TYPE_SELF) &&
-			(ast->type != CDP_TXRX_AST_TYPE_STA_BSS)) {
-			if (ast->pdev_id != ta_peer->vdev->pdev->pdev_id) {
-				/* This case is when a STA roams from one
-				 * repeater to another repeater, but these
-				 * repeaters are connected to root AP on
-				 * different radios.
-				 * Ex: rptr1 connected to ROOT AP over 5G
-				 * and rptr2 connected to ROOT AP over 2G
-				 * radio
-				 */
-				qdf_spin_lock_bh(&soc->ast_lock);
-				dp_peer_del_ast(soc, ast);
-				qdf_spin_unlock_bh(&soc->ast_lock);
-			} else {
-				/* this case is when a STA roams from one
-				 * reapter to another repeater, but inside
-				 * same radio.
-				 */
-				qdf_spin_lock_bh(&soc->ast_lock);
-				dp_peer_update_ast(soc, ta_peer, ast, flags);
-				qdf_spin_unlock_bh(&soc->ast_lock);
-				return;
-			}
-		}
-		/*
-		 * Do not kickout STA if it belongs to a different radio.
-		 * For DBDC repeater, it is possible to arrive here
-		 * for multicast loopback frames originated from connected
-		 * clients and looped back (intrabss) by Root AP
-		 */
-		if (ast->pdev_id != ta_peer->vdev->pdev->pdev_id) {
-			return;
-		}
-
-		/*
-		 * Kickout, when direct associated peer(SA) roams
-		 * to another AP and reachable via TA peer
-		 */
-		if ((sa_peer->vdev->opmode == wlan_op_mode_ap) &&
-		    !sa_peer->delete_in_progress) {
-			sa_peer->delete_in_progress = true;
-			if (soc->cdp_soc.ol_ops->peer_sta_kickout) {
-				soc->cdp_soc.ol_ops->peer_sta_kickout(
-						sa_peer->vdev->pdev->ctrl_pdev,
-						wds_src_mac);
-			}
-		}
-	}
-}
-
-/**
- * dp_rx_wds_srcport_learn() - Add or update the STA PEER which
- *				is behind the WDS repeater.
- *
- * @soc: core txrx main context
- * @rx_tlv_hdr: base address of RX TLV header
- * @ta_peer: WDS repeater peer
- * @nbuf: rx pkt
- *
- * Return: void:
- */
-static inline void
-dp_rx_wds_srcport_learn(struct dp_soc *soc,
-			uint8_t *rx_tlv_hdr,
-			struct dp_peer *ta_peer,
-			qdf_nbuf_t nbuf)
-{
-	uint16_t sa_sw_peer_id = hal_rx_msdu_end_sa_sw_peer_id_get(rx_tlv_hdr);
-	uint8_t sa_is_valid = hal_rx_msdu_end_sa_is_valid_get(rx_tlv_hdr);
-	uint8_t wds_src_mac[QDF_MAC_ADDR_SIZE];
-	uint16_t sa_idx;
-	uint8_t is_chfrag_start = 0;
-	uint8_t is_ad4_valid = 0;
-
-	if (qdf_unlikely(!ta_peer))
-		return;
-
-	is_chfrag_start = qdf_nbuf_is_rx_chfrag_start(nbuf);
-	if (is_chfrag_start)
-		is_ad4_valid = hal_rx_get_mpdu_mac_ad4_valid(rx_tlv_hdr);
-
-	memcpy(wds_src_mac, (qdf_nbuf_data(nbuf) + QDF_MAC_ADDR_SIZE),
-	       QDF_MAC_ADDR_SIZE);
-
-	/*
-	 * Get the AST entry from HW SA index and mark it as active
-	 */
-	sa_idx = hal_rx_msdu_end_sa_idx_get(rx_tlv_hdr);
-
-	dp_rx_wds_add_or_update_ast(soc, ta_peer, wds_src_mac, is_ad4_valid,
-				    sa_is_valid, is_chfrag_start,
-				    sa_idx, sa_sw_peer_id);
-
-	return;
-}
-#else
-static inline void
-dp_rx_wds_srcport_learn(struct dp_soc *soc,
-		uint8_t *rx_tlv_hdr,
-		struct dp_peer *ta_peer,
-		qdf_nbuf_t nbuf)
-{
-}
-#endif
 
 uint8_t dp_rx_process_invalid_peer(struct dp_soc *soc, qdf_nbuf_t nbuf);
 void dp_rx_process_invalid_peer_wrapper(struct dp_soc *soc,
@@ -712,7 +614,7 @@ static inline int check_x86_paddr(struct dp_soc *dp_soc, qdf_nbuf_t *rx_netbuf,
 			nbuf_retry++;
 			if ((*rx_netbuf)) {
 				qdf_nbuf_unmap_single(dp_soc->osdev, *rx_netbuf,
-						QDF_DMA_BIDIRECTIONAL);
+						QDF_DMA_FROM_DEVICE);
 				/* Not freeing buffer intentionally.
 				 * Observed that same buffer is getting
 				 * re-allocated resulting in longer load time
@@ -731,7 +633,7 @@ static inline int check_x86_paddr(struct dp_soc *dp_soc, qdf_nbuf_t *rx_netbuf,
 				return QDF_STATUS_E_FAILURE;
 
 			ret = qdf_nbuf_map_single(dp_soc->osdev, *rx_netbuf,
-							QDF_DMA_BIDIRECTIONAL);
+							QDF_DMA_FROM_DEVICE);
 
 			if (qdf_unlikely(ret == QDF_STATUS_E_FAILURE)) {
 				qdf_nbuf_free(*rx_netbuf);
@@ -745,7 +647,7 @@ static inline int check_x86_paddr(struct dp_soc *dp_soc, qdf_nbuf_t *rx_netbuf,
 
 	if ((*rx_netbuf)) {
 		qdf_nbuf_unmap_single(dp_soc->osdev, *rx_netbuf,
-					QDF_DMA_BIDIRECTIONAL);
+					QDF_DMA_FROM_DEVICE);
 		qdf_nbuf_free(*rx_netbuf);
 	}
 
@@ -844,40 +746,18 @@ static inline QDF_STATUS dp_rx_defrag_concat(qdf_nbuf_t dst, qdf_nbuf_t src)
 	return QDF_STATUS_E_DEFRAG_ERROR;
 }
 
-/*
- * dp_rx_ast_set_active() - set the active flag of the astentry
- *				    corresponding to a hw index.
- * @soc: core txrx main context
- * @sa_idx: hw idx
- * @is_active: active flag
- *
- */
-#ifdef FEATURE_WDS
-static inline QDF_STATUS dp_rx_ast_set_active(struct dp_soc *soc, uint16_t sa_idx, bool is_active)
-{
-	struct dp_ast_entry *ast;
-	qdf_spin_lock_bh(&soc->ast_lock);
-	ast = soc->ast_table[sa_idx];
-
-	/*
-	 * Ensure we are updating the right AST entry by
-	 * validating ast_idx.
-	 * There is a possibility we might arrive here without
-	 * AST MAP event , so this check is mandatory
-	 */
-	if (ast && ast->is_mapped && (ast->ast_idx == sa_idx)) {
-		ast->is_active = is_active;
-		qdf_spin_unlock_bh(&soc->ast_lock);
-		return QDF_STATUS_SUCCESS;
-	}
-
-	qdf_spin_unlock_bh(&soc->ast_lock);
-	return QDF_STATUS_E_FAILURE;
-}
-#else
+#ifndef FEATURE_WDS
 static inline QDF_STATUS dp_rx_ast_set_active(struct dp_soc *soc, uint16_t sa_idx, bool is_active)
 {
 	return QDF_STATUS_SUCCESS;
+}
+
+static inline void
+dp_rx_wds_srcport_learn(struct dp_soc *soc,
+			uint8_t *rx_tlv_hdr,
+			struct dp_peer *ta_peer,
+			qdf_nbuf_t nbuf)
+{
 }
 #endif
 
@@ -1236,7 +1116,7 @@ QDF_STATUS dp_rx_filter_mesh_packets(struct dp_vdev *vdev, qdf_nbuf_t nbuf,
 					uint8_t *rx_tlv_hdr);
 
 int dp_wds_rx_policy_check(uint8_t *rx_tlv_hdr, struct dp_vdev *vdev,
-				struct dp_peer *peer, int rx_mcast);
+			   struct dp_peer *peer);
 
 qdf_nbuf_t
 dp_rx_nbuf_prepare(struct dp_soc *soc, struct dp_pdev *pdev);

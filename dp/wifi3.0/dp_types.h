@@ -32,11 +32,6 @@
 #include <cdp_txrx_cmn.h>
 #ifdef CONFIG_MCL
 #include <cds_ieee80211_common.h>
-#else
-#include <linux/ieee80211.h>
-#endif
-
-#ifndef CONFIG_WIN
 #include <wdi_event_api.h>    /* WDI subscriber event list */
 #endif
 
@@ -55,6 +50,10 @@
 
 #ifndef REMOVE_PKT_LOG
 #include <pktlog.h>
+#endif
+
+#ifdef WLAN_TX_PKT_CAPTURE_ENH
+#include "dp_tx_capture.h"
 #endif
 
 #define REPT_MU_MIMO 1
@@ -240,9 +239,37 @@ enum dp_nss_cfg {
 	dp_nss_cfg_max
 };
 
+#ifdef WLAN_TX_PKT_CAPTURE_ENH
+#define DP_CPU_RING_MAP_1 1
+#endif
+
+/**
+ * dp_cpu_ring_map_type - dp tx cpu ring map
+ * @DP_NSS_DEFAULT_MAP: Default mode with no NSS offloaded
+ * @DP_NSS_FIRST_RADIO_OFFLOADED_MAP: Only First Radio is offloaded
+ * @DP_NSS_SECOND_RADIO_OFFLOADED_MAP: Only second radio is offloaded
+ * @DP_NSS_DBDC_OFFLOADED_MAP: Both radios are offloaded
+ * @DP_NSS_DBTC_OFFLOADED_MAP: All three radios are offloaded
+ * @DP_SINGLE_TX_RING_MAP: to avoid out of order all cpu mapped to single ring
+ * @DP_NSS_CPU_RING_MAP_MAX: Max cpu ring map val
+ */
+enum dp_cpu_ring_map_types {
+	DP_NSS_DEFAULT_MAP,
+	DP_NSS_FIRST_RADIO_OFFLOADED_MAP,
+	DP_NSS_SECOND_RADIO_OFFLOADED_MAP,
+	DP_NSS_DBDC_OFFLOADED_MAP,
+	DP_NSS_DBTC_OFFLOADED_MAP,
+#ifdef WLAN_TX_PKT_CAPTURE_ENH
+	DP_SINGLE_TX_RING_MAP,
+#endif
+	DP_NSS_CPU_RING_MAP_MAX
+};
+
 /**
  * struct rx_desc_pool
  * @pool_size: number of RX descriptor in the pool
+ * @elem_size: Element size
+ * @desc_pages: Multi page descriptors
  * @array: pointer to array of RX descriptor
  * @freelist: pointer to free RX descriptor link list
  * @lock: Protection for the RX descriptor pool
@@ -250,7 +277,12 @@ enum dp_nss_cfg {
  */
 struct rx_desc_pool {
 	uint32_t pool_size;
+#ifdef RX_DESC_MULTI_PAGE_ALLOC
+	uint16_t elem_size;
+	struct qdf_mem_multi_page_t desc_pages;
+#else
 	union dp_rx_desc_list_elem_t *array;
+#endif
 	union dp_rx_desc_list_elem_t *freelist;
 	qdf_spinlock_t lock;
 	uint8_t owner;
@@ -446,6 +478,7 @@ struct dp_srng {
 	void *base_vaddr_unaligned;
 	qdf_dma_addr_t base_paddr_unaligned;
 	uint32_t alloc_size;
+	uint8_t cached;
 	int irq;
 	uint32_t num_entries;
 };
@@ -546,6 +579,34 @@ struct dp_rx_tid {
 
 };
 
+/**
+ * struct dp_intr_stats - DP Interrupt Stats for an interrupt context
+ * @num_tx_ring_masks: interrupts with tx_ring_mask set
+ * @num_rx_ring_masks: interrupts with rx_ring_mask set
+ * @num_rx_mon_ring_masks: interrupts with rx_mon_ring_mask set
+ * @num_rx_err_ring_masks: interrupts with rx_err_ring_mask set
+ * @num_rx_wbm_rel_ring_masks: interrupts with rx_wbm_rel_ring_mask set
+ * @num_reo_status_ring_masks: interrupts with reo_status_ring_mask set
+ * @num_rxdma2host_ring_masks: interrupts with rxdma2host_ring_mask set
+ * @num_host2rxdma_ring_masks: interrupts with host2rxdma_ring_mask set
+ * @num_host2rxdma_ring_masks: interrupts with host2rxdma_ring_mask set
+ * @num_masks: total number of times the interrupt was received
+ *
+ * Counter for individual masks are incremented only if there are any packets
+ * on that ring.
+ */
+struct dp_intr_stats {
+	uint32_t num_tx_ring_masks[MAX_TCL_DATA_RINGS];
+	uint32_t num_rx_ring_masks[MAX_REO_DEST_RINGS];
+	uint32_t num_rx_mon_ring_masks;
+	uint32_t num_rx_err_ring_masks;
+	uint32_t num_rx_wbm_rel_ring_masks;
+	uint32_t num_reo_status_ring_masks;
+	uint32_t num_rxdma2host_ring_masks;
+	uint32_t num_host2rxdma_ring_masks;
+	uint32_t num_masks;
+};
+
 /* per interrupt context  */
 struct dp_intr {
 	uint8_t tx_ring_mask;   /* WBM Tx completion rings (0-2)
@@ -564,6 +625,9 @@ struct dp_intr {
 				to get DMA ring handles */
 	qdf_lro_ctx_t lro_ctx;
 	uint8_t dp_intr_id;
+
+	/* Interrupt Stats for individual masks */
+	struct dp_intr_stats intr_stats;
 };
 
 #define REO_DESC_FREELIST_SIZE 64
@@ -592,7 +656,12 @@ struct dp_soc_stats {
 		uint32_t desc_in_use;
 		/* tqm_release_reason == FW removed */
 		uint32_t dropped_fw_removed;
-
+		/* tx completion release_src != TQM or FW */
+		uint32_t invalid_release_source;
+		/* TX Comp loop packet limit hit */
+		uint32_t tx_comp_loop_pkt_limit_hit;
+		/* Head pointer Out of sync at the end of dp_tx_comp_handler */
+		uint32_t hp_oos2;
 	} tx;
 
 	/* SOC level RX stats */
@@ -608,8 +677,10 @@ struct dp_soc_stats {
 		uint32_t rx_frag_err;
 		/* No of reinjected packets */
 		uint32_t reo_reinject;
-		/* Head pointer Out of sync */
-		uint32_t hp_oos;
+		/* Reap loop packet limit hit */
+		uint32_t reap_loop_pkt_limit_hit;
+		/* Head pointer Out of sync at the end of dp_rx_process */
+		uint32_t hp_oos2;
 		struct {
 			/* Invalid RBM error count */
 			uint32_t invalid_rbm;
@@ -642,6 +713,8 @@ struct dp_soc_stats {
 			uint32_t hal_reo_dest_dup;
 			/* HAL WBM RELEASE Duplicate count */
 			uint32_t hal_wbm_rel_dup;
+			/* HAL RXDMA error Duplicate count */
+			uint32_t hal_rxdma_err_dup;
 		} err;
 
 		/* packet count per core - per ring */
@@ -1112,9 +1185,16 @@ struct dp_neighbour_peer {
 	TAILQ_ENTRY(dp_neighbour_peer) neighbour_peer_list_elem;
 };
 
+#ifdef WLAN_TX_PKT_CAPTURE_ENH
+#define WLAN_TX_PKT_CAPTURE_ENH 1
+#define DP_TX_PPDU_PROC_THRESHOLD 8
+#define DP_TX_PPDU_PROC_TIMEOUT 10
+#endif
+
 /**
  * struct ppdu_info - PPDU Status info descriptor
  * @ppdu_id         - Unique ppduid assigned by firmware for every tx packet
+ * @sched_cmdid     - schedule command id, which will be same in a burst
  * @max_ppdu_id     - wrap around for ppdu id
  * @last_tlv_cnt    - Keep track for missing ppdu tlvs
  * @last_user       - last ppdu processed for user
@@ -1122,9 +1202,11 @@ struct dp_neighbour_peer {
  * @nbuf            - ppdu descriptor payload
  * @ppdu_desc       - ppdu descriptor
  * @ppdu_info_list_elem - linked list of ppdu tlvs
+ * @ppdu_info_queue_elem - Singly linked list (queue) of ppdu tlvs
  */
 struct ppdu_info {
 	uint32_t ppdu_id;
+	uint32_t sched_cmdid;
 	uint32_t max_ppdu_id;
 	uint16_t tlv_bitmap;
 	uint16_t last_tlv_cnt;
@@ -1132,7 +1214,38 @@ struct ppdu_info {
 		 is_ampdu:1;
 	qdf_nbuf_t nbuf;
 	struct cdp_tx_completion_ppdu *ppdu_desc;
+#ifdef WLAN_TX_PKT_CAPTURE_ENH
+	union {
+		TAILQ_ENTRY(ppdu_info) ppdu_info_dlist_elem;
+		STAILQ_ENTRY(ppdu_info) ppdu_info_slist_elem;
+	} ulist;
+#define ppdu_info_list_elem ulist.ppdu_info_dlist_elem
+#define ppdu_info_queue_elem ulist.ppdu_info_slist_elem
+#else
 	TAILQ_ENTRY(ppdu_info) ppdu_info_list_elem;
+#endif
+};
+
+/**
+ * struct msdu_completion_info - wbm msdu completion info
+ * @ppdu_id            - Unique ppduid assigned by firmware for every tx packet
+ * @peer_id            - peer_id
+ * @tid                - tid which used during transmit
+ * @first_msdu         - first msdu indication
+ * @last_msdu          - last msdu indication
+ * @msdu_part_of_amsdu - msdu part of amsdu
+ * @transmit_cnt       - retried count
+ * @tsf                - timestamp which it transmitted
+ */
+struct msdu_completion_info {
+	uint32_t ppdu_id;
+	uint16_t peer_id;
+	uint8_t tid;
+	uint8_t first_msdu:1,
+		last_msdu:1,
+		msdu_part_of_amsdu:1;
+	uint8_t transmit_cnt;
+	uint32_t tsf;
 };
 
 #ifdef WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG
@@ -1148,6 +1261,33 @@ struct rx_protocol_tag_stats {
 #endif /* WLAN_SUPPORT_RX_TAG_STATISTICS */
 
 #endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
+
+#ifndef WLAN_TX_PKT_CAPTURE_ENH
+struct dp_pdev_tx_capture {
+};
+
+struct dp_peer_tx_capture {
+};
+#endif
+#ifdef WLAN_RX_PKT_CAPTURE_ENH
+/* Template data to be set for Enhanced RX Monitor packets */
+#define RX_MON_CAP_ENH_TRAILER 0xdeadc0dedeadda7a
+
+/**
+ * struct dp_rx_mon_enh_trailer_data - Data structure to set a known pattern
+ * at end of each MSDU in monitor-lite mode
+ * @reserved1: reserved for future use
+ * @reserved2: reserved for future use
+ * @reserved3: reserved for future use
+ * @protocol_tag: protocol tag value read from skb->cb
+ */
+struct dp_rx_mon_enh_trailer_data {
+	uint16_t reserved1;
+	uint16_t reserved2;
+	uint16_t reserved3;
+	uint16_t protocol_tag;
+};
+#endif /* WLAN_RX_PKT_CAPTURE_ENH */
 
 /* PDEV level structure for data path */
 struct dp_pdev {
@@ -1320,7 +1460,9 @@ struct dp_pdev {
 	/* per user 128 bytes msdu header list for MPDU */
 	struct msdu_list msdu_list[MAX_MU_USERS];
 	/* RX enhanced capture mode */
-	uint32_t rx_enh_capture_mode;
+	uint8_t rx_enh_capture_mode;
+	/* RX enhanced capture trailer enable/disable flag */
+	bool is_rx_enh_capture_trailer_enabled;
 #ifdef WLAN_RX_PKT_CAPTURE_ENH
 	/* RX per MPDU/PPDU information */
 	struct cdp_rx_indication_mpdu mpdu_ind[MAX_MU_USERS];
@@ -1400,6 +1542,7 @@ struct dp_pdev {
 	uint32_t ppdu_id;
 	bool first_nbuf;
 	struct {
+		qdf_nbuf_t last_nbuf; /*Ptr to mgmt last buf */
 		uint8_t *mgmt_buf; /* Ptr to mgmt. payload in HTT ppdu stats */
 		uint32_t mgmt_buf_len; /* Len of mgmt. payload in ppdu stats */
 		uint32_t ppdu_id;
@@ -1435,7 +1578,7 @@ struct dp_pdev {
 	uint8_t dp_peer_based_pktlog;
 
 	/* Cached peer_id from htt_peer_details_tlv */
-	uint8_t fw_stats_peer_id;
+	uint16_t fw_stats_peer_id;
 
 	/* qdf_event for fw_peer_stats */
 	qdf_event_t fw_peer_stats_event;
@@ -1445,13 +1588,14 @@ struct dp_pdev {
 
 	/* unique cookie required for peer session */
 	uint32_t next_peer_cookie;
-#ifdef WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG
+
 	/*
 	 * Run time enabled when the first protocol tag is added,
 	 * run time disabled when the last protocol tag is deleted
 	 */
 	bool  is_rx_protocol_tagging_enabled;
 
+#ifdef WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG
 	/*
 	 * The protocol type is used as array index to save
 	 * user provided tag info
@@ -1470,6 +1614,14 @@ struct dp_pdev {
 		rx_err_proto_tag_stats[RX_PROTOCOL_TAG_MAX];
 #endif /* WLAN_SUPPORT_RX_TAG_STATISTICS */
 #endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
+
+	/* tx packet capture enhancement */
+	bool tx_capture_enabled;
+	struct dp_pdev_tx_capture tx_capture;
+	/* stats counter for tx ppdu processed */
+	uint64_t tx_ppdu_proc;
+
+	uint32_t *ppdu_tlv_buf; /* Buffer to hold HTT ppdu stats TLVs*/
 };
 
 struct dp_peer;
@@ -1642,6 +1794,8 @@ struct dp_vdev {
 
 	/* TIDmap priority */
 	uint8_t tidmap_prty;
+	/* Self Peer in STA mode */
+	struct dp_peer *vap_self_peer;
 };
 
 
@@ -1701,6 +1855,8 @@ struct dp_peer {
 
 	/* TID structures */
 	struct dp_rx_tid rx_tid[DP_MAX_TIDS];
+	struct dp_peer_tx_capture tx_capture;
+
 
 	/* TBD: No transmit TID state required? */
 
@@ -1738,9 +1894,6 @@ struct dp_peer {
 	enum ol_txrx_peer_state state;
 	qdf_spinlock_t peer_info_lock;
 
-	qdf_time_t last_assoc_rcvd;
-	qdf_time_t last_disassoc_rcvd;
-	qdf_time_t last_deauth_rcvd;
 	/* Peer Stats */
 	struct cdp_peer_stats stats;
 
@@ -1780,7 +1933,6 @@ struct dp_peer {
 #endif
 };
 
-#ifdef CONFIG_WIN
 /*
  * dp_invalid_peer_msg
  * @nbuf: data buffer
@@ -1792,7 +1944,6 @@ struct dp_invalid_peer_msg {
 	struct ieee80211_frame *wh;
 	uint8_t vdev_id;
 };
-#endif
 
 /*
  * dp_tx_me_buf_t: ME buffer

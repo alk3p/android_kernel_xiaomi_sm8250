@@ -443,6 +443,11 @@ scm_update_dbs_scan_ctrl_ext_flag(struct scan_start_request *req)
 		goto end;
 	}
 
+	if (!wlan_scan_cfg_honour_nl_scan_policy_flags(psoc)) {
+		scm_debug("nl scan policy flags not honoured, goto end");
+		goto end;
+	}
+
 	if (req->scan_req.scan_policy_high_accuracy) {
 		scm_debug("high accuracy scan received, going for non-dbs scan");
 		scan_dbs_policy = SCAN_DBS_POLICY_FORCE_NONDBS;
@@ -792,14 +797,13 @@ scm_update_channel_list(struct scan_start_request *req,
 	if (req->scan_req.scan_type == SCAN_TYPE_P2P_SEARCH)
 		p2p_search = true;
 	/*
-	 * No need to update channels if req is passive scan and single channel
-	 * ie ROC, Preauth etc.
+	 * No need to update channels if req is single channel* ie ROC,
+	 * Preauth or a single channel scan etc.
 	 * If the single chan in the scan channel list is an NOL channel,it is
 	 * not removed as it would reduce the number of scan channels to 0
 	 * and FW would scan all chans which is unexpected in this scenerio.
 	 */
-	if (req->scan_req.scan_f_passive &&
-	    req->scan_req.chan_list.num_chan == 1)
+	if (req->scan_req.chan_list.num_chan == 1)
 		return;
 
 	/* do this only for STA and P2P-CLI mode */
@@ -956,12 +960,13 @@ scm_scan_req_update_params(struct wlan_objmgr_vdev *vdev,
 		ucfg_scan_init_chanlist_params(req, 0, NULL, NULL);
 
 	scm_update_channel_list(req, scan_obj);
-	scm_debug("dwell time: active %d, passive %d, repeat_probe_time %d n_probes %d flags_ext %x, wide_bw_scan: %d",
+	scm_debug("dwell time: active %d, passive %d, repeat_probe_time %d n_probes %d flags_ext %x, wide_bw_scan: %d priority: %d",
 		  req->scan_req.dwell_time_active,
 		  req->scan_req.dwell_time_passive,
 		  req->scan_req.repeat_probe_time, req->scan_req.n_probes,
 		  req->scan_req.scan_ctrl_flags_ext,
-		  req->scan_req.scan_f_wide_band);
+		  req->scan_req.scan_f_wide_band,
+		  req->scan_req.scan_priority);
 }
 
 QDF_STATUS

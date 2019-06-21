@@ -192,7 +192,6 @@ struct wlan_lmac_if_ftm_tx_ops {
  * @vdev_mlme_attach: function to register events
  * @vdev_mlme_detach: function to unregister events
  * @vdev_mgr_rsp_timer_init: function to initialize vdev response timer
- * @vdev_mgr_rsp_timer_deinit: function to free vdev response timer
  * @vdev_mgr_rsp_timer_mod: function to timer_mod vdev response timer
  * @vdev_mgr_rsp_timer_stop: function to stop vdev response timer
  * @vdev_create_send: function to send vdev create
@@ -225,9 +224,6 @@ struct wlan_lmac_if_mlme_tx_ops {
 	QDF_STATUS (*vdev_mlme_detach)(struct wlan_objmgr_psoc *psoc);
 #ifdef CMN_VDEV_MGR_TGT_IF_ENABLE
 	QDF_STATUS (*vdev_mgr_rsp_timer_init)(
-					struct wlan_objmgr_vdev *vdev,
-					qdf_timer_t *rsp_timer);
-	QDF_STATUS (*vdev_mgr_rsp_timer_deinit)(
 					struct wlan_objmgr_vdev *vdev,
 					qdf_timer_t *rsp_timer);
 	QDF_STATUS (*vdev_mgr_rsp_timer_mod)(
@@ -968,6 +964,8 @@ struct wlan_lmac_if_reg_rx_ops {
 			uint16_t regdmn);
 	QDF_STATUS (*reg_get_current_regdomain)(struct wlan_objmgr_pdev *pdev,
 			struct cur_regdmn_info *cur_regdmn);
+	QDF_STATUS (*reg_enable_dfs_channels)(struct wlan_objmgr_pdev *pdev,
+					      bool dfs_enable);
 };
 
 #ifdef CONVERGED_P2P_ENABLE
