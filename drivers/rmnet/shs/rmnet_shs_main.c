@@ -30,6 +30,8 @@
 #define NS_IN_MS 1000000
 #define LPWR_CLUSTER 0
 #define PERF_CLUSTER 4
+#define PERF_CORES 4
+
 #define INVALID_CPU -1
 
 #define WQ_DELAY 2000000
@@ -44,6 +46,8 @@
 DEFINE_SPINLOCK(rmnet_shs_ht_splock);
 DEFINE_HASHTABLE(RMNET_SHS_HT, RMNET_SHS_HT_SIZE);
 struct rmnet_shs_cpu_node_s rmnet_shs_cpu_node_tbl[MAX_CPUS];
+int cpu_num_flows[MAX_CPUS];
+
 /* Maintains a list of flows associated with a core
  * Also keeps track of number of packets processed on that core
  */
@@ -116,6 +120,8 @@ void rmnet_shs_cpu_node_remove(struct rmnet_shs_skbn_s *node)
 			    0xDEF, 0xDEF, 0xDEF, 0xDEF, NULL, NULL);
 
 	list_del_init(&node->node_id);
+	cpu_num_flows[node->map_cpu]--;
+
 }
 
 void rmnet_shs_cpu_node_add(struct rmnet_shs_skbn_s *node,
@@ -125,15 +131,18 @@ void rmnet_shs_cpu_node_add(struct rmnet_shs_skbn_s *node,
 			    0xDEF, 0xDEF, 0xDEF, 0xDEF, NULL, NULL);
 
 	list_add(&node->node_id, hd);
+	cpu_num_flows[node->map_cpu]++;
 }
 
 void rmnet_shs_cpu_node_move(struct rmnet_shs_skbn_s *node,
-			     struct list_head *hd)
+			     struct list_head *hd, int oldcpu)
 {
 	SHS_TRACE_LOW(RMNET_SHS_CPU_NODE, RMNET_SHS_CPU_NODE_FUNC_MOVE,
 			    0xDEF, 0xDEF, 0xDEF, 0xDEF, NULL, NULL);
 
 	list_move(&node->node_id, hd);
+	cpu_num_flows[node->map_cpu]++;
+	cpu_num_flows[oldcpu]--;
 }
 
 /* Evaluates the incoming transport protocol of the incoming skb. Determines
@@ -346,6 +355,38 @@ int rmnet_shs_get_mask_len(u8 mask)
 	return sum;
 }
 
+int rmnet_shs_get_core_prio_flow(u8 mask)
+{
+	int ret = INVALID_CPU;
+	int least_flows = INVALID_CPU;
+	u8 curr_idx = 0;
+	u8 i;
+
+	/* Return 1st free core or the core with least # flows
+	 */
+	for (i = 0; i < MAX_CPUS; i++) {
+
+		if (!(mask & (1 <<i)))
+			continue;
+
+		if (mask & (1 << i))
+			curr_idx++;
+
+		if (list_empty(&rmnet_shs_cpu_node_tbl[i].node_list_id)) {
+			return i;
+		}
+
+		if (cpu_num_flows[i] <= least_flows ||
+		    least_flows == INVALID_CPU) {
+			ret = i;
+			least_flows = cpu_num_flows[i];
+		}
+
+	}
+
+	return ret;
+}
+
 /* Take a index and a mask and returns what active CPU is
  * in that index.
  */
@@ -427,7 +468,8 @@ int rmnet_shs_get_suggested_cpu(struct rmnet_shs_skbn_s *node)
 	/* Return same perf core unless moving to gold from silver*/
 	if (rmnet_shs_cpu_node_tbl[node->map_cpu].prio &&
 	    rmnet_shs_is_lpwr_cpu(node->map_cpu)) {
-		cpu = rmnet_shs_wq_get_least_utilized_core(0xF0);
+		cpu = rmnet_shs_get_core_prio_flow(PERF_MASK &
+						   rmnet_shs_cfg.map_mask);
 		if (cpu < 0 && node->hstats != NULL)
 			cpu = node->hstats->suggested_cpu;
 	} else if (node->hstats != NULL)
@@ -628,7 +670,8 @@ int rmnet_shs_node_can_flush_pkts(struct rmnet_shs_skbn_s *node, u8 force_flush)
 				rmnet_shs_update_cpu_proc_q_all_cpus();
 				node->queue_head = cpun->qhead;
 				rmnet_shs_cpu_node_move(node,
-							&cpun->node_list_id);
+							&cpun->node_list_id,
+							cpu_num);
 				SHS_TRACE_HIGH(RMNET_SHS_FLUSH,
 					RMNET_SHS_FLUSH_NODE_CORE_SWITCH,
 					node->map_cpu, prev_cpu,
@@ -945,6 +988,7 @@ void rmnet_shs_flush_lock_table(u8 flsh, u8 ctxt)
 			    !rmnet_shs_cpu_node_tbl[cpu_num].prio) {
 
 				rmnet_shs_cpu_node_tbl[cpu_num].prio = 1;
+				rmnet_shs_boost_cpus();
 				if (hrtimer_active(&GET_CTIMER(cpu_num)))
 					hrtimer_cancel(&GET_CTIMER(cpu_num));
 
@@ -1179,8 +1223,9 @@ enum hrtimer_restart rmnet_shs_queue_core(struct hrtimer *t)
 	struct core_flush_s *core_work = container_of(t,
 				 struct core_flush_s, core_timer);
 
-	schedule_work(&core_work->work);
+	rmnet_shs_reset_cpus();
 
+	schedule_work(&core_work->work);
 	return ret;
 }
 
@@ -1276,6 +1321,8 @@ void rmnet_shs_init(struct net_device *dev, struct net_device *vnd)
 	rmnet_shs_cfg.map_len = rmnet_shs_get_mask_len(rmnet_shs_cfg.map_mask);
 	for (num_cpu = 0; num_cpu < MAX_CPUS; num_cpu++)
 		INIT_LIST_HEAD(&rmnet_shs_cpu_node_tbl[num_cpu].node_list_id);
+
+	rmnet_shs_freq_init();
 
 	rmnet_shs_cfg.rmnet_shs_init_complete = 1;
 }
@@ -1543,6 +1590,7 @@ void rmnet_shs_assign(struct sk_buff *skb, struct rmnet_port *port)
  */
 void rmnet_shs_exit(void)
 {
+	rmnet_shs_freq_exit();
 	qmi_rmnet_ps_ind_deregister(rmnet_shs_cfg.port,
 				    &rmnet_shs_cfg.rmnet_idl_ind_cb);
 
