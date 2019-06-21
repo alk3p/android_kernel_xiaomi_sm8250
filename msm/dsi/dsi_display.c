@@ -29,6 +29,7 @@
 
 #define MISR_BUFF_SIZE	256
 #define ESD_MODE_STRING_MAX_LEN 256
+#define ESD_TRIGGER_STRING_MAX_LEN 10
 
 #define MAX_NAME_SIZE	64
 
@@ -69,6 +70,8 @@ static int dsi_display_config_clk_gating(struct dsi_display *display,
 {
 	int rc = 0, i = 0;
 	struct dsi_display_ctrl *mctrl, *ctrl;
+	enum dsi_clk_gate_type clk_selection;
+	enum dsi_clk_gate_type const default_clk_select = PIXEL_CLK | DSI_PHY;
 
 	if (!display) {
 		pr_err("Invalid params\n");
@@ -81,12 +84,28 @@ static int dsi_display_config_clk_gating(struct dsi_display *display,
 		return -EINVAL;
 	}
 
-	rc = dsi_ctrl_config_clk_gating(mctrl->ctrl, enable, PIXEL_CLK |
-							DSI_PHY);
+	clk_selection = display->clk_gating_config;
+
+	if (!enable) {
+		/* for disable path, make sure to disable all clk gating */
+		clk_selection = DSI_CLK_ALL;
+	} else if (!clk_selection || clk_selection > DSI_CLK_NONE) {
+		/* Default selection, no overrides */
+		clk_selection = default_clk_select;
+	} else if (clk_selection == DSI_CLK_NONE) {
+		clk_selection = 0;
+	}
+
+	pr_debug("%s clock gating Byte:%s Pixel:%s PHY:%s\n",
+		enable ? "Enabling" : "Disabling",
+		clk_selection & BYTE_CLK ? "yes" : "no",
+		clk_selection & PIXEL_CLK ? "yes" : "no",
+		clk_selection & DSI_PHY ? "yes" : "no");
+	rc = dsi_ctrl_config_clk_gating(mctrl->ctrl, enable, clk_selection);
 	if (rc) {
-		pr_err("[%s] failed to %s clk gating, rc=%d\n",
+		pr_err("[%s] failed to %s clk gating for clocks %d, rc=%d\n",
 				display->name, enable ? "enable" : "disable",
-				rc);
+				clk_selection, rc);
 		return rc;
 	}
 
@@ -98,11 +117,13 @@ static int dsi_display_config_clk_gating(struct dsi_display *display,
 		 * In Split DSI usecase we should not enable clock gating on
 		 * DSI PHY1 to ensure no display atrifacts are seen.
 		 */
-		rc = dsi_ctrl_config_clk_gating(ctrl->ctrl, enable, PIXEL_CLK);
+		clk_selection &= ~DSI_PHY;
+		rc = dsi_ctrl_config_clk_gating(ctrl->ctrl, enable,
+				clk_selection);
 		if (rc) {
-			pr_err("[%s] failed to %s pixel clk gating, rc=%d\n",
+			pr_err("[%s] failed to %s clk gating for clocks %d, rc=%d\n",
 				display->name, enable ? "enable" : "disable",
-				rc);
+				clk_selection, rc);
 			return rc;
 		}
 	}
@@ -1249,6 +1270,7 @@ static ssize_t debugfs_esd_trigger_check(struct file *file,
 	char *buf;
 	int rc = 0;
 	u32 esd_trigger;
+	size_t len;
 
 	if (!display)
 		return -ENODEV;
@@ -1266,16 +1288,17 @@ static ssize_t debugfs_esd_trigger_check(struct file *file,
 		atomic_read(&display->panel->esd_recovery_pending))
 		return user_len;
 
-	buf = kzalloc(user_len, GFP_KERNEL);
+	buf = kzalloc(ESD_TRIGGER_STRING_MAX_LEN, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
-	if (copy_from_user(buf, user_buf, user_len)) {
+	len = min_t(size_t, user_len, ESD_TRIGGER_STRING_MAX_LEN - 1);
+	if (copy_from_user(buf, user_buf, len)) {
 		rc = -EINVAL;
 		goto error;
 	}
 
-	buf[user_len] = '\0'; /* terminate the string */
+	buf[len] = '\0'; /* terminate the string */
 
 	if (kstrtouint(buf, 10, &esd_trigger)) {
 		rc = -EINVAL;
@@ -1298,7 +1321,7 @@ static ssize_t debugfs_esd_trigger_check(struct file *file,
 		}
 	}
 
-	rc = user_len;
+	rc = len;
 error:
 	kfree(buf);
 	return rc;
@@ -1313,7 +1336,7 @@ static ssize_t debugfs_alter_esd_check_mode(struct file *file,
 	struct drm_panel_esd_config *esd_config;
 	char *buf;
 	int rc = 0;
-	size_t len = min_t(size_t, user_len, ESD_MODE_STRING_MAX_LEN);
+	size_t len;
 
 	if (!display)
 		return -ENODEV;
@@ -1321,10 +1344,11 @@ static ssize_t debugfs_alter_esd_check_mode(struct file *file,
 	if (*ppos)
 		return 0;
 
-	buf = kzalloc(len, GFP_KERNEL);
+	buf = kzalloc(ESD_MODE_STRING_MAX_LEN, GFP_KERNEL);
 	if (ZERO_OR_NULL_PTR(buf))
 		return -ENOMEM;
 
+	len = min_t(size_t, user_len, ESD_MODE_STRING_MAX_LEN - 1);
 	if (copy_from_user(buf, user_buf, len)) {
 		rc = -EINVAL;
 		goto error;
@@ -1347,6 +1371,10 @@ static ssize_t debugfs_alter_esd_check_mode(struct file *file,
 		goto error;
 
 	if (!strcmp(buf, "te_signal_check\n")) {
+		if (display->panel->panel_mode == DSI_OP_VIDEO_MODE) {
+			pr_info("TE based ESD check for Video Mode panels is not allowed\n");
+			goto error;
+		}
 		pr_info("ESD check is switched to TE mode by user\n");
 		esd_config->status_mode = ESD_MODE_PANEL_TE;
 		dsi_display_change_te_irq_status(display, true);
@@ -1387,7 +1415,7 @@ static ssize_t debugfs_read_esd_check_mode(struct file *file,
 	struct drm_panel_esd_config *esd_config;
 	char *buf;
 	int rc = 0;
-	size_t len = min_t(size_t, user_len, ESD_MODE_STRING_MAX_LEN);
+	size_t len;
 
 	if (!display)
 		return -ENODEV;
@@ -1400,7 +1428,7 @@ static ssize_t debugfs_read_esd_check_mode(struct file *file,
 		return -EINVAL;
 	}
 
-	buf = kzalloc(len, GFP_KERNEL);
+	buf = kzalloc(ESD_MODE_STRING_MAX_LEN, GFP_KERNEL);
 	if (ZERO_OR_NULL_PTR(buf))
 		return -ENOMEM;
 
@@ -1411,6 +1439,7 @@ static ssize_t debugfs_read_esd_check_mode(struct file *file,
 		goto error;
 	}
 
+	len = min_t(size_t, user_len, ESD_MODE_STRING_MAX_LEN - 1);
 	if (!esd_config->esd_enabled) {
 		rc = snprintf(buf, len, "ESD feature not enabled");
 		goto output_mode;
@@ -1583,6 +1612,13 @@ static int dsi_display_debugfs_init(struct dsi_display *display)
 	if (!debugfs_create_bool("ulps_status", 0400, dir,
 			&display->ulps_enabled)) {
 		pr_err("[%s] debugfs create ulps status file failed\n",
+		       display->name);
+		goto error_remove_dir;
+	}
+
+	if (!debugfs_create_u32("clk_gating_config", 0600, dir,
+			&display->clk_gating_config)) {
+		pr_err("[%s] debugfs create clk gating config failed\n",
 		       display->name);
 		goto error_remove_dir;
 	}
@@ -3971,6 +4007,10 @@ static int dsi_display_set_mode_sub(struct dsi_display *display,
 		return -EINVAL;
 	}
 
+	if (mode->dsi_mode_flags & DSI_MODE_FLAG_POMS) {
+		display->config.panel_mode = mode->panel_mode;
+		display->panel->panel_mode = mode->panel_mode;
+	}
 	rc = dsi_panel_get_host_cfg_for_mode(display->panel,
 					     mode,
 					     &display->config);
@@ -3996,7 +4036,8 @@ static int dsi_display_set_mode_sub(struct dsi_display *display,
 	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
 		rc = dsi_ctrl_update_host_config(ctrl->ctrl, &display->config,
-				mode->dsi_mode_flags, display->dsi_clk_handle);
+				mode, mode->dsi_mode_flags,
+				display->dsi_clk_handle);
 		if (rc) {
 			pr_err("[%s] failed to update ctrl config, rc=%d\n",
 			       display->name, rc);
@@ -5034,12 +5075,13 @@ static int dsi_display_ext_get_info(struct drm_connector *connector,
 	info->is_connected = connector->status != connector_status_disconnected;
 
 	if (!strcmp(display->display_type, "primary"))
-		info->is_primary = true;
-	else
-		info->is_primary = false;
+		info->display_type = SDE_CONNECTOR_PRIMARY;
+	else if (!strcmp(display->display_type, "secondary"))
+		info->display_type = SDE_CONNECTOR_SECONDARY;
 
 	info->capabilities |= (MSM_DISPLAY_CAP_VID_MODE |
-		MSM_DISPLAY_CAP_EDID | MSM_DISPLAY_CAP_HOT_PLUG);
+			MSM_DISPLAY_CAP_EDID | MSM_DISPLAY_CAP_HOT_PLUG);
+	info->curr_panel_mode = MSM_DISPLAY_VIDEO_MODE;
 
 	mutex_unlock(&display->display_lock);
 	return 0;
@@ -5361,6 +5403,7 @@ int dsi_display_get_info(struct drm_connector *connector,
 {
 	struct dsi_display *display;
 	struct dsi_panel_phy_props phy_props;
+	struct dsi_host_common_cfg *host;
 	int i, rc;
 
 	if (!info || !disp) {
@@ -5389,10 +5432,11 @@ int dsi_display_get_info(struct drm_connector *connector,
 		info->h_tile_instance[i] = display->ctrl[i].ctrl->cell_index;
 
 	info->is_connected = true;
-	info->is_primary = false;
 
 	if (!strcmp(display->display_type, "primary"))
-		info->is_primary = true;
+		info->display_type = SDE_CONNECTOR_PRIMARY;
+	else if (!strcmp(display->display_type, "secondary"))
+		info->display_type = SDE_CONNECTOR_SECONDARY;
 
 	info->width_mm = phy_props.panel_width_mm;
 	info->height_mm = phy_props.panel_height_mm;
@@ -5403,10 +5447,16 @@ int dsi_display_get_info(struct drm_connector *connector,
 
 	switch (display->panel->panel_mode) {
 	case DSI_OP_VIDEO_MODE:
+		info->curr_panel_mode = MSM_DISPLAY_VIDEO_MODE;
 		info->capabilities |= MSM_DISPLAY_CAP_VID_MODE;
+		if (display->panel->panel_mode_switch_enabled)
+			info->capabilities |= MSM_DISPLAY_CAP_CMD_MODE;
 		break;
 	case DSI_OP_CMD_MODE:
+		info->curr_panel_mode = MSM_DISPLAY_CMD_MODE;
 		info->capabilities |= MSM_DISPLAY_CAP_CMD_MODE;
+		if (display->panel->panel_mode_switch_enabled)
+			info->capabilities |= MSM_DISPLAY_CAP_VID_MODE;
 		info->is_te_using_watchdog_timer =
 			display->panel->te_using_watchdog_timer |
 			display->sw_te_using_wd;
@@ -5422,6 +5472,9 @@ int dsi_display_get_info(struct drm_connector *connector,
 
 	info->te_source = display->te_source;
 
+	host = &display->panel->host_config;
+	if (host->split_link.split_link_enabled)
+		info->capabilities |= MSM_DISPLAY_SPLIT_LINK;
 error:
 	mutex_unlock(&display->display_lock);
 	return rc;
@@ -5536,11 +5589,28 @@ int dsi_display_get_modes(struct dsi_display *display,
 		memset(&panel_mode, 0, sizeof(panel_mode));
 
 		rc = dsi_panel_get_mode(display->panel, mode_idx,
-						&panel_mode, topology_override);
+						&panel_mode,
+						topology_override);
 		if (rc) {
 			pr_err("[%s] failed to get mode idx %d from panel\n",
 				   display->name, mode_idx);
 			goto error;
+		}
+
+		/* Calculate dsi frame transfer time */
+		if (display->panel->panel_mode == DSI_OP_CMD_MODE) {
+			dsi_panel_calc_dsi_transfer_time(
+					&display->panel->host_config,
+					&panel_mode.timing);
+			panel_mode.priv_info->dsi_transfer_time_us =
+				panel_mode.timing.dsi_transfer_time_us;
+			panel_mode.priv_info->min_dsi_clk_hz =
+				panel_mode.timing.min_dsi_clk_hz;
+
+			panel_mode.priv_info->mdp_transfer_time_us =
+				panel_mode.priv_info->dsi_transfer_time_us;
+			panel_mode.timing.mdp_transfer_time_us =
+				panel_mode.timing.dsi_transfer_time_us;
 		}
 
 		if (display->ctrl_count > 1) { /* TODO: remove if */
@@ -5704,7 +5774,8 @@ int dsi_display_find_mode(struct dsi_display *display,
 
 		if (cmp->timing.v_active == m->timing.v_active &&
 			cmp->timing.h_active == m->timing.h_active &&
-			cmp->timing.refresh_rate == m->timing.refresh_rate) {
+			cmp->timing.refresh_rate == m->timing.refresh_rate &&
+			cmp->panel_mode == m->panel_mode) {
 			*out_mode = m;
 			rc = 0;
 			break;
@@ -5882,6 +5953,7 @@ int dsi_display_set_mode(struct dsi_display *display,
 {
 	int rc = 0;
 	struct dsi_display_mode adj_mode;
+	struct dsi_mode_info timing;
 
 	if (!display || !mode || !display->panel) {
 		pr_err("Invalid params\n");
@@ -5891,6 +5963,7 @@ int dsi_display_set_mode(struct dsi_display *display,
 	mutex_lock(&display->display_lock);
 
 	adj_mode = *mode;
+	timing = adj_mode.timing;
 	adjust_timing_by_ctrl_count(display, &adj_mode);
 
 	/*For dynamic DSI setting, use specified clock rate */
@@ -5917,6 +5990,11 @@ int dsi_display_set_mode(struct dsi_display *display,
 			goto error;
 		}
 	}
+
+	pr_info("mdp_transfer_time_us=%d us\n",
+			adj_mode.priv_info->mdp_transfer_time_us);
+	pr_info("hactive= %d,vactive= %d,fps=%d",timing.h_active,
+			timing.v_active,timing.refresh_rate);
 
 	memcpy(display->panel->cur_mode, &adj_mode, sizeof(adj_mode));
 error:
@@ -6302,10 +6380,12 @@ int dsi_display_prepare(struct dsi_display *display)
 	dsi_display_ctrl_isr_configure(display, true);
 
 	if (mode->dsi_mode_flags & DSI_MODE_FLAG_DMS) {
-		if (display->is_cont_splash_enabled) {
-			pr_err("DMS is not supposed to be set on first frame\n");
+		if (display->is_cont_splash_enabled &&
+		    display->config.panel_mode == DSI_OP_VIDEO_MODE) {
+			pr_err("DMS not supported on first frame\n");
 			return -EINVAL;
 		}
+
 		/* update dsi ctrl for new mode */
 		rc = dsi_display_pre_switch(display);
 		if (rc)
@@ -6314,7 +6394,8 @@ int dsi_display_prepare(struct dsi_display *display)
 		goto error;
 	}
 
-	if (!display->is_cont_splash_enabled) {
+	if (!(mode->dsi_mode_flags & DSI_MODE_FLAG_POMS) &&
+		(!display->is_cont_splash_enabled)) {
 		/*
 		 * For continuous splash usecase we skip panel
 		 * pre prepare since the regulator vote is already
@@ -6403,11 +6484,13 @@ int dsi_display_prepare(struct dsi_display *display)
 			goto error_ctrl_link_off;
 		}
 
-		rc = dsi_panel_prepare(display->panel);
-		if (rc) {
-			pr_err("[%s] panel prepare failed, rc=%d\n",
-					display->name, rc);
-			goto error_ctrl_link_off;
+		if (!(mode->dsi_mode_flags & DSI_MODE_FLAG_POMS)) {
+			rc = dsi_panel_prepare(display->panel);
+			if (rc) {
+				pr_err("[%s] panel prepare failed, rc=%d\n",
+						display->name, rc);
+				goto error_ctrl_link_off;
+			}
 		}
 	}
 	goto error;
@@ -6728,7 +6811,8 @@ int dsi_display_enable(struct dsi_display *display)
 				   display->name, rc);
 			goto error;
 		}
-	} else {
+	} else if (!(display->panel->cur_mode->dsi_mode_flags &
+			DSI_MODE_FLAG_POMS)){
 		rc = dsi_panel_enable(display->panel);
 		if (rc) {
 			pr_err("[%s] failed to enable DSI panel, rc=%d\n",
@@ -6757,6 +6841,7 @@ int dsi_display_enable(struct dsi_display *display)
 	}
 
 	if (display->config.panel_mode == DSI_OP_VIDEO_MODE) {
+		pr_debug("%s:enable video timing eng\n", __func__);
 		rc = dsi_display_vid_engine_enable(display);
 		if (rc) {
 			pr_err("[%s]failed to enable DSI video engine, rc=%d\n",
@@ -6764,6 +6849,7 @@ int dsi_display_enable(struct dsi_display *display)
 			goto error_disable_panel;
 		}
 	} else if (display->config.panel_mode == DSI_OP_CMD_MODE) {
+		pr_debug("%s:enable command timing eng\n", __func__);
 		rc = dsi_display_cmd_engine_enable(display);
 		if (rc) {
 			pr_err("[%s]failed to enable DSI cmd engine, rc=%d\n",
@@ -6797,10 +6883,18 @@ int dsi_display_post_enable(struct dsi_display *display)
 
 	mutex_lock(&display->display_lock);
 
-	rc = dsi_panel_post_enable(display->panel);
-	if (rc)
-		pr_err("[%s] panel post-enable failed, rc=%d\n",
-		       display->name, rc);
+	if (display->panel->cur_mode->dsi_mode_flags & DSI_MODE_FLAG_POMS) {
+		if (display->config.panel_mode == DSI_OP_CMD_MODE)
+			dsi_panel_mode_switch_to_cmd(display->panel);
+
+		if (display->config.panel_mode == DSI_OP_VIDEO_MODE)
+			dsi_panel_mode_switch_to_vid(display->panel);
+	} else {
+		rc = dsi_panel_post_enable(display->panel);
+		if (rc)
+			pr_err("[%s] panel post-enable failed, rc=%d\n",
+				display->name, rc);
+	}
 
 	/* remove the clk vote for CMD mode panels */
 	if (display->config.panel_mode == DSI_OP_CMD_MODE)
@@ -6826,12 +6920,18 @@ int dsi_display_pre_disable(struct dsi_display *display)
 	if (display->config.panel_mode == DSI_OP_CMD_MODE)
 		dsi_display_clk_ctrl(display->dsi_clk_handle,
 			DSI_ALL_CLKS, DSI_CLK_ON);
+	if (display->poms_pending) {
+		if (display->config.panel_mode == DSI_OP_CMD_MODE)
+			dsi_panel_pre_mode_switch_to_video(display->panel);
 
-	rc = dsi_panel_pre_disable(display->panel);
-	if (rc)
-		pr_err("[%s] panel pre-disable failed, rc=%d\n",
-		       display->name, rc);
-
+		if (display->config.panel_mode == DSI_OP_VIDEO_MODE)
+			dsi_panel_pre_mode_switch_to_cmd(display->panel);
+	} else {
+		rc = dsi_panel_pre_disable(display->panel);
+		if (rc)
+			pr_err("[%s] panel pre-disable failed, rc=%d\n",
+				display->name, rc);
+	}
 	mutex_unlock(&display->display_lock);
 	return rc;
 }
@@ -6868,11 +6968,12 @@ int dsi_display_disable(struct dsi_display *display)
 		rc = -EINVAL;
 	}
 
-	rc = dsi_panel_disable(display->panel);
-	if (rc)
-		pr_err("[%s] failed to disable DSI panel, rc=%d\n",
-		       display->name, rc);
-
+	if (!display->poms_pending) {
+		rc = dsi_panel_disable(display->panel);
+		if (rc)
+			pr_err("[%s] failed to disable DSI panel, rc=%d\n",
+				display->name, rc);
+	}
 	mutex_unlock(&display->display_lock);
 	SDE_EVT32(SDE_EVTLOG_FUNC_EXIT);
 	return rc;
@@ -6911,12 +7012,12 @@ int dsi_display_unprepare(struct dsi_display *display)
 	if (rc)
 		pr_err("[%s] display wake up failed, rc=%d\n",
 		       display->name, rc);
-
-	rc = dsi_panel_unprepare(display->panel);
-	if (rc)
-		pr_err("[%s] panel unprepare failed, rc=%d\n",
-		       display->name, rc);
-
+	if (!display->poms_pending) {
+		rc = dsi_panel_unprepare(display->panel);
+		if (rc)
+			pr_err("[%s] panel unprepare failed, rc=%d\n",
+			       display->name, rc);
+	}
 	rc = dsi_display_ctrl_host_disable(display);
 	if (rc)
 		pr_err("[%s] failed to disable DSI host, rc=%d\n",
@@ -6949,10 +7050,12 @@ int dsi_display_unprepare(struct dsi_display *display)
 	/* destrory dsi isr set up */
 	dsi_display_ctrl_isr_configure(display, false);
 
-	rc = dsi_panel_post_unprepare(display->panel);
-	if (rc)
-		pr_err("[%s] panel post-unprepare failed, rc=%d\n",
-		       display->name, rc);
+	if (!display->poms_pending) {
+		rc = dsi_panel_post_unprepare(display->panel);
+		if (rc)
+			pr_err("[%s] panel post-unprepare failed, rc=%d\n",
+			       display->name, rc);
+	}
 
 	mutex_unlock(&display->display_lock);
 

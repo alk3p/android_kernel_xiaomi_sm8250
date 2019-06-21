@@ -28,6 +28,17 @@
 		value;\
 	})
 
+#define DSI_H_ACTIVE_DSC(t) \
+	({\
+		u64 value;\
+		if ((t)->dsc_enabled && (t)->dsc)\
+			value = (t)->dsc->pclk_per_line;\
+		else\
+			value = (t)->h_active;\
+		value;\
+	})
+
+
 #define DSI_DEBUG_NAME_LEN		32
 #define display_for_each_ctrl(index, display) \
 	for (index = 0; (index < (display)->ctrl_count) &&\
@@ -74,6 +85,8 @@ enum dsi_op_mode {
  * @DSI_MODE_FLAG_DMS: Seamless transition is dynamic mode switch
  * @DSI_MODE_FLAG_VRR: Seamless transition is DynamicFPS.
  *                     New timing values are sent from DAL.
+ * @DSI_MODE_FLAG_POMS:
+ *         Seamless transition is dynamic panel operating mode switch
  */
 enum dsi_mode_flags {
 	DSI_MODE_FLAG_SEAMLESS			= BIT(0),
@@ -81,6 +94,7 @@ enum dsi_mode_flags {
 	DSI_MODE_FLAG_VBLANK_PRE_MODESET	= BIT(2),
 	DSI_MODE_FLAG_DMS			= BIT(3),
 	DSI_MODE_FLAG_VRR			= BIT(4),
+	DSI_MODE_FLAG_POMS			= BIT(5),
 };
 
 /**
@@ -285,11 +299,15 @@ enum dsi_cmd_set_state {
  * @PIXEL_CLK:  DSI pixel clock.
  * @BYTE_CLK:   DSI byte clock.
  * @DSI_PHY:    DSI PHY.
+ * @DSI_CLK_ALL: All available DSI clocks
+ * @DSI_CLK_NONE: None of the clocks should be gated
  */
 enum dsi_clk_gate_type {
 	PIXEL_CLK = 1,
 	BYTE_CLK = 2,
 	DSI_PHY = 4,
+	DSI_CLK_ALL = (PIXEL_CLK | BYTE_CLK | DSI_PHY),
+	DSI_CLK_NONE = 8,
 };
 
 /**
@@ -367,8 +385,10 @@ struct dsi_panel_cmd_set {
  * @v_sync_polarity:  Polarity of VSYNC (false is active low).
  * @refresh_rate:     Refresh rate in Hz.
  * @clk_rate_hz:      DSI bit clock rate per lane in Hz.
+ * @min_dsi_clk_hz:   Min DSI bit clock to transfer in vsync time.
  * @mdp_transfer_time_us:   Specifies the mdp transfer time for command mode
  *                    panels in microseconds.
+ * @dsi_transfer_time_us:   Specifies dsi transfer time for command mode.
  * @dsc_enabled:      DSC compression enabled.
  * @dsc:              DSC compression configuration.
  * @roi_caps:         Panel ROI capabilities.
@@ -389,16 +409,32 @@ struct dsi_mode_info {
 
 	u32 refresh_rate;
 	u64 clk_rate_hz;
+	u64 min_dsi_clk_hz;
 	u32 mdp_transfer_time_us;
+	u32 dsi_transfer_time_us;
 	bool dsc_enabled;
 	struct msm_display_dsc_info *dsc;
 	struct msm_roi_caps roi_caps;
 };
 
 /**
+ * struct dsi_split_link_config - Split Link Configuration
+ * @split_link_enabled:  Split Link Enabled.
+ * @num_sublinks:     Number of sublinks.
+ * @lanes_per_sublink:   Number of lanes per sublink.
+ */
+struct dsi_split_link_config {
+	bool split_link_enabled;
+	u32 num_sublinks;
+	u32 lanes_per_sublink;
+};
+
+/**
  * struct dsi_host_common_cfg - Host configuration common to video and cmd mode
  * @dst_format:          Destination pixel format.
  * @data_lanes:          Physical data lanes to be enabled.
+ * @num_data_lanes:      Number of physical data lanes.
+ * @bpp:                 Number of bits per pixel.
  * @en_crc_check:        Enable CRC checks.
  * @en_ecc_check:        Enable ECC checks.
  * @te_mode:             Source for TE signalling.
@@ -420,10 +456,13 @@ struct dsi_mode_info {
  *                       true.
  * @ext_bridge_mode:     External bridge is connected.
  * @force_hs_clk_lane:   Send continuous clock to the panel.
+ * @dsi_split_link_config:  Split Link Configuration.
  */
 struct dsi_host_common_cfg {
 	enum dsi_pixel_format dst_format;
 	enum dsi_data_lanes data_lanes;
+	u8 num_data_lanes;
+	u8 bpp;
 	bool en_crc_check;
 	bool en_ecc_check;
 	enum dsi_te_mode te_mode;
@@ -440,6 +479,7 @@ struct dsi_host_common_cfg {
 	bool append_tx_eot;
 	bool ext_bridge_mode;
 	bool force_hs_clk_lane;
+	struct dsi_split_link_config split_link;
 };
 
 /**
@@ -526,7 +566,9 @@ struct dsi_host_config {
  * @panel_prefill_lines:  Panel prefill lines for RSC
  * @mdp_transfer_time_us:   Specifies the mdp transfer time for command mode
  *                          panels in microseconds.
+ * @dsi_transfer_time_us: Specifies the dsi transfer time for cmd panels.
  * @clk_rate_hz:          DSI bit clock per lane in hz.
+ * @min_dsi_clk_hz:       Min dsi clk per lane to transfer frame in vsync time.
  * @topology:             Topology selected for the panel
  * @dsc:                  DSC compression info
  * @dsc_enabled:          DSC compression enabled
@@ -542,7 +584,9 @@ struct dsi_display_mode_priv_info {
 	u32 panel_jitter_denom;
 	u32 panel_prefill_lines;
 	u32 mdp_transfer_time_us;
+	u32 dsi_transfer_time_us;
 	u64 clk_rate_hz;
+	u64 min_dsi_clk_hz;
 
 	struct msm_display_topology topology;
 	struct msm_display_dsc_info dsc;
@@ -555,12 +599,14 @@ struct dsi_display_mode_priv_info {
  * @timing:         Timing parameters for the panel.
  * @pixel_clk_khz:  Pixel clock in Khz.
  * @dsi_mode_flags: Flags to signal other drm components via private flags
+ * @panel_mode:      Panel mode
  * @priv_info:      Mode private info
  */
 struct dsi_display_mode {
 	struct dsi_mode_info timing;
 	u32 pixel_clk_khz;
 	u32 dsi_mode_flags;
+	enum dsi_op_mode panel_mode;
 	struct dsi_display_mode_priv_info *priv_info;
 };
 

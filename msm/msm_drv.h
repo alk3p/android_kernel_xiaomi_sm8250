@@ -65,11 +65,11 @@ struct msm_gem_address_space;
 struct msm_gem_vma;
 
 #define NUM_DOMAINS    4    /* one for KMS, then one per gpu core (?) */
-#define MAX_CRTCS      8
+#define MAX_CRTCS      16
 #define MAX_PLANES     20
-#define MAX_ENCODERS   8
-#define MAX_BRIDGES    8
-#define MAX_CONNECTORS 8
+#define MAX_ENCODERS   16
+#define MAX_BRIDGES    16
+#define MAX_CONNECTORS 16
 
 #define TEARDOWN_DEADLOCK_RETRY_MAX 5
 
@@ -238,6 +238,7 @@ enum msm_display_compression_ratio {
  * @MSM_DISPLAY_CAP_EDID:               EDID supported
  * @MSM_DISPLAY_ESD_ENABLED:            ESD feature enabled
  * @MSM_DISPLAY_CAP_MST_MODE:           Display with MST support
+ * @MSM_DISPLAY_SPLIT_LINK:             Split Link enabled
  */
 enum msm_display_caps {
 	MSM_DISPLAY_CAP_VID_MODE	= BIT(0),
@@ -246,6 +247,19 @@ enum msm_display_caps {
 	MSM_DISPLAY_CAP_EDID		= BIT(3),
 	MSM_DISPLAY_ESD_ENABLED		= BIT(4),
 	MSM_DISPLAY_CAP_MST_MODE	= BIT(5),
+	MSM_DISPLAY_SPLIT_LINK		= BIT(6),
+};
+
+/**
+ * enum panel_mode - panel operation mode
+ * @MSM_DISPLAY_VIDEO_MODE: video mode panel
+ * @MSM_DISPLAY_CMD_MODE:   Command mode panel
+ * @MODE_MAX:
+ */
+enum panel_op_mode {
+	MSM_DISPLAY_VIDEO_MODE = 0,
+	MSM_DISPLAY_CMD_MODE,
+	MSM_DISPLAY_MODE_MAX,
 };
 
 /**
@@ -474,7 +488,7 @@ struct msm_mode_info {
  * @max_height:         Max height of display. In case of hot pluggable display
  *                      this is max height supported by controller
  * @clk_rate:           DSI bit clock per lane in HZ.
- * @is_primary:         Set to true if display is primary display
+ * @display_type:       Enum for type of display
  * @is_te_using_watchdog_timer:  Boolean to indicate watchdog TE is
  *				 used instead of panel TE in cmd mode panels
  * @roi_caps:           Region of interest capability info
@@ -484,7 +498,7 @@ struct msm_mode_info {
 struct msm_display_info {
 	int intf_type;
 	uint32_t capabilities;
-
+	enum panel_op_mode curr_panel_mode;
 	uint32_t num_of_h_tiles;
 	uint32_t h_tile_instance[MAX_H_TILES_PER_DISPLAY];
 
@@ -497,7 +511,7 @@ struct msm_display_info {
 	uint32_t max_height;
 	uint64_t clk_rate;
 
-	bool is_primary;
+	uint32_t display_type;
 	bool is_te_using_watchdog_timer;
 	struct msm_roi_caps roi_caps;
 

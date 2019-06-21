@@ -152,6 +152,13 @@ struct dp_mst_encoder_info_cache {
 struct dp_mst_private dp_mst;
 struct dp_mst_encoder_info_cache dp_mst_enc_cache;
 
+static void dp_mst_sim_destroy_port(struct kref *ref)
+{
+	struct drm_dp_mst_port *port = container_of(ref,
+			struct drm_dp_mst_port, kref);
+	kfree(port);
+}
+
 /* DRM DP MST Framework simulator OPs */
 static void dp_mst_sim_add_port(struct dp_mst_private *mst,
 			struct dp_mst_sim_port_data *port_msg)
@@ -196,13 +203,14 @@ static void dp_mst_sim_add_port(struct dp_mst_private *mst,
 			mutex_lock(&mstb->mgr->lock);
 			list_del(&port->next);
 			mutex_unlock(&mstb->mgr->lock);
+			kref_put(&port->kref, dp_mst_sim_destroy_port);
 			goto put_port;
 		}
 		(*mstb->mgr->cbs->register_connector)(port->connector);
 	}
 
 put_port:
-	kref_put(&port->kref, NULL);
+	kref_put(&port->kref, dp_mst_sim_destroy_port);
 }
 
 static void dp_mst_sim_link_probe_work(struct work_struct *work)
@@ -600,6 +608,9 @@ static void _dp_mst_bridge_pre_enable_part1(struct dp_mst_bridge *dp_bridge)
 
 	/* skip mst specific disable operations during suspend */
 	if (mst->state == PM_SUSPEND) {
+		dp_display->wakeup_phy_layer(dp_display, true);
+		drm_dp_send_power_updown_phy(&mst->mst_mgr, port, true);
+		dp_display->wakeup_phy_layer(dp_display, false);
 		_dp_mst_update_single_timeslot(mst, dp_bridge);
 		return;
 	}
@@ -683,8 +694,12 @@ static void _dp_mst_bridge_pre_disable_part2(struct dp_mst_bridge *dp_bridge)
 	DP_MST_DEBUG("enter\n");
 
 	/* skip mst specific disable operations during suspend */
-	if (mst->state == PM_SUSPEND)
+	if (mst->state == PM_SUSPEND) {
+		dp_display->wakeup_phy_layer(dp_display, true);
+		drm_dp_send_power_updown_phy(&mst->mst_mgr, port, false);
+		dp_display->wakeup_phy_layer(dp_display, false);
 		return;
+	}
 
 	mst->mst_fw_cbs->check_act_status(&mst->mst_mgr);
 

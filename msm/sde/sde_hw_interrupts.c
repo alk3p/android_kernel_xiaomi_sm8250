@@ -126,6 +126,7 @@
 /**
  * Concurrent WB overflow interrupt status bit definitions
  */
+#define SDE_INTR_CWB_1_OVERFLOW BIT(8)
 #define SDE_INTR_CWB_2_OVERFLOW BIT(14)
 #define SDE_INTR_CWB_3_OVERFLOW BIT(15)
 #define SDE_INTR_CWB_4_OVERFLOW BIT(20)
@@ -306,6 +307,8 @@ static struct sde_irq_type sde_irq_intr2_map[] = {
 
 	{ SDE_IRQ_TYPE_PING_PONG_WR_PTR, PINGPONG_S0,
 		SDE_INTR_PING_PONG_S0_WR_PTR, -1},
+
+	{ SDE_IRQ_TYPE_CWB_OVERFLOW, CWB_1, SDE_INTR_CWB_1_OVERFLOW, -1},
 
 	{ SDE_IRQ_TYPE_PING_PONG_RD_PTR, PINGPONG_S0,
 		SDE_INTR_PING_PONG_S0_RD_PTR, -1},

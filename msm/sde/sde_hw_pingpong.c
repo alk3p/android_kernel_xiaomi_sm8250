@@ -176,6 +176,7 @@ static int sde_hw_pp_setup_te_config(struct sde_hw_pingpong *pp,
 	SDE_REG_WRITE(c, PP_SYNC_CONFIG_HEIGHT, te->sync_cfg_height);
 	SDE_REG_WRITE(c, PP_VSYNC_INIT_VAL, te->vsync_init_val);
 	SDE_REG_WRITE(c, PP_RD_PTR_IRQ, te->rd_ptr_irq);
+	SDE_REG_WRITE(c, PP_WR_PTR_IRQ, te->wr_ptr_irq);
 	SDE_REG_WRITE(c, PP_START_POS, te->start_pos);
 	SDE_REG_WRITE(c, PP_SYNC_THRESH,
 			((te->sync_threshold_continue << 16) |
@@ -537,6 +538,15 @@ struct sde_hw_pingpong *sde_hw_pingpong_init(enum sde_pingpong idx,
 
 	sde_dbg_reg_register_dump_range(SDE_DBG_NAME, cfg->name, c->hw.blk_off,
 			c->hw.blk_off + c->hw.length, c->hw.xin_id);
+
+	if (cfg->sblk->dither.base && cfg->sblk->dither.len) {
+		sde_dbg_reg_register_dump_range(SDE_DBG_NAME,
+			cfg->sblk->dither.name,
+			c->hw.blk_off + cfg->sblk->dither.base,
+			c->hw.blk_off + cfg->sblk->dither.base +
+			cfg->sblk->dither.len,
+			c->hw.xin_id);
+	}
 
 	return c;
 
