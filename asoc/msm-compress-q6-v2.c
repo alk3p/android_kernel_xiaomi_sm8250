@@ -4738,9 +4738,9 @@ static int msm_compr_channel_mixer_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 	chmixer_pspd->output_channel = ucontrol->value.integer.value[3];
 	chmixer_pspd->port_idx = ucontrol->value.integer.value[4];
 
-	if (chmixer_pspd->input_channel <= 0 ||
+	if (chmixer_pspd->input_channel < 0 ||
 		chmixer_pspd->input_channel > PCM_FORMAT_MAX_NUM_CHANNEL_V8 ||
-		chmixer_pspd->output_channel <= 0 ||
+		chmixer_pspd->output_channel < 0 ||
 		chmixer_pspd->output_channel > PCM_FORMAT_MAX_NUM_CHANNEL_V8) {
 		pr_err("%s: Invalid channels, in %d, out %d\n",
 				__func__, chmixer_pspd->input_channel,
@@ -4795,7 +4795,7 @@ static int msm_compr_channel_mixer_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 		if (prtd && prtd->audio_client) {
 			stream_id = prtd->audio_client->session;
 			be_id = chmixer_pspd->port_idx;
-			ret = msm_pcm_routing_set_channel_mixer_runtime(be_id,
+			msm_pcm_routing_set_channel_mixer_runtime(be_id,
 					stream_id, session_type, chmixer_pspd);
 		}
 	}
@@ -5387,6 +5387,7 @@ static struct platform_driver msm_compr_driver = {
 		.name = "msm-compress-dsp",
 		.owner = THIS_MODULE,
 		.of_match_table = msm_compr_dt_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = msm_compr_dev_probe,
 	.remove = msm_compr_remove,

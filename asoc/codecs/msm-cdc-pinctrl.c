@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -122,9 +122,10 @@ EXPORT_SYMBOL(msm_cdc_pinctrl_select_active_state);
  * msm_cdc_pinctrl_get_state: get curren pinctrl state
  * @np: pointer to struct device_node
  *
- * Returns 0 for sleep state, 1 for active state
+ * Returns 0 for sleep state, 1 for active state,
+ * error code for failure
  */
-bool msm_cdc_pinctrl_get_state(struct device_node *np)
+int msm_cdc_pinctrl_get_state(struct device_node *np)
 {
 	struct msm_cdc_pinctrl_info *gpio_data;
 
@@ -233,6 +234,7 @@ static struct platform_driver msm_cdc_pinctrl_driver = {
 		.name = "msm-cdc-pinctrl",
 		.owner = THIS_MODULE,
 		.of_match_table = msm_cdc_pinctrl_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = msm_cdc_pinctrl_probe,
 	.remove = msm_cdc_pinctrl_remove,

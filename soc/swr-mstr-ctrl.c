@@ -984,6 +984,26 @@ static int swrm_slvdev_datapath_control(struct swr_master *master, bool enable)
 
 	mutex_lock(&swrm->mlock);
 
+	/*
+	 * During disable if master is already down, which implies an ssr/pdr
+	 * scenario, just mark ports as disabled and exit
+	 */
+	if (swrm->state == SWR_MSTR_SSR && !enable) {
+		if (!test_bit(DISABLE_PENDING, &swrm->port_req_pending)) {
+			dev_dbg(swrm->dev, "%s:No pending disconn port req\n",
+				__func__);
+			goto exit;
+		}
+		clear_bit(DISABLE_PENDING, &swrm->port_req_pending);
+		swrm_cleanup_disabled_port_reqs(master);
+		if (!swrm_is_port_en(master)) {
+			dev_dbg(&master->dev, "%s: pm_runtime auto suspend triggered\n",
+				__func__);
+			pm_runtime_mark_last_busy(swrm->dev);
+			pm_runtime_put_autosuspend(swrm->dev);
+		}
+		goto exit;
+	}
 	bank = get_inactive_bank_num(swrm);
 
 	if (enable) {
@@ -2282,6 +2302,7 @@ static int swrm_runtime_resume(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct swr_mstr_ctrl *swrm = platform_get_drvdata(pdev);
 	int ret = 0;
+	bool clk_err = false;
 	struct swr_master *mstr = &swrm->master;
 	struct swr_device *swr_dev;
 
@@ -2289,11 +2310,15 @@ static int swrm_runtime_resume(struct device *dev)
 		__func__, swrm->state);
 	mutex_lock(&swrm->reslock);
 
-	if (swrm->lpass_core_hw_vote)
+	if (swrm->lpass_core_hw_vote) {
 		ret = clk_prepare_enable(swrm->lpass_core_hw_vote);
-		if (ret < 0)
+		if (ret < 0) {
 			dev_err(dev, "%s:lpass core hw enable failed\n",
 				__func__);
+			ret = 0;
+			clk_err = true;
+		}
+	}
 
 	if ((swrm->state == SWR_MSTR_DOWN) ||
 	    (swrm->state == SWR_MSTR_SSR && swrm->dev_up)) {
@@ -2306,7 +2331,6 @@ static int swrm_runtime_resume(struct device *dev)
 		if (swrm_clk_request(swrm, true))
 			goto exit;
 		if (!swrm->clk_stop_mode0_supp || swrm->state == SWR_MSTR_SSR) {
-			enable_bank_switch(swrm, 0, SWR_ROW_50, SWR_MIN_COL);
 			list_for_each_entry(swr_dev, &mstr->devices, dev_list) {
 				ret = swr_device_up(swr_dev);
 				if (ret == -ENODEV) {
@@ -2327,7 +2351,11 @@ static int swrm_runtime_resume(struct device *dev)
 			swrm_master_init(swrm);
 			swrm_cmd_fifo_wr_cmd(swrm, 0x4, 0xF, 0x0,
 						SWRS_SCP_INT_STATUS_MASK_1);
-
+			if (swrm->state == SWR_MSTR_SSR) {
+				mutex_unlock(&swrm->reslock);
+				enable_bank_switch(swrm, 0, SWR_ROW_50, SWR_MIN_COL);
+				mutex_lock(&swrm->reslock);
+			}
 		} else {
 			/*wake up from clock stop*/
 			swr_master_write(swrm, SWRM_MCP_BUS_CTRL_ADDR, 0x2);
@@ -2336,7 +2364,7 @@ static int swrm_runtime_resume(struct device *dev)
 		swrm->state = SWR_MSTR_UP;
 	}
 exit:
-	if (swrm->lpass_core_hw_vote)
+	if (swrm->lpass_core_hw_vote && !clk_err)
 		clk_disable_unprepare(swrm->lpass_core_hw_vote);
 	pm_runtime_set_autosuspend_delay(&pdev->dev, auto_suspend_timer);
 	mutex_unlock(&swrm->reslock);
@@ -2348,6 +2376,7 @@ static int swrm_runtime_suspend(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct swr_mstr_ctrl *swrm = platform_get_drvdata(pdev);
 	int ret = 0;
+	bool clk_err = false;
 	struct swr_master *mstr = &swrm->master;
 	struct swr_device *swr_dev;
 	int current_state = 0;
@@ -2358,11 +2387,15 @@ static int swrm_runtime_suspend(struct device *dev)
 	mutex_lock(&swrm->force_down_lock);
 	current_state = swrm->state;
 	mutex_unlock(&swrm->force_down_lock);
-	if (swrm->lpass_core_hw_vote)
+	if (swrm->lpass_core_hw_vote) {
 		ret = clk_prepare_enable(swrm->lpass_core_hw_vote);
-		if (ret < 0)
+		if (ret < 0) {
 			dev_err(dev, "%s:lpass core hw enable failed\n",
 				__func__);
+			ret = 0;
+			clk_err = true;
+		}
+	}
 
 	if ((current_state == SWR_MSTR_UP) ||
 	    (current_state == SWR_MSTR_SSR)) {
@@ -2414,7 +2447,7 @@ static int swrm_runtime_suspend(struct device *dev)
 	if (current_state != SWR_MSTR_SSR)
 		swrm->state = SWR_MSTR_DOWN;
 exit:
-	if (swrm->lpass_core_hw_vote)
+	if (swrm->lpass_core_hw_vote && !clk_err)
 		clk_disable_unprepare(swrm->lpass_core_hw_vote);
 	mutex_unlock(&swrm->reslock);
 	return ret;
@@ -2931,6 +2964,7 @@ static struct platform_driver swr_mstr_driver = {
 		.owner = THIS_MODULE,
 		.pm = &swrm_dev_pm_ops,
 		.of_match_table = swrm_dt_match,
+		.suppress_bind_attrs = true,
 	},
 };
 

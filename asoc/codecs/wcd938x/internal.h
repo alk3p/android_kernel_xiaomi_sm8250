@@ -94,6 +94,8 @@ struct wcd938x_priv {
 	/* Entry for version info */
 	struct snd_info_entry *entry;
 	struct snd_info_entry *version_entry;
+	int flyback_cur_det_disable;
+	int ear_rx_path;
 };
 
 struct wcd938x_micbias_setting {

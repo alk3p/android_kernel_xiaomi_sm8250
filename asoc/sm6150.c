@@ -5928,6 +5928,7 @@ static int msm_mi2s_snd_startup(struct snd_pcm_substream *substream)
 		if (mi2s_intf_conf[index].msm_is_ext_mclk) {
 			pr_debug("%s: Enabling mclk, clk_freq_in_hz = %u\n",
 				__func__, mi2s_mclk[index].clk_freq_in_hz);
+			mi2s_mclk[index].enable = 1;
 			ret = afe_set_lpass_clock_v2(port_id,
 						     &mi2s_mclk[index]);
 			if (ret < 0) {
@@ -5935,7 +5936,6 @@ static int msm_mi2s_snd_startup(struct snd_pcm_substream *substream)
 					__func__, ret);
 				goto clk_off;
 			}
-			mi2s_mclk[index].enable = 1;
 		}
 		if (pdata->mi2s_gpio_p[index])
 			msm_cdc_pinctrl_select_active_state(
@@ -5988,12 +5988,12 @@ static void msm_mi2s_snd_shutdown(struct snd_pcm_substream *substream)
 		if (mi2s_intf_conf[index].msm_is_ext_mclk) {
 			pr_debug("%s: Disabling mclk, clk_freq_in_hz = %u\n",
 				 __func__, mi2s_mclk[index].clk_freq_in_hz);
+			mi2s_mclk[index].enable = 0;
 			ret = afe_set_lpass_clock_v2(port_id,
 						     &mi2s_mclk[index]);
 			if (ret < 0)
 				pr_err("%s: mclk disable failed for MCLK (%d); ret=%d\n",
 					__func__, index, ret);
-			mi2s_mclk[index].enable = 0;
 		}
 	}
 	mutex_unlock(&mi2s_intf_conf[index].lock);
@@ -9297,11 +9297,23 @@ static struct platform_driver sm6150_asoc_machine_driver = {
 		.owner = THIS_MODULE,
 		.pm = &snd_soc_pm_ops,
 		.of_match_table = sm6150_asoc_machine_of_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = msm_asoc_machine_probe,
 	.remove = msm_asoc_machine_remove,
 };
-module_platform_driver(sm6150_asoc_machine_driver);
+
+int __init sm6150_init(void)
+{
+	pr_debug("%s\n", __func__);
+	return platform_driver_register(&sm6150_asoc_machine_driver);
+}
+
+void sm6150_exit(void)
+{
+	pr_debug("%s\n", __func__);
+	platform_driver_unregister(&sm6150_asoc_machine_driver);
+}
 
 MODULE_DESCRIPTION("ALSA SoC SM6150 Machine driver");
 MODULE_LICENSE("GPL v2");
