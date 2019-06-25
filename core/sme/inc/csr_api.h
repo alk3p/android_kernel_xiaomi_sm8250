@@ -32,7 +32,7 @@
 
 #define CSR_INVALID_SCANRESULT_HANDLE       (NULL)
 
-typedef enum {
+enum csr_akm_type {
 	/* never used */
 	eCSR_AUTH_TYPE_NONE,
 	/* MAC layer authentication types */
@@ -73,7 +73,7 @@ typedef enum {
 	eCSR_AUTH_TYPE_FAILED = 0xff,
 	eCSR_AUTH_TYPE_UNKNOWN = eCSR_AUTH_TYPE_FAILED,
 
-} eCsrAuthType;
+};
 
 typedef enum {
 	eCSR_ENCRYPT_TYPE_NONE,
@@ -245,7 +245,7 @@ typedef struct tagCsrEncryptionList {
 
 typedef struct tagCsrAuthList {
 	uint32_t numEntries;
-	eCsrAuthType authType[eCSR_NUM_OF_SUPPORT_AUTH_TYPE];
+	enum csr_akm_type authType[eCSR_NUM_OF_SUPPORT_AUTH_TYPE];
 } tCsrAuthList, *tpCsrAuthList;
 
 #ifdef FEATURE_WLAN_ESE
@@ -450,7 +450,7 @@ typedef enum {
 	eCSR_ROAM_RESULT_SUCCESS = eCSR_ROAM_RESULT_NONE,
 	/*
 	 * If roamStatus is eCSR_ROAM_ASSOCIATION_COMPLETION,
-	 * struct csr_roam_info's pBssDesc may pass back
+	 * struct csr_roam_info's bss_desc may pass back
 	 */
 	eCSR_ROAM_RESULT_FAILURE,
 	/* Pass back pointer to struct csr_roam_info */
@@ -463,7 +463,7 @@ typedef enum {
 	eCSR_ROAM_RESULT_CAP_CHANGED,
 	/*
 	 * This means we starts an IBSS struct csr_roam_info's
-	 * pBssDesc may pass back
+	 * bss_desc may pass back
 	 */
 	eCSR_ROAM_RESULT_IBSS_STARTED,
 	eCSR_ROAM_RESULT_IBSS_START_FAILED,
@@ -473,7 +473,7 @@ typedef enum {
 	eCSR_ROAM_RESULT_IBSS_INACTIVE,
 	/*
 	 * If roamStatus is eCSR_ROAM_ASSOCIATION_COMPLETION struct
-	 * csr_roam_info's pBssDesc may pass back and the peer's MAC
+	 * csr_roam_info's bss_desc may pass back and the peer's MAC
 	 * address in peerMacOrBssid. If roamStatus is
 	 * eCSR_ROAM_IBSS_IND, the peer's MAC address in
 	 * peerMacOrBssid and a beacon frame of the IBSS in pbFrames
@@ -747,7 +747,7 @@ struct csr_roam_profile {
 	uint32_t phyMode;
 	eCsrRoamBssType BSSType;
 	tCsrAuthList AuthType;
-	eCsrAuthType negotiatedAuthType;
+	enum csr_akm_type negotiatedAuthType;
 	tCsrAuthList akm_list;
 	tCsrEncryptionList EncryptionType;
 	/* This field is for output only, not for input */
@@ -856,7 +856,7 @@ typedef struct tagCsrRoamConnectedProfile {
 	struct qdf_mac_addr bssid;
 	uint16_t beaconInterval;
 	eCsrRoamBssType BSSType;
-	eCsrAuthType AuthType;
+	enum csr_akm_type AuthType;
 	tCsrAuthList AuthInfo;
 	tCsrAuthList akm_list;
 	eCsrEncryptionType EncryptionType;
@@ -881,7 +881,7 @@ typedef struct tagCsrRoamConnectedProfile {
 	 * which can be WSC IE and/or P2P IE
 	 */
 	uint8_t *pAddIEAssoc;
-	struct bss_description *pBssDesc;
+	struct bss_description *bss_desc;
 	bool qap;               /* AP supports QoS */
 	struct mobility_domain_info mdid;
 #ifdef FEATURE_WLAN_ESE
@@ -1054,7 +1054,7 @@ struct csr_config_params {
 
 struct csr_roam_info {
 	struct csr_roam_profile *pProfile;
-	struct bss_description *pBssDesc;
+	struct bss_description *bss_desc;
 	uint32_t nBeaconLength;
 	uint32_t nAssocReqLength;
 	uint32_t nAssocRspLength;
@@ -1074,7 +1074,7 @@ struct csr_roam_info {
 	 * eCSR_ROAM_RESULT_IBSS_NEW_PEER or PEER_DEPARTED
 	 */
 	struct qdf_mac_addr peerMac;
-	tSirResultCodes statusCode;
+	tSirResultCodes status_code;
 	/* this'd be our own defined or sent from otherBSS(per 802.11spec) */
 	uint32_t reasonCode;
 
@@ -1192,7 +1192,7 @@ typedef struct sSirSmeAssocIndToUpperLayerCnf {
 	uint16_t messageType;   /* eWNI_SME_ASSOC_CNF */
 	uint16_t length;
 	uint8_t sessionId;
-	tSirResultCodes statusCode;
+	tSirResultCodes status_code;
 	tSirMacAddr bssId;      /* Self BSSID */
 	tSirMacAddr peerMacAddr;
 	uint16_t aid;

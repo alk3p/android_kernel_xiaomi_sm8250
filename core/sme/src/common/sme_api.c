@@ -65,13 +65,13 @@ static QDF_STATUS init_sme_cmd_list(struct mac_context *mac);
 static void sme_disconnect_connected_sessions(struct mac_context *mac);
 
 static QDF_STATUS sme_handle_generic_change_country_code(struct mac_context *mac,
-						  void *pMsgBuf);
+						  void *msg_buf);
 
 static QDF_STATUS sme_process_nss_update_resp(struct mac_context *mac, uint8_t *msg);
 
 /* Channel Change Response Indication Handler */
 static QDF_STATUS sme_process_channel_change_resp(struct mac_context *mac,
-					   uint16_t msg_type, void *pMsgBuf);
+					   uint16_t msg_type, void *msg_buf);
 
 static QDF_STATUS sme_stats_ext_event(struct mac_context *mac,
 				      struct stats_ext_event *msg);
@@ -3949,8 +3949,10 @@ QDF_STATUS sme_oem_data_req(mac_handle_t mac_handle,
 
 	oem_data_req->data_len = hdd_oem_req->data_len;
 	oem_data_req->data = qdf_mem_malloc(oem_data_req->data_len);
-	if (!oem_data_req->data)
+	if (!oem_data_req->data) {
+		qdf_mem_free(oem_data_req);
 		return QDF_STATUS_E_NOMEM;
+	}
 
 	qdf_mem_copy(oem_data_req->data, hdd_oem_req->data,
 		     oem_data_req->data_len);
@@ -5301,13 +5303,13 @@ void sme_set_cc_src(mac_handle_t mac_handle, enum country_src cc_src)
  */
 static QDF_STATUS
 sme_handle_generic_change_country_code(struct mac_context *mac_ctx,
-				       void *pMsgBuf)
+				       void *msg_buf)
 {
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	v_REGDOMAIN_t reg_domain_id = 0;
 	bool user_ctry_priority =
 		mac_ctx->mlme_cfg->sap_cfg.country_code_priority;
-	tAniGenericChangeCountryCodeReq *msg = pMsgBuf;
+	tAniGenericChangeCountryCodeReq *msg = msg_buf;
 
 	if (SOURCE_11D != mac_ctx->reg_hint_src) {
 		if (SOURCE_DRIVER != mac_ctx->reg_hint_src) {
@@ -8042,6 +8044,7 @@ QDF_STATUS sme_notify_ht2040_mode(mac_handle_t mac_handle, uint16_t staId,
 	default:
 		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
 			  "%s: Invalid OP mode", __func__);
+		qdf_mem_free(pHtOpMode);
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -8459,28 +8462,27 @@ QDF_STATUS sme_send_rate_update_ind(mac_handle_t mac_handle,
 			TX_RATE_HT20 | TX_RATE_SGI;
 
 	status = sme_acquire_global_lock(&mac->sme);
-	if (QDF_STATUS_SUCCESS == status) {
-		msg.type = WMA_RATE_UPDATE_IND;
-		msg.bodyptr = rate_upd;
-		MTRACE(qdf_trace(QDF_MODULE_ID_SME, TRACE_CODE_SME_TX_WMA_MSG,
-				 NO_SESSION, msg.type));
-		if (!QDF_IS_STATUS_SUCCESS
-			    (scheduler_post_message(QDF_MODULE_ID_SME,
-						    QDF_MODULE_ID_WMA,
-						    QDF_MODULE_ID_WMA,
-						    &msg))) {
-			QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-				  "%s: Not able to post WMA_RATE_UPDATE_IND to WMA!",
-				  __func__);
-
-			sme_release_global_lock(&mac->sme);
-			qdf_mem_free(rate_upd);
-			return QDF_STATUS_E_FAILURE;
-		}
-
-		sme_release_global_lock(&mac->sme);
-		return QDF_STATUS_SUCCESS;
+	if (QDF_IS_STATUS_ERROR(status)) {
+		qdf_mem_free(rate_upd);
+		return status;
 	}
+
+	msg.type = WMA_RATE_UPDATE_IND;
+	msg.bodyptr = rate_upd;
+	MTRACE(qdf_trace(QDF_MODULE_ID_SME, TRACE_CODE_SME_TX_WMA_MSG,
+			 NO_SESSION, msg.type));
+
+	status = scheduler_post_message(QDF_MODULE_ID_SME, QDF_MODULE_ID_WMA,
+					QDF_MODULE_ID_WMA, &msg);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
+			  "%s: Not able to post WMA_RATE_UPDATE_IND to WMA!",
+			  __func__);
+		qdf_mem_free(rate_upd);
+		status = QDF_STATUS_E_FAILURE;
+	}
+
+	sme_release_global_lock(&mac->sme);
 
 	return status;
 }
@@ -8560,8 +8562,8 @@ QDF_STATUS sme_update_sta_inactivity_timeout(mac_handle_t mac_handle,
 	inactivity_time->sta_inactivity_timeout =
 		sta_inactivity_timer->sta_inactivity_timeout;
 
-	wma_update_sta_inactivity_timeout(wma_handle,
-				inactivity_time);
+	wma_update_sta_inactivity_timeout(wma_handle, inactivity_time);
+	qdf_mem_free(inactivity_time);
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -8853,12 +8855,12 @@ QDF_STATUS sme_roam_channel_change_req(mac_handle_t mac_handle,
  * Return QDF_STATUS
  */
 static QDF_STATUS sme_process_channel_change_resp(struct mac_context *mac,
-					   uint16_t msg_type, void *pMsgBuf)
+					   uint16_t msg_type, void *msg_buf)
 {
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	struct csr_roam_info *roam_info;
 	eCsrRoamResult roamResult;
-	tpSwitchChannelParams pChnlParams = (tpSwitchChannelParams) pMsgBuf;
+	tpSwitchChannelParams pChnlParams = (tpSwitchChannelParams) msg_buf;
 	uint32_t SessionId = pChnlParams->peSessionId;
 
 	roam_info = qdf_mem_malloc(sizeof(*roam_info));
@@ -9111,8 +9113,7 @@ QDF_STATUS sme_set_thermal_level(mac_handle_t mac_handle, uint8_t level)
 QDF_STATUS sme_txpower_limit(mac_handle_t mac_handle,
 			     struct tx_power_limit *psmetx)
 {
-	QDF_STATUS status = QDF_STATUS_SUCCESS;
-	QDF_STATUS qdf_status = QDF_STATUS_SUCCESS;
+	QDF_STATUS status;
 	struct scheduler_msg message = {0};
 	struct mac_context *mac = MAC_CONTEXT(mac_handle);
 	struct tx_power_limit *tx_power_limit;
@@ -9124,24 +9125,25 @@ QDF_STATUS sme_txpower_limit(mac_handle_t mac_handle,
 	*tx_power_limit = *psmetx;
 
 	status = sme_acquire_global_lock(&mac->sme);
-	if (QDF_IS_STATUS_SUCCESS(status)) {
-		message.type = WMA_TX_POWER_LIMIT;
-		message.reserved = 0;
-		message.bodyptr = tx_power_limit;
-
-		qdf_status = scheduler_post_message(QDF_MODULE_ID_SME,
-						    QDF_MODULE_ID_WMA,
-						    QDF_MODULE_ID_WMA,
-						    &message);
-		if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
-			QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-				  "%s: not able to post WMA_TX_POWER_LIMIT",
-				  __func__);
-			status = QDF_STATUS_E_FAILURE;
-			qdf_mem_free(tx_power_limit);
-		}
-		sme_release_global_lock(&mac->sme);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		qdf_mem_free(tx_power_limit);
+		return status;
 	}
+
+	message.type = WMA_TX_POWER_LIMIT;
+	message.bodyptr = tx_power_limit;
+	status = scheduler_post_message(QDF_MODULE_ID_SME, QDF_MODULE_ID_WMA,
+					QDF_MODULE_ID_WMA, &message);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
+			  "%s: not able to post WMA_TX_POWER_LIMIT",
+			  __func__);
+		status = QDF_STATUS_E_FAILURE;
+		qdf_mem_free(tx_power_limit);
+	}
+
+	sme_release_global_lock(&mac->sme);
+
 	return status;
 }
 
@@ -9184,20 +9186,24 @@ QDF_STATUS sme_ap_disable_intra_bss_fwd(mac_handle_t mac_handle,
 	pSapDisableIntraFwd->disableintrabssfwd = disablefwd;
 
 	status = sme_acquire_global_lock(&mac->sme);
-	if (QDF_IS_STATUS_SUCCESS(status)) {
-		/* serialize the req through MC thread */
-		message.bodyptr = pSapDisableIntraFwd;
-		message.type = WMA_SET_SAP_INTRABSS_DIS;
-		qdf_status = scheduler_post_message(QDF_MODULE_ID_SME,
-						    QDF_MODULE_ID_WMA,
-						    QDF_MODULE_ID_WMA,
-						    &message);
-		if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
-			status = QDF_STATUS_E_FAILURE;
-			qdf_mem_free(pSapDisableIntraFwd);
-		}
-		sme_release_global_lock(&mac->sme);
+
+	if (QDF_IS_STATUS_ERROR(status)) {
+		qdf_mem_free(pSapDisableIntraFwd);
+		return QDF_STATUS_E_FAILURE;
 	}
+	/* serialize the req through MC thread */
+	message.bodyptr = pSapDisableIntraFwd;
+	message.type = WMA_SET_SAP_INTRABSS_DIS;
+	qdf_status = scheduler_post_message(QDF_MODULE_ID_SME,
+					    QDF_MODULE_ID_WMA,
+					    QDF_MODULE_ID_WMA,
+					    &message);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		status = QDF_STATUS_E_FAILURE;
+		qdf_mem_free(pSapDisableIntraFwd);
+	}
+	sme_release_global_lock(&mac->sme);
+
 	return status;
 }
 
@@ -10141,14 +10147,19 @@ QDF_STATUS sme_set_wisa_params(mac_handle_t mac_handle,
 
 	*cds_msg_wisa_params = *wisa_params;
 	status = sme_acquire_global_lock(&mac->sme);
-	if (QDF_IS_STATUS_SUCCESS(status)) {
-		message.bodyptr = cds_msg_wisa_params;
-		message.type = WMA_SET_WISA_PARAMS;
-		status = scheduler_post_message(QDF_MODULE_ID_SME,
-						QDF_MODULE_ID_WMA,
-						QDF_MODULE_ID_WMA, &message);
-		sme_release_global_lock(&mac->sme);
+
+	if (QDF_IS_STATUS_ERROR(status)) {
+		qdf_mem_free(cds_msg_wisa_params);
+		return QDF_STATUS_E_FAILURE;
 	}
+	message.bodyptr = cds_msg_wisa_params;
+	message.type = WMA_SET_WISA_PARAMS;
+	status = scheduler_post_message(QDF_MODULE_ID_SME,
+					QDF_MODULE_ID_WMA,
+					QDF_MODULE_ID_WMA, &message);
+	if (QDF_IS_STATUS_ERROR(status))
+		qdf_mem_free(cds_msg_wisa_params);
+	sme_release_global_lock(&mac->sme);
 	return status;
 }
 
@@ -11279,6 +11290,10 @@ void sme_update_he_cap_nss(mac_handle_t mac_handle, uint8_t session_id,
 		sme_err("invalid Nss value %d", nss);
 	}
 	csr_session = CSR_GET_SESSION(mac_ctx, session_id);
+	if (!csr_session) {
+		sme_err("No session for id %d", session_id);
+		return;
+	}
 	rx_mcs_map =
 	mac_ctx->mlme_cfg->he_caps.dot11_he_cap.rx_he_mcs_map_lt_80;
 	tx_mcs_map =

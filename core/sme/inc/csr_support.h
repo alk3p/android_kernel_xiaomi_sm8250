@@ -208,7 +208,7 @@ struct csr_timer_info {
 	uint8_t session_id;
 };
 
-#define CSR_IS_11A_BSS(pBssDesc)    (eSIR_11A_NW_TYPE == (pBssDesc)->nwType)
+#define CSR_IS_11A_BSS(bss_desc)    (eSIR_11A_NW_TYPE == (bss_desc)->nwType)
 #define CSR_IS_BASIC_RATE(rate)     ((rate) & CSR_DOT11_BASIC_RATE_MASK)
 #define CSR_IS_QOS_BSS(pIes)  \
 		((pIes)->WMMParams.present || (pIes)->WMMInfoAp.present)
@@ -311,7 +311,7 @@ bool csr_rates_is_dot11_rate_supported(struct mac_context *mac_ctx, uint8_t rate
 enum bss_type csr_translate_bsstype_to_mac_type(eCsrRoamBssType csrtype);
 /* Caller allocates memory for pIEStruct */
 QDF_STATUS csr_parse_bss_description_ies(struct mac_context *mac_ctx,
-					 struct bss_description *pBssDesc,
+					 struct bss_description *bss_desc,
 					 tDot11fBeaconIEs *pIEStruct);
 /*
  * This function will allocate memory for the parsed IEs to the caller.
@@ -319,7 +319,7 @@ QDF_STATUS csr_parse_bss_description_ies(struct mac_context *mac_ctx,
  * this function succeeds
  */
 QDF_STATUS csr_get_parsed_bss_description_ies(struct mac_context *mac_ctx,
-					      struct bss_description *pBssDesc,
+					      struct bss_description *bss_desc,
 					      tDot11fBeaconIEs **ppIEStruct);
 
 tSirScanType csr_get_scan_type(struct mac_context *mac, uint8_t chnId);
@@ -357,7 +357,7 @@ QDF_STATUS csr_validate_mcc_beacon_interval(struct mac_context *mac_ctx,
 					    enum QDF_OPMODE cur_bss_persona);
 
 bool csr_is_profile11r(struct mac_context *mac, struct csr_roam_profile *pProfile);
-bool csr_is_auth_type11r(struct mac_context *mac, eCsrAuthType AuthType,
+bool csr_is_auth_type11r(struct mac_context *mac, enum csr_akm_type AuthType,
 			 uint8_t mdiePresent);
 #ifdef FEATURE_WLAN_ESE
 bool csr_is_profile_ese(struct csr_roam_profile *pProfile);
@@ -369,6 +369,6 @@ bool csr_is_profile_ese(struct csr_roam_profile *pProfile);
  *
  * Return: true, if auth type is ese, false otherwise
  */
-bool csr_is_auth_type_ese(eCsrAuthType AuthType);
+bool csr_is_auth_type_ese(enum csr_akm_type AuthType);
 
 #endif

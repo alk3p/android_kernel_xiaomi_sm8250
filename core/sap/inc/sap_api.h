@@ -249,7 +249,7 @@ typedef struct sap_StationAssocIndication_s {
 	uint32_t assocReqLength;
 	uint8_t *assocReqPtr;
 	bool fWmmEnabled;
-	eCsrAuthType negotiatedAuthType;
+	enum csr_akm_type negotiatedAuthType;
 	eCsrEncryptionType negotiatedUCEncryptionType;
 	eCsrEncryptionType negotiatedMCEncryptionType;
 	bool fAuthRequired;
@@ -265,7 +265,7 @@ typedef struct sap_StationAssocReassocCompleteEvent_s {
 	uint8_t status;
 	uint8_t *ies;
 	uint32_t ies_len;
-	uint32_t statusCode;
+	uint32_t status_code;
 	bool wmmEnabled;
 	uint8_t timingMeasCap;
 	struct oem_channel_info chan_info;
@@ -291,7 +291,7 @@ typedef struct sap_StationDisassocCompleteEvent_s {
 	struct qdf_mac_addr staMac;
 	uint8_t staId;          /* STAID should not be used */
 	uint8_t status;
-	uint32_t statusCode;
+	uint32_t status_code;
 	uint32_t reason_code;
 	eSapDisassocReason reason;
 	int rssi;
@@ -1130,6 +1130,17 @@ QDF_STATUS
 wlan_sap_set_channel_avoidance(mac_handle_t mac_handle,
 			       bool sap_channel_avoidance);
 #endif
+
+/**
+ * wlan_sap_set_acs_with_more_param() - sets acs_with_more_param ini param
+ * @mac_handle: Opaque handle to the global MAC context
+ * @acs_with_more_param: ini parameter value
+ *
+ * Return: The QDF_STATUS code.
+ */
+QDF_STATUS
+wlan_sap_set_acs_with_more_param(mac_handle_t mac_handle,
+				 bool acs_with_more_param);
 
 /**
  * wlansap_set_dfs_preferred_channel_location() - set dfs preferred channel

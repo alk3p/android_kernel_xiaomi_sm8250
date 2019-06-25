@@ -59,6 +59,8 @@
 #ifdef FEATURE_WLAN_ESE
 #define RRM_ROAM_SCORE_NEIGHBOR_IAPP_LIST                       30
 #endif
+/* RRM SCAN DWELL TIME */
+#define RRM_SCAN_MIN_DWELL_TIME 20
 
 uint64_t rrm_scan_timer;
 
@@ -586,7 +588,7 @@ static QDF_STATUS sme_rrm_send_scan_result(struct mac_context *mac_ctx,
 				scan_results->timer, rrm_scan_timer);
 		if ((scan_results->timer >= rrm_scan_timer) ||
 		    (is_conn_bss_found == true)) {
-			roam_info->pBssDesc = &scan_results->BssDescriptor;
+			roam_info->bss_desc = &scan_results->BssDescriptor;
 			csr_roam_call_callback(mac_ctx, session_id, roam_info,
 						0, eCSR_ROAM_UPDATE_SCAN_RESULT,
 						eCSR_ROAM_RESULT_NONE);
@@ -841,13 +843,13 @@ static QDF_STATUS sme_rrm_issue_scan_req(struct mac_context *mac_ctx)
 		 * depending on type of scan.
 		 */
 		if (req->scan_req.scan_f_passive) {
-			if (max_chan_time > req->scan_req.dwell_time_passive)
+			if (max_chan_time >= RRM_SCAN_MIN_DWELL_TIME)
 				req->scan_req.dwell_time_passive =
 								max_chan_time;
 			sme_debug("Passive Max Dwell Time(%d)",
 				  req->scan_req.dwell_time_passive);
 		} else {
-			if (max_chan_time > req->scan_req.dwell_time_active)
+			if (max_chan_time >= RRM_SCAN_MIN_DWELL_TIME)
 				req->scan_req.dwell_time_active = max_chan_time;
 			sme_debug("Active Max Dwell Time(%d)",
 				  req->scan_req.dwell_time_active);
@@ -985,7 +987,7 @@ static QDF_STATUS sme_rrm_fill_scan_channels(uint8_t *country,
 /**
  * sme_rrm_process_beacon_report_req_ind() -Process beacon report request
  * @mac:- Global Mac structure
- * @pMsgBuf:- a pointer to a buffer that maps to various structures base
+ * @msg_buf:- a pointer to a buffer that maps to various structures base
  *                  on the message type.The beginning of the buffer can always
  *                  map to tSirSmeRsp.
  *
@@ -995,9 +997,9 @@ static QDF_STATUS sme_rrm_fill_scan_channels(uint8_t *country,
  * Return : QDF_STATUS_SUCCESS - Validation is successful.
  */
 QDF_STATUS sme_rrm_process_beacon_report_req_ind(struct mac_context *mac,
-						void *pMsgBuf)
+						void *msg_buf)
 {
-	tpSirBeaconReportReqInd pBeaconReq = (tpSirBeaconReportReqInd) pMsgBuf;
+	tpSirBeaconReportReqInd pBeaconReq = (tpSirBeaconReportReqInd)msg_buf;
 	tpRrmSMEContext pSmeRrmContext = &mac->rrm.rrmSmeContext;
 	uint32_t len = 0, i = 0;
 	uint8_t country[WNI_CFG_COUNTRY_CODE_LEN];
@@ -1143,9 +1145,11 @@ QDF_STATUS sme_rrm_process_beacon_report_req_ind(struct mac_context *mac,
 		     (uint8_t *) &pBeaconReq->measurementDuration,
 		     SIR_ESE_MAX_MEAS_IE_REQS);
 
-	sme_debug("token: %d regClass: %d randnIntvl: %d msgSource: %d",
+	sme_debug("token: %d regClass: %d randnIntvl: %d msgSource: %d measurementduration %d, rrm_ctx duration %d",
 		pSmeRrmContext->token, pSmeRrmContext->regClass,
-		pSmeRrmContext->randnIntvl, pSmeRrmContext->msgSource);
+		pSmeRrmContext->randnIntvl, pSmeRrmContext->msgSource,
+		pBeaconReq->measurementDuration[0],
+		pSmeRrmContext->duration[0]);
 
 	return sme_rrm_issue_scan_req(mac);
 
@@ -1385,7 +1389,7 @@ static void rrm_store_neighbor_rpt_by_roam_score(struct mac_context *mac,
  * sme_rrm_process_neighbor_report() -Process the Neighbor report received
  *                                                     from PE
  * @mac - Global MAC structure
- * @pMsgBuf - a pointer to a buffer that maps to various structures base
+ * @msg_buf - a pointer to a buffer that maps to various structures base
  *                  on the message type.
  *                  The beginning of the buffer can always map to tSirSmeRsp.
  * This is called to process the Neighbor report received from PE.
@@ -1464,7 +1468,7 @@ end:
  * sme_rrm_msg_processor()-Process RRM message
  * @mac - Pointer to the global MAC parameter structure.
  * @msg_type - the type of msg passed by PE as defined in wni_api.h
- * @pMsgBuf - a pointer to a buffer that maps to various structures base
+ * @msg_buf - a pointer to a buffer that maps to various structures base
  *                  on the message type.
  *                  The beginning of the buffer can always map to tSirSmeRsp.
  * sme_process_msg() calls this function for the
@@ -1473,18 +1477,18 @@ end:
  * Return: QDF_STATUS_SUCCESS - Validation is successful.
  */
 QDF_STATUS sme_rrm_msg_processor(struct mac_context *mac, uint16_t msg_type,
-				 void *pMsgBuf)
+				 void *msg_buf)
 {
 	sme_debug("Msg = %d for RRM measurement", msg_type);
 
 	/* switch on the msg type & make the state transition accordingly */
 	switch (msg_type) {
 	case eWNI_SME_NEIGHBOR_REPORT_IND:
-		sme_rrm_process_neighbor_report(mac, pMsgBuf);
+		sme_rrm_process_neighbor_report(mac, msg_buf);
 		break;
 
 	case eWNI_SME_BEACON_REPORT_REQ_IND:
-		sme_rrm_process_beacon_report_req_ind(mac, pMsgBuf);
+		sme_rrm_process_beacon_report_req_ind(mac, msg_buf);
 		break;
 
 	default:

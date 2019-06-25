@@ -83,7 +83,7 @@ typedef enum {
   reassoc is done
   ---------------------------------------------------------------------------*/
 typedef struct {
-	struct bss_description *pBssDesc;
+	struct bss_description *bss_desc;
 	struct csr_roam_profile *pProfile;
 } sme_QosAssocInfo;
 
@@ -93,7 +93,7 @@ typedef struct {
 QDF_STATUS sme_qos_open(struct mac_context *mac);
 QDF_STATUS sme_qos_close(struct mac_context *mac);
 QDF_STATUS sme_qos_msg_processor(struct mac_context *mac, uint16_t msg_type,
-		void *pMsgBuf);
+		void *msg_buf);
 
 /*--------------------------------------------------------------------------
   Internal APIs for CSR

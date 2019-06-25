@@ -301,7 +301,7 @@ struct roam_cmd {
 struct setkey_cmd {
 	uint32_t roamId;
 	eCsrEncryptionType encType;
-	eCsrAuthType authType;
+	enum csr_akm_type authType;
 	tAniKeyDirection keyDirection;  /* Tx, Rx or Tx-and-Rx */
 	struct qdf_mac_addr peermac;    /* Peer's MAC address. ALL 1's for group key */
 	uint8_t paeRole;        /* 0 for supplicant */
@@ -410,9 +410,9 @@ struct csr_channel_powerinfo {
 };
 
 struct csr_roam_joinstatus {
-	tSirResultCodes statusCode;
+	tSirResultCodes status_code;
 	/*
-	 * this is set to unspecified if statusCode indicates timeout.
+	 * this is set to unspecified if status_code indicates timeout.
 	 * Or it is the failed reason from the other BSS(per 802.11 spec)
 	 */
 	uint32_t reasonCode;
@@ -938,7 +938,7 @@ bool csr_is_concurrent_session_running(struct mac_context *mac);
 bool csr_is_infra_ap_started(struct mac_context *mac);
 bool csr_is_valid_mc_concurrent_session(struct mac_context *mac,
 					uint32_t sessionId,
-					struct bss_description *pBssDesc);
+					struct bss_description *bss_desc);
 bool csr_is_conn_state_connected_infra_ap(struct mac_context *mac,
 		uint32_t sessionId);
 QDF_STATUS csr_get_statistics(struct mac_context *mac,
@@ -954,7 +954,7 @@ QDF_STATUS csr_get_config_param(struct mac_context *mac,
 					  struct csr_config_params *pParam);
 QDF_STATUS csr_change_default_config_param(struct mac_context *mac,
 		struct csr_config_params *pParam);
-QDF_STATUS csr_msg_processor(struct mac_context *mac, void *pMsgBuf);
+QDF_STATUS csr_msg_processor(struct mac_context *mac, void *msg_buf);
 QDF_STATUS csr_open(struct mac_context *mac);
 QDF_STATUS csr_init_chan_list(struct mac_context *mac, uint8_t *alpha2);
 QDF_STATUS csr_close(struct mac_context *mac);
@@ -1092,7 +1092,7 @@ csr_rso_save_ap_to_scan_cache(struct mac_context *mac,
 			      struct roam_offload_synch_ind *roam_synch_ind,
 			      struct bss_description *bss_desc_ptr);
 
-void csr_process_ho_fail_ind(struct mac_context *mac, void *pMsgBuf);
+void csr_process_ho_fail_ind(struct mac_context *mac, void *msg_buf);
 #endif
 #ifdef FEATURE_WLAN_DIAG_SUPPORT_CSR
 void csr_roaming_report_diag_event(struct mac_context *mac_ctx,

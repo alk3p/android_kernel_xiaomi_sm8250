@@ -94,7 +94,7 @@ struct tag_csrscan_result {
 	eCsrEncryptionType ucEncryptionType;
 	eCsrEncryptionType mcEncryptionType;
 	/* Preferred auth type that matched with the profile. */
-	eCsrAuthType authType;
+	enum csr_akm_type authType;
 	int  bss_score;
 
 	tCsrScanResultInfo Result;
@@ -144,8 +144,9 @@ struct scan_result_list {
 enum csr_roam_state csr_roam_state_change(struct mac_context *mac,
 					  enum csr_roam_state NewRoamState,
 					  uint8_t sessionId);
-void csr_roaming_state_msg_processor(struct mac_context *mac, void *pMsgBuf);
-void csr_roam_joined_state_msg_processor(struct mac_context *mac, void *pMsgBuf);
+void csr_roaming_state_msg_processor(struct mac_context *mac, void *msg_buf);
+void csr_roam_joined_state_msg_processor(struct mac_context *mac,
+					 void *msg_buf);
 void csr_scan_callback(struct wlan_objmgr_vdev *vdev,
 				struct scan_event *event, void *arg);
 void csr_release_command_roam(struct mac_context *mac, tSmeCmd *pCommand);
@@ -154,7 +155,7 @@ void csr_release_command_wm_status_change(struct mac_context *mac,
 
 QDF_STATUS csr_roam_save_connected_bss_desc(struct mac_context *mac,
 					    uint32_t sessionId,
-					    struct bss_description *pBssDesc);
+					    struct bss_description *bss_desc);
 
 /*
  * Prepare a filter base on a profile for parsing the scan results.
@@ -257,7 +258,7 @@ static inline void csr_roam_stats_rsp_processor(struct mac_context *mac,
 QDF_STATUS csr_roam_issue_start_bss(struct mac_context *mac, uint32_t sessionId,
 				    struct csr_roamstart_bssparams *pParam,
 				    struct csr_roam_profile *pProfile,
-				    struct bss_description *pBssDesc,
+				    struct bss_description *bss_desc,
 					uint32_t roamId);
 QDF_STATUS csr_roam_issue_stop_bss(struct mac_context *mac, uint32_t sessionId,
 				   enum csr_roam_substate NewSubstate);
@@ -298,7 +299,7 @@ QDF_STATUS csr_send_mb_start_bss_req_msg(struct mac_context *mac,
 					 uint32_t sessionId,
 					 eCsrRoamBssType bssType,
 					 struct csr_roamstart_bssparams *pParam,
-					 struct bss_description *pBssDesc);
+					 struct bss_description *bss_desc);
 QDF_STATUS csr_send_mb_stop_bss_req_msg(struct mac_context *mac,
 					uint32_t sessionId);
 
@@ -541,7 +542,7 @@ void csr_get_vdev_type_nss(struct mac_context *mac_ctx,
  *
  * Return: DIAG auth type
  */
-enum mgmt_auth_type diag_auth_type_from_csr_type(eCsrAuthType authtype);
+enum mgmt_auth_type diag_auth_type_from_csr_type(enum csr_akm_type authtype);
 /**
  * diag_enc_type_from_csr_type() - to convert CSR encr type to DIAG encr type
  * @enctype: CSR encryption type
