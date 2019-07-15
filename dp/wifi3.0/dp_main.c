@@ -71,6 +71,21 @@ extern int con_mode_monitor;
 #endif
 #endif
 
+#ifdef WLAN_FEATURE_DP_EVENT_HISTORY
+/*
+ * If WLAN_CFG_INT_NUM_CONTEXTS is changed, HIF_NUM_INT_CONTEXTS
+ * also should be updated accordingly
+ */
+QDF_COMPILE_TIME_ASSERT(num_intr_grps,
+			HIF_NUM_INT_CONTEXTS == WLAN_CFG_INT_NUM_CONTEXTS);
+
+/*
+ * HIF_EVENT_HIST_MAX should always be power of 2
+ */
+QDF_COMPILE_TIME_ASSERT(hif_event_history_size,
+			(HIF_EVENT_HIST_MAX & (HIF_EVENT_HIST_MAX - 1)) == 0);
+#endif /* WLAN_FEATURE_DP_EVENT_HISTORY */
+
 #ifdef WLAN_RX_PKT_CAPTURE_ENH
 #include "dp_rx_mon_feature.h"
 #else
@@ -1171,9 +1186,95 @@ dp_srng_mem_alloc(struct dp_soc *soc, struct dp_srng *srng, uint32_t align,
 	return QDF_STATUS_SUCCESS;
 }
 
+#ifdef WLAN_DP_PER_RING_TYPE_CONFIG
+/**
+ * dp_srng_configure_interrupt_thresholds() - Retrieve interrupt
+ * threshold values from the wlan_srng_cfg table for each ring type
+ * @soc: device handle
+ * @ring_params: per ring specific parameters
+ * @ring_type: Ring type
+ * @ring_num: Ring number for a given ring type
+ *
+ * Fill the ring params with the interrupt threshold
+ * configuration parameters available in the per ring type wlan_srng_cfg
+ * table.
+ *
+ * Return: None
+ */
+static void
+dp_srng_configure_interrupt_thresholds(struct dp_soc *soc,
+				       struct hal_srng_params *ring_params,
+				       int ring_type, int ring_num,
+				       int num_entries)
+{
+	if (ring_type == WBM2SW_RELEASE && (ring_num == 3)) {
+		ring_params->intr_timer_thres_us =
+				wlan_cfg_get_int_timer_threshold_other(soc->wlan_cfg_ctx);
+		ring_params->intr_batch_cntr_thres_entries =
+				wlan_cfg_get_int_batch_threshold_other(soc->wlan_cfg_ctx);
+	} else {
+		ring_params->intr_timer_thres_us =
+				soc->wlan_srng_cfg[ring_type].timer_threshold;
+		ring_params->intr_batch_cntr_thres_entries =
+				soc->wlan_srng_cfg[ring_type].batch_count_threshold;
+	}
+	ring_params->low_threshold =
+			soc->wlan_srng_cfg[ring_type].low_threshold;
 
-/*
- * dp_setup_srng - Internal function to setup SRNG rings used by data path
+	if (ring_params->low_threshold)
+		ring_params->flags |= HAL_SRNG_LOW_THRES_INTR_ENABLE;
+}
+#else
+static void
+dp_srng_configure_interrupt_thresholds(struct dp_soc *soc,
+				       struct hal_srng_params *ring_params,
+				       int ring_type, int ring_num,
+				       int num_entries)
+{
+	if (ring_type == REO_DST) {
+		ring_params->intr_timer_thres_us =
+			wlan_cfg_get_int_timer_threshold_rx(soc->wlan_cfg_ctx);
+		ring_params->intr_batch_cntr_thres_entries =
+			wlan_cfg_get_int_batch_threshold_rx(soc->wlan_cfg_ctx);
+	} else if (ring_type == WBM2SW_RELEASE && (ring_num < 3)) {
+		ring_params->intr_timer_thres_us =
+			wlan_cfg_get_int_timer_threshold_tx(soc->wlan_cfg_ctx);
+		ring_params->intr_batch_cntr_thres_entries =
+			wlan_cfg_get_int_batch_threshold_tx(soc->wlan_cfg_ctx);
+	} else {
+		ring_params->intr_timer_thres_us =
+			wlan_cfg_get_int_timer_threshold_other(soc->wlan_cfg_ctx);
+		ring_params->intr_batch_cntr_thres_entries =
+			wlan_cfg_get_int_batch_threshold_other(soc->wlan_cfg_ctx);
+	}
+
+	/* Enable low threshold interrupts for rx buffer rings (regular and
+	 * monitor buffer rings.
+	 * TODO: See if this is required for any other ring
+	 */
+	if ((ring_type == RXDMA_BUF) || (ring_type == RXDMA_MONITOR_BUF) ||
+	    (ring_type == RXDMA_MONITOR_STATUS)) {
+		/* TODO: Setting low threshold to 1/8th of ring size
+		 * see if this needs to be configurable
+		 */
+		ring_params->low_threshold = num_entries >> 3;
+		ring_params->intr_timer_thres_us =
+			wlan_cfg_get_int_timer_threshold_rx(soc->wlan_cfg_ctx);
+		ring_params->flags |= HAL_SRNG_LOW_THRES_INTR_ENABLE;
+		ring_params->intr_batch_cntr_thres_entries = 0;
+	}
+}
+#endif
+
+/**
+ * dp_srng_setup() - Internal function to setup SRNG rings used by data path
+ * @soc: datapath soc handle
+ * @srng: srng handle
+ * @ring_type: ring that needs to be configured
+ * @mac_id: mac number
+ * @num_entries: Total number of entries for a given ring
+ *
+ * Return: non-zero - failure/zero - success
  */
 static int dp_srng_setup(struct dp_soc *soc, struct dp_srng *srng,
 			 int ring_type, int ring_num, int mac_id,
@@ -1236,42 +1337,9 @@ static int dp_srng_setup(struct dp_soc *soc, struct dp_srng *srng,
 				 ring_type, ring_num);
 	}
 
-	/*
-	 * Setup interrupt timer and batch counter thresholds for
-	 * interrupt mitigation based on ring type
-	 */
-	if (ring_type == REO_DST) {
-		ring_params.intr_timer_thres_us =
-			wlan_cfg_get_int_timer_threshold_rx(soc->wlan_cfg_ctx);
-		ring_params.intr_batch_cntr_thres_entries =
-			wlan_cfg_get_int_batch_threshold_rx(soc->wlan_cfg_ctx);
-	} else if (ring_type == WBM2SW_RELEASE && (ring_num < 3)) {
-		ring_params.intr_timer_thres_us =
-			wlan_cfg_get_int_timer_threshold_tx(soc->wlan_cfg_ctx);
-		ring_params.intr_batch_cntr_thres_entries =
-			wlan_cfg_get_int_batch_threshold_tx(soc->wlan_cfg_ctx);
-	} else {
-		ring_params.intr_timer_thres_us =
-			wlan_cfg_get_int_timer_threshold_other(soc->wlan_cfg_ctx);
-		ring_params.intr_batch_cntr_thres_entries =
-			wlan_cfg_get_int_batch_threshold_other(soc->wlan_cfg_ctx);
-	}
-
-	/* Enable low threshold interrupts for rx buffer rings (regular and
-	 * monitor buffer rings.
-	 * TODO: See if this is required for any other ring
-	 */
-	if ((ring_type == RXDMA_BUF) || (ring_type == RXDMA_MONITOR_BUF) ||
-		(ring_type == RXDMA_MONITOR_STATUS)) {
-		/* TODO: Setting low threshold to 1/8th of ring size
-		 * see if this needs to be configurable
-		 */
-		ring_params.low_threshold = num_entries >> 3;
-		ring_params.flags |= HAL_SRNG_LOW_THRES_INTR_ENABLE;
-		ring_params.intr_timer_thres_us =
-			wlan_cfg_get_int_timer_threshold_rx(soc->wlan_cfg_ctx);
-		ring_params.intr_batch_cntr_thres_entries = 0;
-	}
+	dp_srng_configure_interrupt_thresholds(soc, &ring_params,
+					       ring_type, ring_num,
+					       num_entries);
 
 	if (cached) {
 		ring_params.flags |= HAL_SRNG_CACHED_DESC;
@@ -1340,7 +1408,7 @@ static void dp_srng_cleanup(struct dp_soc *soc, struct dp_srng *srng,
 		}
 	}
 
-	if (srng->alloc_size) {
+	if (srng->alloc_size && srng->base_vaddr_unaligned) {
 		if (!srng->cached) {
 			qdf_mem_free_consistent(soc->osdev, soc->osdev->dev,
 						srng->alloc_size,
@@ -1350,12 +1418,47 @@ static void dp_srng_cleanup(struct dp_soc *soc, struct dp_srng *srng,
 			qdf_mem_free(srng->base_vaddr_unaligned);
 		}
 		srng->alloc_size = 0;
+		srng->base_vaddr_unaligned = NULL;
 	}
 	srng->hal_srng = NULL;
 }
 
 /* TODO: Need this interface from HIF */
 void *hif_get_hal_handle(void *hif_handle);
+
+#ifdef WLAN_FEATURE_DP_EVENT_HISTORY
+int dp_srng_access_start(struct dp_intr *int_ctx, struct dp_soc *dp_soc,
+			 void *hal_ring)
+{
+	void *hal_soc = dp_soc->hal_soc;
+	uint32_t hp, tp;
+	uint8_t ring_id;
+
+	hal_get_sw_hptp(hal_soc, hal_ring, &tp, &hp);
+	ring_id = hal_srng_ring_id_get(hal_ring);
+
+	hif_record_event(dp_soc->hif_handle, int_ctx->dp_intr_id,
+			 ring_id, hp, tp, HIF_EVENT_SRNG_ACCESS_START);
+
+	return hal_srng_access_start(hal_soc, hal_ring);
+}
+
+void dp_srng_access_end(struct dp_intr *int_ctx, struct dp_soc *dp_soc,
+			void *hal_ring)
+{
+	void *hal_soc = dp_soc->hal_soc;
+	uint32_t hp, tp;
+	uint8_t ring_id;
+
+	hal_get_sw_hptp(hal_soc, hal_ring, &tp, &hp);
+	ring_id = hal_srng_ring_id_get(hal_ring);
+
+	hif_record_event(dp_soc->hif_handle, int_ctx->dp_intr_id,
+			 ring_id, hp, tp, HIF_EVENT_SRNG_ACCESS_END);
+
+	return hal_srng_access_end(hal_soc, hal_ring);
+}
+#endif /* WLAN_FEATURE_DP_EVENT_HISTORY */
 
 /*
  * dp_service_srngs() - Top level interrupt handler for DP Ring interrupts
@@ -1415,9 +1518,9 @@ static uint32_t dp_service_srngs(void *dp_ctx, uint32_t dp_budget)
 
 	/* Process REO Exception ring interrupt */
 	if (rx_err_mask) {
-		work_done = dp_rx_err_process(soc,
-				soc->reo_exception_ring.hal_srng,
-				remaining_quota);
+		work_done = dp_rx_err_process(int_ctx, soc,
+					      soc->reo_exception_ring.hal_srng,
+					      remaining_quota);
 
 		if (work_done) {
 			intr_stats->num_rx_err_ring_masks++;
@@ -1434,8 +1537,9 @@ static uint32_t dp_service_srngs(void *dp_ctx, uint32_t dp_budget)
 
 	/* Process Rx WBM release ring interrupt */
 	if (rx_wbm_rel_mask) {
-		work_done = dp_rx_wbm_err_process(soc,
-				soc->rx_rel_ring.hal_srng, remaining_quota);
+		work_done = dp_rx_wbm_err_process(int_ctx, soc,
+						  soc->rx_rel_ring.hal_srng,
+						  remaining_quota);
 
 		if (work_done) {
 			intr_stats->num_rx_wbm_rel_ring_masks++;
@@ -1473,7 +1577,7 @@ static uint32_t dp_service_srngs(void *dp_ctx, uint32_t dp_budget)
 	}
 
 	if (reo_status_mask) {
-		if (dp_reo_status_ring_handler(soc))
+		if (dp_reo_status_ring_handler(int_ctx, soc))
 			int_ctx->intr_stats.num_reo_status_ring_masks++;
 	}
 
@@ -1498,7 +1602,7 @@ static uint32_t dp_service_srngs(void *dp_ctx, uint32_t dp_budget)
 
 			if (int_ctx->rxdma2host_ring_mask &
 					(1 << mac_for_pdev)) {
-				work_done = dp_rxdma_err_process(soc,
+				work_done = dp_rxdma_err_process(int_ctx, soc,
 								 mac_for_pdev,
 								 remaining_quota);
 				if (work_done)
@@ -3400,7 +3504,7 @@ static struct cdp_pdev *dp_pdev_attach_wifi3(struct cdp_soc_t *txrx_soc,
 	if (dp_rx_pdev_attach(pdev)) {
 		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
 			  FL("dp_rx_pdev_attach failed"));
-		goto fail1;
+		goto fail2;
 	}
 
 	DP_STATS_INIT(pdev);
@@ -3423,7 +3527,7 @@ static struct cdp_pdev *dp_pdev_attach_wifi3(struct cdp_soc_t *txrx_soc,
 	if (dp_rx_pdev_mon_attach(pdev)) {
 		QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_ERROR,
 				"dp_rx_pdev_mon_attach failed");
-		goto rx_mon_attach_fail;
+		goto fail2;
 	}
 
 	if (dp_wdi_event_attach(pdev)) {
@@ -3473,7 +3577,7 @@ wdi_attach_fail:
 	 */
 	dp_rx_pdev_mon_detach(pdev);
 
-rx_mon_attach_fail:
+fail2:
 	dp_rx_pdev_detach(pdev);
 
 fail1:
@@ -4771,6 +4875,9 @@ static void dp_vdev_detach_wifi3(struct cdp_vdev *vdev_handle,
 
 	qdf_spin_unlock_bh(&pdev->vdev_list_lock);
 free_vdev:
+	if (wlan_op_mode_monitor == vdev->opmode)
+		pdev->monitor_vdev = NULL;
+
 	qdf_mem_free(vdev);
 
 	if (callback)
@@ -4932,6 +5039,10 @@ static void *dp_peer_create_wifi3(struct cdp_vdev *vdev_handle,
 		peer->ctrl_peer = ctrl_peer;
 
 		dp_local_peer_id_alloc(pdev, peer);
+
+		qdf_spinlock_create(&peer->peer_info_lock);
+		dp_peer_rx_bufq_resources_init(peer);
+
 		DP_STATS_INIT(peer);
 		DP_STATS_UPD(peer, rx.avg_rssi, INVALID_RSSI);
 
@@ -5905,6 +6016,7 @@ QDF_STATUS dp_reset_monitor_mode(struct cdp_pdev *pdev_handle)
 
 		if (status != QDF_STATUS_SUCCESS) {
 			dp_err("Failed to send tlv filter for monitor mode rings");
+			qdf_spin_unlock_bh(&pdev->mon_lock);
 			return status;
 		}
 
@@ -6306,6 +6418,20 @@ dp_pdev_set_advance_monitor_filter(struct cdp_pdev *pdev_handle,
 }
 
 /**
+ * dp_pdev_set_monitor_channel() - set monitor channel num in pdev
+ * @pdev_handle: Datapath PDEV handle
+ *
+ * Return: None
+ */
+static
+void dp_pdev_set_monitor_channel(struct cdp_pdev *pdev_handle, int chan_num)
+{
+	struct dp_pdev *pdev = (struct dp_pdev *)pdev_handle;
+
+	pdev->mon_chan_num = chan_num;
+}
+
+/**
  * dp_get_pdev_id_frm_pdev() - get pdev_id
  * @pdev_handle: Datapath PDEV handle
  *
@@ -6437,6 +6563,18 @@ void dp_peer_set_mesh_rx_filter(struct cdp_vdev *vdev_hdl, uint32_t val)
 }
 #endif
 
+bool dp_check_pdev_exists(struct dp_soc *soc, struct dp_pdev *data)
+{
+	uint8_t pdev_count;
+
+	for (pdev_count = 0; pdev_count < MAX_PDEV_CNT; pdev_count++) {
+		if (soc->pdev_list[pdev_count] &&
+		    soc->pdev_list[pdev_count] == data)
+			return true;
+	}
+	return false;
+}
+
 /**
  * dp_rx_bar_stats_cb(): BAR received stats callback
  * @soc: SOC handle
@@ -6450,6 +6588,11 @@ void dp_rx_bar_stats_cb(struct dp_soc *soc, void *cb_ctxt,
 {
 	struct dp_pdev *pdev = (struct dp_pdev *)cb_ctxt;
 	struct hal_reo_queue_status *queue_status = &(reo_status->queue_status);
+
+	if (!dp_check_pdev_exists(soc, pdev)) {
+		dp_err_rl("pdev doesn't exist");
+		return;
+	}
 
 	if (!qdf_atomic_read(&soc->cmn_init_done))
 		return;
@@ -8857,6 +9000,7 @@ static struct cdp_mon_ops dp_ops_mon = {
 	.txrx_reset_monitor_mode = dp_reset_monitor_mode,
 	/* Added support for HK advance filter */
 	.txrx_set_advance_monitor_filter = dp_pdev_set_advance_monitor_filter,
+	.txrx_monitor_record_channel = dp_pdev_set_monitor_channel,
 };
 
 static struct cdp_host_stats_ops dp_ops_host_stats = {
@@ -9283,6 +9427,8 @@ dp_soc_attach(void *ctrl_psoc, HTC_HANDLE htc_handle, qdf_device_t qdf_osdev,
 	soc->ctrl_psoc = ctrl_psoc;
 	soc->osdev = qdf_osdev;
 	soc->num_hw_dscp_tid_map = HAL_MAX_HW_DSCP_TID_MAPS;
+
+	wlan_set_srng_cfg(&soc->wlan_srng_cfg);
 
 	soc->wlan_cfg_ctx = wlan_cfg_soc_attach(soc->ctrl_psoc);
 	if (!soc->wlan_cfg_ctx) {

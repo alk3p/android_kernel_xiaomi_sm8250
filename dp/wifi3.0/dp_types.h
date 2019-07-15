@@ -689,6 +689,8 @@ struct dp_soc_stats {
 			/* Invalid PDEV error count */
 			uint32_t invalid_pdev;
 
+			/* Defrag peer uninit error count */
+			uint32_t defrag_peer_uninit;
 			/* Invalid sa_idx or da_idx*/
 			uint32_t invalid_sa_da_idx;
 			/* MSDU DONE failures */
@@ -1118,6 +1120,8 @@ struct dp_soc {
 	uint8_t pcp_tid_map[PCP_TID_MAP_MAX];
 	/* TID map priority value */
 	uint8_t tidmap_prty;
+	/* Pointer to global per ring type specific configuration table */
+	struct wlan_srng_cfg *wlan_srng_cfg;
 };
 
 #ifdef IPA_OFFLOAD
@@ -1379,6 +1383,9 @@ struct dp_pdev {
 
 	/* Monitor mode interface and status storage */
 	struct dp_vdev *monitor_vdev;
+
+	/* Monitor mode operation channel */
+	int mon_chan_num;
 
 	/* monitor mode lock */
 	qdf_spinlock_t mon_lock;

@@ -3058,6 +3058,9 @@ static QDF_STATUS send_scan_chan_list_cmd_tlv(wmi_unified_t wmi_handle,
 		if (tchan_info->dfs_set)
 			WMI_SET_CHANNEL_FLAG(chan_info,
 					     WMI_CHAN_FLAG_DFS);
+		if (tchan_info->allow_he)
+			WMI_SET_CHANNEL_FLAG(chan_info,
+					     WMI_CHAN_FLAG_ALLOW_HE);
 
 		if (tchan_info->allow_vht)
 			WMI_SET_CHANNEL_FLAG(chan_info,
@@ -5342,13 +5345,14 @@ static QDF_STATUS send_stop_11d_scan_cmd_tlv(wmi_unified_t wmi_handle,
 /**
  * send_start_oem_data_cmd_tlv() - start OEM data request to target
  * @wmi_handle: wmi handle
- * @startOemDataReq: start request params
+ * @data_len: the length of @data
+ * @data: the pointer to data buf
  *
  * Return: CDF status
  */
 static QDF_STATUS send_start_oem_data_cmd_tlv(wmi_unified_t wmi_handle,
-			  uint32_t data_len,
-			  uint8_t *data)
+					      uint32_t data_len,
+					      uint8_t *data)
 {
 	wmi_buf_t buf;
 	uint8_t *cmd;
@@ -5381,6 +5385,68 @@ static QDF_STATUS send_start_oem_data_cmd_tlv(wmi_unified_t wmi_handle,
 
 	return ret;
 }
+
+#ifdef FEATURE_OEM_DATA
+/**
+ * send_start_oemv2_data_cmd_tlv() - start OEM data to target
+ * @wmi_handle: wmi handle
+ * @oem_data: the pointer to oem data
+ *
+ * Return: QDF status
+ */
+static QDF_STATUS send_start_oemv2_data_cmd_tlv(wmi_unified_t wmi_handle,
+						struct oem_data *oem_data)
+{
+	QDF_STATUS ret;
+	wmi_oem_data_cmd_fixed_param *cmd;
+	wmi_buf_t buf;
+	uint16_t len = sizeof(*cmd);
+	uint16_t oem_data_len_aligned;
+	uint8_t *buf_ptr;
+
+	if (!oem_data || !oem_data->data) {
+		wmi_err_rl("oem data is not valid");
+		return QDF_STATUS_E_FAILURE;
+	}
+	oem_data_len_aligned = roundup(oem_data->data_len, sizeof(uint32_t));
+	if (oem_data_len_aligned < oem_data->data_len) {
+		wmi_err_rl("integer overflow while rounding up data_len");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	if (oem_data_len_aligned > WMI_SVC_MSG_MAX_SIZE - WMI_TLV_HDR_SIZE) {
+		wmi_err_rl("wmi_max_msg_size overflow for given data_len");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	len += WMI_TLV_HDR_SIZE + oem_data_len_aligned;
+	buf = wmi_buf_alloc(wmi_handle, len);
+	if (!buf)
+		return QDF_STATUS_E_NOMEM;
+
+	buf_ptr = (uint8_t *)wmi_buf_data(buf);
+	cmd = (wmi_oem_data_cmd_fixed_param *)buf_ptr;
+	WMITLV_SET_HDR(&cmd->tlv_header,
+		       WMITLV_TAG_STRUC_wmi_oem_data_cmd_fixed_param,
+		       WMITLV_GET_STRUCT_TLVLEN(wmi_oem_data_cmd_fixed_param));
+
+	cmd->vdev_id = oem_data->vdev_id;
+	cmd->data_len = oem_data->data_len;
+	buf_ptr += sizeof(*cmd);
+	WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_BYTE, oem_data_len_aligned);
+	buf_ptr += WMI_TLV_HDR_SIZE;
+	qdf_mem_copy(buf_ptr, oem_data->data, oem_data->data_len);
+
+	wmi_mtrace(WMI_OEM_DATA_CMDID, NO_SESSION, 0);
+	ret = wmi_unified_cmd_send(wmi_handle, buf, len, WMI_OEM_DATA_CMDID);
+	if (QDF_IS_STATUS_ERROR(ret)) {
+		wmi_err_rl("Failed with ret = %d", ret);
+		wmi_buf_free(buf);
+	}
+
+	return ret;
+}
+#endif
 
 /**
  * send_dfs_phyerr_filter_offload_en_cmd_tlv() - enable dfs phyerr filter
@@ -10018,62 +10084,6 @@ static bool is_diag_event_tlv(uint32_t event_id)
 	return false;
 }
 
-static uint16_t wmi_tag_vdev_set_cmd(wmi_unified_t wmi_hdl, wmi_buf_t buf)
-{
-	wmi_vdev_set_param_cmd_fixed_param *set_cmd;
-
-	set_cmd = (wmi_vdev_set_param_cmd_fixed_param *)wmi_buf_data(buf);
-
-	switch (set_cmd->param_id) {
-	case WMI_VDEV_PARAM_LISTEN_INTERVAL:
-	case WMI_VDEV_PARAM_DTIM_POLICY:
-	case WMI_STA_PS_PARAM_INACTIVITY_TIME:
-	case WMI_STA_PS_PARAM_MAX_RESET_ITO_COUNT_ON_TIM_NO_TXRX:
-		return HTC_TX_PACKET_TAG_AUTO_PM;
-	default:
-		break;
-	}
-
-	return 0;
-}
-
-static uint16_t wmi_tag_sta_powersave_cmd(wmi_unified_t wmi_hdl, wmi_buf_t buf)
-{
-	wmi_sta_powersave_param_cmd_fixed_param *ps_cmd;
-
-	ps_cmd = (wmi_sta_powersave_param_cmd_fixed_param *)wmi_buf_data(buf);
-
-	switch (ps_cmd->param) {
-	case WMI_STA_PS_PARAM_TX_WAKE_THRESHOLD:
-	case WMI_STA_PS_PARAM_INACTIVITY_TIME:
-	case WMI_STA_PS_ENABLE_QPOWER:
-	case WMI_STA_PS_PARAM_MAX_RESET_ITO_COUNT_ON_TIM_NO_TXRX:
-		return HTC_TX_PACKET_TAG_AUTO_PM;
-	default:
-		break;
-	}
-
-	return 0;
-}
-
-static uint16_t wmi_tag_common_cmd(wmi_unified_t wmi_hdl, wmi_buf_t buf,
-				   uint32_t cmd_id)
-{
-	if (qdf_atomic_read(&wmi_hdl->is_wow_bus_suspended))
-		return 0;
-
-	switch (cmd_id) {
-	case WMI_VDEV_SET_PARAM_CMDID:
-		return wmi_tag_vdev_set_cmd(wmi_hdl, buf);
-	case WMI_STA_POWERSAVE_PARAM_CMDID:
-		return wmi_tag_sta_powersave_cmd(wmi_hdl, buf);
-	default:
-		break;
-	}
-
-	return 0;
-}
-
 static uint16_t wmi_tag_fw_hang_cmd(wmi_unified_t wmi_handle)
 {
 	uint16_t tag = 0;
@@ -10110,6 +10120,7 @@ static uint16_t wmi_set_htc_tx_tag_tlv(wmi_unified_t wmi_handle,
 	case WMI_PDEV_SUSPEND_CMDID:
 	case WMI_WOW_HOSTWAKEUP_FROM_SLEEP_CMDID:
 	case WMI_PDEV_RESUME_CMDID:
+	case WMI_HB_SET_ENABLE_CMDID:
 #ifdef FEATURE_WLAN_D0WOW
 	case WMI_D0_WOW_ENABLE_DISABLE_CMDID:
 #endif
@@ -10118,9 +10129,6 @@ static uint16_t wmi_set_htc_tx_tag_tlv(wmi_unified_t wmi_handle,
 	case WMI_FORCE_FW_HANG_CMDID:
 		htc_tx_tag = wmi_tag_fw_hang_cmd(wmi_handle);
 		break;
-	case WMI_VDEV_SET_PARAM_CMDID:
-	case WMI_STA_POWERSAVE_PARAM_CMDID:
-		htc_tx_tag = wmi_tag_common_cmd(wmi_handle, buf, cmd_id);
 	default:
 		break;
 	}
@@ -11777,6 +11785,9 @@ struct wmi_ops tlv_ops =  {
 #endif
 	.send_csa_offload_enable_cmd = send_csa_offload_enable_cmd_tlv,
 	.send_start_oem_data_cmd = send_start_oem_data_cmd_tlv,
+#ifdef FEATURE_OEM_DATA
+	.send_start_oemv2_data_cmd = send_start_oemv2_data_cmd_tlv,
+#endif
 #ifdef WLAN_FEATURE_CIF_CFR
 	.send_oem_dma_cfg_cmd = send_oem_dma_cfg_cmd_tlv,
 #endif
@@ -12286,6 +12297,8 @@ static void populate_tlv_events_id(uint32_t *event_ids)
 	event_ids[wmi_vdev_get_mws_coex_antenna_sharing_state_eventid] =
 			WMI_VDEV_GET_MWS_COEX_ANTENNA_SHARING_STATE_EVENTID;
 #endif
+	event_ids[wmi_coex_report_antenna_isolation_event_id] =
+				WMI_COEX_REPORT_ANTENNA_ISOLATION_EVENTID;
 }
 
 /**

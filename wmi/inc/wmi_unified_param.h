@@ -620,6 +620,7 @@ typedef enum {
  * @allow_ht: HT allowed in chan
  * @allow_vht: VHT allowed on chan
  * @set_agile: is agile mode
+ * @allow_he: HE allowed on chan
  * @phy_mode: phymode (vht80 or ht40 or ...)
  * @cfreq1: centre frequency on primary
  * @cfreq2: centre frequency on secondary
@@ -641,7 +642,8 @@ struct channel_param {
 		is_chan_passive:1,
 		allow_ht:1,
 		allow_vht:1,
-		set_agile:1;
+		set_agile:1,
+		allow_he:1;
 	uint32_t phy_mode;
 	uint32_t cfreq1;
 	uint32_t cfreq2;
@@ -651,6 +653,20 @@ struct channel_param {
 	uint8_t  antennamax;
 	uint8_t  reg_class_id;
 };
+
+#ifdef FEATURE_OEM_DATA
+/**
+ * struct oem_data - oem data to be sent to firmware
+ * @vdev_id: Unique identifier assigned to the vdev
+ * @data_len: len of data
+ * @data: the pointer to the buffer containing data
+ */
+struct oem_data {
+	uint8_t vdev_id;
+	size_t data_len;
+	uint8_t *data;
+};
+#endif
 
 /**
  * struct mac_ssid - mac ssid structure
@@ -4834,6 +4850,7 @@ typedef enum {
 #ifdef WLAN_FEATURE_INTEROP_ISSUES_AP
 	wmi_pdev_interop_issues_ap_event_id,
 #endif
+	wmi_coex_report_antenna_isolation_event_id,
 	wmi_events_max,
 } wmi_conv_event_id;
 

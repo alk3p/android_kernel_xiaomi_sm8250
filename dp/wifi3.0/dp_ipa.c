@@ -743,8 +743,6 @@ QDF_STATUS dp_ipa_enable_autonomy(struct cdp_pdev *ppdev)
 	soc->reo_remapped = true;
 	qdf_spin_unlock_bh(&soc->remap_lock);
 
-	dp_ipa_handle_rx_buf_pool_smmu_mapping(soc, pdev, true);
-
 	/* Call HAL API to remap REO rings to REO2IPA ring */
 	ix0 = HAL_REO_REMAP_VAL(REO_REMAP_TCL, REO_REMAP_TCL) |
 	      HAL_REO_REMAP_VAL(REO_REMAP_SW1, REO_REMAP_SW4) |
@@ -1059,8 +1057,8 @@ QDF_STATUS dp_ipa_setup(struct cdp_pdev *ppdev, void *ipa_i2w_cb,
 	struct dp_ipa_resources *ipa_res = &pdev->ipa_resource;
 	qdf_ipa_ep_cfg_t *tx_cfg;
 	qdf_ipa_ep_cfg_t *rx_cfg;
-	qdf_ipa_wdi_pipe_setup_info_t *tx;
-	qdf_ipa_wdi_pipe_setup_info_t *rx;
+	qdf_ipa_wdi_pipe_setup_info_t *tx = NULL;
+	qdf_ipa_wdi_pipe_setup_info_t *rx = NULL;
 	qdf_ipa_wdi_pipe_setup_info_smmu_t *tx_smmu;
 	qdf_ipa_wdi_pipe_setup_info_smmu_t *rx_smmu;
 	qdf_ipa_wdi_conn_in_params_t pipe_in;
@@ -1070,9 +1068,6 @@ QDF_STATUS dp_ipa_setup(struct cdp_pdev *ppdev, void *ipa_i2w_cb,
 	if (!wlan_cfg_is_ipa_enabled(soc->wlan_cfg_ctx))
 		return QDF_STATUS_SUCCESS;
 
-
-	qdf_mem_zero(&tx, sizeof(qdf_ipa_wdi_pipe_setup_info_t));
-	qdf_mem_zero(&rx, sizeof(qdf_ipa_wdi_pipe_setup_info_t));
 	qdf_mem_zero(&pipe_in, sizeof(pipe_in));
 	qdf_mem_zero(&pipe_out, sizeof(pipe_out));
 
@@ -1545,13 +1540,18 @@ QDF_STATUS dp_ipa_cleanup_iface(char *ifname, bool is_ipv6_enabled)
  */
 QDF_STATUS dp_ipa_enable_pipes(struct cdp_pdev *ppdev)
 {
+	struct dp_pdev *pdev = (struct dp_pdev *)ppdev;
+	struct dp_soc *soc = pdev->soc;
 	QDF_STATUS result;
+
+	dp_ipa_handle_rx_buf_pool_smmu_mapping(soc, pdev, true);
 
 	result = qdf_ipa_wdi_enable_pipes();
 	if (result) {
 		QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_ERROR,
 			  "%s: Enable WDI PIPE fail, code %d",
 			  __func__, result);
+		dp_ipa_handle_rx_buf_pool_smmu_mapping(soc, pdev, false);
 		return QDF_STATUS_E_FAILURE;
 	}
 

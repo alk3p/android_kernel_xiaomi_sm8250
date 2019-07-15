@@ -27,6 +27,7 @@
 #include "dp_rx_defrag.h"
 #include <enet.h>	/* LLC_SNAP_HDR_LEN */
 #include "dp_rx_defrag.h"
+#include "dp_ipa.h"
 
 const struct dp_rx_defrag_cipher dp_f_ccmp = {
 	"AES-CCM",
@@ -1066,6 +1067,8 @@ dp_rx_defrag_nwifi_to_8023(qdf_nbuf_t nbuf, uint16_t hdrsize)
 		return QDF_STATUS_E_FAILURE;
 	}
 
+	dp_ipa_handle_rx_buf_smmu_mapping(soc, head, true);
+
 	paddr = qdf_nbuf_get_frag_paddr(head, 0);
 
 	ret = check_x86_paddr(soc, &head, &paddr, pdev);
@@ -1699,7 +1702,7 @@ uint32_t dp_rx_frag_handle(struct dp_soc *soc, void *ring_desc,
 
 QDF_STATUS dp_rx_defrag_add_last_frag(struct dp_soc *soc,
 				      struct dp_peer *peer, uint16_t tid,
-		uint16_t rxseq, qdf_nbuf_t nbuf)
+				      uint16_t rxseq, qdf_nbuf_t nbuf)
 {
 	struct dp_rx_tid *rx_tid = &peer->rx_tid[tid];
 	struct dp_rx_reorder_array_elem *rx_reorder_array_elem;
@@ -1708,6 +1711,22 @@ QDF_STATUS dp_rx_defrag_add_last_frag(struct dp_soc *soc,
 	QDF_STATUS status;
 
 	rx_reorder_array_elem = peer->rx_tid[tid].array;
+
+	/*
+	 * HW may fill in unexpected peer_id in RX PKT TLV,
+	 * if this peer_id related peer is valid by coincidence,
+	 * but actually this peer won't do dp_peer_rx_init(like SAP vdev
+	 * self peer), then invalid access to rx_reorder_array_elem happened.
+	 */
+	if (!rx_reorder_array_elem) {
+		dp_verbose_debug(
+			"peer id:%d mac:" QDF_MAC_ADDR_STR "drop rx frame!",
+			peer->peer_ids[0],
+			QDF_MAC_ADDR_ARRAY(peer->mac_addr.raw));
+		DP_STATS_INC(soc, rx.err.defrag_peer_uninit, 1);
+		qdf_nbuf_free(nbuf);
+		goto fail;
+	}
 
 	if (rx_reorder_array_elem->head &&
 	    rxseq != rx_tid->curr_seq_num) {

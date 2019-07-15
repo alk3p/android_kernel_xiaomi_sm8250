@@ -158,6 +158,11 @@ typedef __qdf_mem_info_t qdf_mem_info_t;
 typedef __sgtable_t sgtable_t;
 
 /**
+ * typepdef qdf_cpu_mask - CPU Mask
+ */
+typedef __qdf_cpu_mask qdf_cpu_mask;
+
+/**
  * pointer to net device
  */
 typedef __qdf_netdev_t qdf_netdev_t;
@@ -640,28 +645,7 @@ void __printf(3, 4) qdf_trace_msg(QDF_MODULE_ID module, QDF_TRACE_LEVEL level,
 void qdf_vtrace_msg(QDF_MODULE_ID module, QDF_TRACE_LEVEL level,
 		    const char *str_format, va_list val);
 
-#ifdef CONFIG_MCL
-
-#define qdf_print(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_QDF, ## params)
-#define qdf_alert(params...) QDF_TRACE_FATAL(QDF_MODULE_ID_QDF, ## params)
-#define qdf_err(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_QDF, ## params)
-#define qdf_warn(params...) QDF_TRACE_WARN(QDF_MODULE_ID_QDF, ## params)
-#define qdf_info(params...) QDF_TRACE_INFO(QDF_MODULE_ID_QDF, ## params)
-#define qdf_debug(params...) QDF_TRACE_DEBUG(QDF_MODULE_ID_QDF, ## params)
-
-#define qdf_nofl_alert(params...) \
-	QDF_TRACE_FATAL_NO_FL(QDF_MODULE_ID_QDF, ## params)
-#define qdf_nofl_err(params...) \
-	QDF_TRACE_ERROR_NO_FL(QDF_MODULE_ID_QDF, ## params)
-#define qdf_nofl_warn(params...) \
-	QDF_TRACE_WARN_NO_FL(QDF_MODULE_ID_QDF, ## params)
-#define qdf_nofl_info(params...) \
-	QDF_TRACE_INFO_NO_FL(QDF_MODULE_ID_QDF, ## params)
-#define qdf_nofl_debug(params...) \
-	QDF_TRACE_DEBUG_NO_FL(QDF_MODULE_ID_QDF, ## params)
-
-#else /* CONFIG_MCL */
-
+#ifdef QDF_TRACE_PRINT_ENABLE
 #define qdf_print(args...) QDF_TRACE_INFO(QDF_MODULE_ID_ANY, ## args)
 #define qdf_alert(args...) QDF_TRACE_FATAL(QDF_MODULE_ID_ANY, ## args)
 #define qdf_err(args...)   QDF_TRACE_ERROR(QDF_MODULE_ID_ANY, ## args)
@@ -682,7 +666,26 @@ void qdf_vtrace_msg(QDF_MODULE_ID module, QDF_TRACE_LEVEL level,
 #define qdf_nofl_debug(params...) \
 	QDF_TRACE_DEBUG_NO_FL(QDF_MODULE_ID_ANY, ## params)
 
-#endif /* CONFIG_MCL */
+#else /* QDF_TRACE_PRINT_ENABLE */
+#define qdf_print(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_QDF, ## params)
+#define qdf_alert(params...) QDF_TRACE_FATAL(QDF_MODULE_ID_QDF, ## params)
+#define qdf_err(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_QDF, ## params)
+#define qdf_warn(params...) QDF_TRACE_WARN(QDF_MODULE_ID_QDF, ## params)
+#define qdf_info(params...) QDF_TRACE_INFO(QDF_MODULE_ID_QDF, ## params)
+#define qdf_debug(params...) QDF_TRACE_DEBUG(QDF_MODULE_ID_QDF, ## params)
+
+#define qdf_nofl_alert(params...) \
+	QDF_TRACE_FATAL_NO_FL(QDF_MODULE_ID_QDF, ## params)
+#define qdf_nofl_err(params...) \
+	QDF_TRACE_ERROR_NO_FL(QDF_MODULE_ID_QDF, ## params)
+#define qdf_nofl_warn(params...) \
+	QDF_TRACE_WARN_NO_FL(QDF_MODULE_ID_QDF, ## params)
+#define qdf_nofl_info(params...) \
+	QDF_TRACE_INFO_NO_FL(QDF_MODULE_ID_QDF, ## params)
+#define qdf_nofl_debug(params...) \
+	QDF_TRACE_DEBUG_NO_FL(QDF_MODULE_ID_QDF, ## params)
+
+#endif /* QDF_TRACE_PRINT_ENABLE */
 
 #define qdf_rl_alert(params...) QDF_TRACE_FATAL_RL(QDF_MODULE_ID_QDF, ## params)
 #define qdf_rl_err(params...) QDF_TRACE_ERROR_RL(QDF_MODULE_ID_QDF, ## params)
@@ -930,6 +933,22 @@ struct qdf_ipv6_addr {
  * Return: QDF_STATUS
  */
 QDF_STATUS qdf_ipv6_parse(const char *ipv6_str, struct qdf_ipv6_addr *out_addr);
+
+/**
+ * qdf_uint16_array_parse() - parse the given string as uint16 array
+ * @in_str: the input string to parse
+ * @out_array: the output uint16 array, populated on success
+ * @array_size: size of the array
+ * @out_size: size of the populated array
+ *
+ * This API is called to convert string (each value separated by
+ * a comma) into an uint16 array
+ *
+ * Return: QDF_STATUS
+ */
+
+QDF_STATUS qdf_uint16_array_parse(const char *in_str, uint16_t *out_array,
+				  qdf_size_t array_size, qdf_size_t *out_size);
 
 /**
  * qdf_uint8_array_parse() - parse the given string as uint8 array

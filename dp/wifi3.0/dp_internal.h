@@ -826,11 +826,13 @@ extern void dp_reo_cmdlist_destroy(struct dp_soc *soc);
 
 /**
  * dp_reo_status_ring_handler - Handler for REO Status ring
+ * @int_ctx: pointer to DP interrupt context
  * @soc: DP Soc handle
  *
  * Returns: Number of descriptors reaped
  */
-uint32_t dp_reo_status_ring_handler(struct dp_soc *soc);
+uint32_t dp_reo_status_ring_handler(struct dp_intr *int_ctx,
+				    struct dp_soc *soc);
 void dp_aggregate_vdev_stats(struct dp_vdev *vdev,
 			     struct cdp_vdev_stats *vdev_stats);
 void dp_rx_tid_stats_cb(struct dp_soc *soc, void *cb_ctxt,
@@ -863,6 +865,15 @@ void dp_set_michael_key(struct cdp_peer *peer_handle,
 uint32_t dp_pdev_tid_stats_display(void *pdev_handle,
 			enum _ol_ath_param_t param, uint32_t value, void *buff);
 #endif
+
+/**
+ * dp_check_pdev_exists() - Validate pdev before use
+ * @soc - dp soc handle
+ * @data - pdev handle
+ *
+ * Return: 0 - success/invalid - failure
+ */
+bool dp_check_pdev_exists(struct dp_soc *soc, struct dp_pdev *data);
 
 /**
  * dp_update_delay_stats() - Update delay statistics in structure
@@ -1199,6 +1210,48 @@ static inline void dp_peer_unref_del_find_by_id(struct dp_peer *peer)
 {
 }
 #endif
+
+#ifdef WLAN_FEATURE_DP_EVENT_HISTORY
+/**
+ * dp_srng_access_start() - Wrapper function to log access start of a hal ring
+ * @int_ctx: pointer to DP interrupt context
+ * @soc: DP Soc handle
+ * @hal_ring: opaque pointer to the HAL Rx Error Ring, which will be serviced
+ *
+ * Return: 0 on success; error on failure
+ */
+int dp_srng_access_start(struct dp_intr *int_ctx, struct dp_soc *dp_soc,
+			 void *hal_ring);
+
+/**
+ * dp_srng_access_end() - Wrapper function to log access end of a hal ring
+ * @int_ctx: pointer to DP interrupt context
+ * @soc: DP Soc handle
+ * @hal_ring: opaque pointer to the HAL Rx Error Ring, which will be serviced
+ *
+ * Return: void
+ */
+void dp_srng_access_end(struct dp_intr *int_ctx, struct dp_soc *dp_soc,
+			void *hal_ring);
+
+#else
+
+static inline int dp_srng_access_start(struct dp_intr *int_ctx,
+				       struct dp_soc *dp_soc, void *hal_ring)
+{
+	void *hal_soc = dp_soc->hal_soc;
+
+	return hal_srng_access_start(hal_soc, hal_ring);
+}
+
+static inline void dp_srng_access_end(struct dp_intr *int_ctx,
+				      struct dp_soc *dp_soc, void *hal_ring)
+{
+	void *hal_soc = dp_soc->hal_soc;
+
+	return hal_srng_access_end(hal_soc, hal_ring);
+}
+#endif /* WLAN_FEATURE_DP_EVENT_HISTORY */
 
 #ifdef CONFIG_WIN
 /**

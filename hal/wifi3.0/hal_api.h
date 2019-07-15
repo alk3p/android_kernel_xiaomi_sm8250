@@ -90,6 +90,16 @@ static inline int hal_force_wake_release(struct hal_soc *soc)
 }
 #endif
 
+#ifdef PCIE_REG_WINDOW_LOCAL_NO_CACHE
+static inline void hal_select_window(struct hal_soc *hal_soc, uint32_t offset)
+{
+	uint32_t window = (offset >> WINDOW_SHIFT) & WINDOW_VALUE_MASK;
+
+	qdf_iowrite32(hal_soc->dev_base_addr + WINDOW_REG_ADDRESS,
+		      WINDOW_ENABLE_BIT | window);
+	hal_soc->register_window = window;
+}
+#else
 static inline void hal_select_window(struct hal_soc *hal_soc, uint32_t offset)
 {
 	uint32_t window = (offset >> WINDOW_SHIFT) & WINDOW_VALUE_MASK;
@@ -99,6 +109,7 @@ static inline void hal_select_window(struct hal_soc *hal_soc, uint32_t offset)
 		hal_soc->register_window = window;
 	}
 }
+#endif
 
 /**
  * note1: WINDOW_RANGE_MASK = (1 << WINDOW_SHIFT) -1
@@ -881,6 +892,20 @@ static inline uint32_t hal_srng_src_done_val(void *hal_soc, void *hal_ring)
 }
 
 /**
+ * hal_get_entrysize_from_srng() - Retrieve ring entry size
+ * @hal_ring: Source ring pointer
+ *
+ * Return: uint8_t
+ */
+static inline
+uint8_t hal_get_entrysize_from_srng(void *hal_ring)
+{
+	struct hal_srng *srng = (struct hal_srng *)hal_ring;
+
+	return srng->entry_size;
+}
+
+/**
  * hal_get_sw_hptp - Get SW head and tail pointer location for any ring
  * @hal_soc: Opaque HAL SOC handle
  * @hal_ring: Source ring pointer
@@ -895,11 +920,11 @@ static inline void hal_get_sw_hptp(void *hal_soc, void *hal_ring,
 	struct hal_srng *srng = (struct hal_srng *)hal_ring;
 
 	if (srng->ring_dir == HAL_SRNG_SRC_RING) {
-		*headp = srng->u.src_ring.hp / srng->entry_size;
-		*tailp = *(srng->u.src_ring.tp_addr) / srng->entry_size;
+		*headp = srng->u.src_ring.hp;
+		*tailp = *srng->u.src_ring.tp_addr;
 	} else {
-		*tailp = srng->u.dst_ring.tp / srng->entry_size;
-		*headp = *(srng->u.dst_ring.hp_addr) / srng->entry_size;
+		*tailp = srng->u.dst_ring.tp;
+		*headp = *srng->u.dst_ring.hp_addr;
 	}
 }
 
@@ -1445,7 +1470,7 @@ static inline void hal_srng_dump_ring_desc(struct hal_soc *hal, void *hal_ring,
 {
 	struct hal_srng *srng = (struct hal_srng *)hal_ring;
 
-	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_FATAL,
+	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO_HIGH,
 			   ring_desc, (srng->entry_size << 2));
 }
 

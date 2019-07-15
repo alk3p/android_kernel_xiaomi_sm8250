@@ -91,7 +91,7 @@
 #define RADIOTAP_CCK_CHANNEL 0x0020
 #define RADIOTAP_OFDM_CHANNEL 0x0040
 
-#ifdef CONFIG_MCL
+#ifdef FEATURE_NBUFF_REPLENISH_TIMER
 #include <qdf_mc_timer.h>
 
 struct qdf_track_timer {
@@ -506,7 +506,6 @@ qdf_export_symbol(__qdf_nbuf_alloc);
  * Return: none
  */
 
-#ifdef CONFIG_MCL
 void __qdf_nbuf_free(struct sk_buff *skb)
 {
 	if (pld_nbuf_pre_alloc_free(skb))
@@ -518,16 +517,6 @@ void __qdf_nbuf_free(struct sk_buff *skb)
 	else
 		dev_kfree_skb_any(skb);
 }
-#else
-void __qdf_nbuf_free(struct sk_buff *skb)
-{
-	if (pld_nbuf_pre_alloc_free(skb))
-		return;
-
-	qdf_nbuf_count_dec(skb);
-	dev_kfree_skb_any(skb);
-}
-#endif
 
 qdf_export_symbol(__qdf_nbuf_free);
 

@@ -424,6 +424,7 @@ struct hif_opaque_softc *hif_open(qdf_device_t qdf_ctx, uint32_t mode,
 	qdf_mem_copy(&scn->callbacks, cbk,
 		     sizeof(struct hif_driver_state_callbacks));
 	scn->bus_type  = bus_type;
+	hif_set_event_hist_mask(GET_HIF_OPAQUE_HDL(scn));
 	status = hif_bus_open(scn, bus_type);
 	if (status != QDF_STATUS_SUCCESS) {
 		HIF_ERROR("%s: hif_bus_open error = %d, bus_type = %d",
@@ -1272,7 +1273,11 @@ irqreturn_t hif_wake_interrupt_handler(int irq, void *context)
 	if (scn->initial_wakeup_cb)
 		scn->initial_wakeup_cb(scn->initial_wakeup_priv);
 
-	hif_pm_runtime_request_resume(hif_ctx);
+	if (hif_pm_runtime_get_monitor_wake_intr(hif_ctx) &&
+	    hif_pm_runtime_is_suspended(hif_ctx)) {
+		hif_pm_runtime_set_monitor_wake_intr(hif_ctx, 0);
+		hif_pm_runtime_request_resume(hif_ctx);
+	}
 
 	return IRQ_HANDLED;
 }
