@@ -1076,9 +1076,20 @@ fail:
 	return;
 }
 
+/**
+ * dp_rx_err_process() - Processes error frames routed to REO error ring
+ *
+ * @soc: core txrx main context
+ * @hal_ring: opaque pointer to the HAL Rx Error Ring, which will be serviced
+ * @quota: No. of units (packets) that can be serviced in one shot.
+ *
+ * This function implements error processing and top level demultiplexer
+ * for all the frames routed to REO error ring.
+ *
+ * Return: uint32_t: No. of elements processed
+ */
 uint32_t
-dp_rx_err_process(struct dp_intr *int_ctx, struct dp_soc *soc,
-		  void *hal_ring, uint32_t quota)
+dp_rx_err_process(struct dp_soc *soc, void *hal_ring, uint32_t quota)
 {
 	void *hal_soc;
 	void *ring_desc;
@@ -1107,7 +1118,7 @@ dp_rx_err_process(struct dp_intr *int_ctx, struct dp_soc *soc,
 	/* Debug -- Remove later */
 	qdf_assert(hal_soc);
 
-	if (qdf_unlikely(dp_srng_access_start(int_ctx, soc, hal_ring))) {
+	if (qdf_unlikely(hal_srng_access_start(hal_soc, hal_ring))) {
 
 		/* TODO */
 		/*
@@ -1235,7 +1246,7 @@ dp_rx_err_process(struct dp_intr *int_ctx, struct dp_soc *soc,
 	}
 
 done:
-	dp_srng_access_end(int_ctx, soc, hal_ring);
+	hal_srng_access_end(hal_soc, hal_ring);
 
 	if (soc->rx.flags.defrag_timeout_check) {
 		uint32_t now_ms =
@@ -1263,9 +1274,20 @@ done:
 	return rx_bufs_used; /* Assume no scale factor for now */
 }
 
+/**
+ * dp_rx_wbm_err_process() - Processes error frames routed to WBM release ring
+ *
+ * @soc: core txrx main context
+ * @hal_ring: opaque pointer to the HAL Rx Error Ring, which will be serviced
+ * @quota: No. of units (packets) that can be serviced in one shot.
+ *
+ * This function implements error processing and top level demultiplexer
+ * for all the frames routed to WBM2HOST sw release ring.
+ *
+ * Return: uint32_t: No. of elements processed
+ */
 uint32_t
-dp_rx_wbm_err_process(struct dp_intr *int_ctx, struct dp_soc *soc,
-		      void *hal_ring, uint32_t quota)
+dp_rx_wbm_err_process(struct dp_soc *soc, void *hal_ring, uint32_t quota)
 {
 	void *hal_soc;
 	void *ring_desc;
@@ -1296,7 +1318,7 @@ dp_rx_wbm_err_process(struct dp_intr *int_ctx, struct dp_soc *soc,
 	/* Debug -- Remove later */
 	qdf_assert(hal_soc);
 
-	if (qdf_unlikely(dp_srng_access_start(int_ctx, soc, hal_ring))) {
+	if (qdf_unlikely(hal_srng_access_start(hal_soc, hal_ring))) {
 
 		/* TODO */
 		/*
@@ -1383,7 +1405,7 @@ dp_rx_wbm_err_process(struct dp_intr *int_ctx, struct dp_soc *soc,
 						rx_desc);
 	}
 done:
-	dp_srng_access_end(int_ctx, soc, hal_ring);
+	hal_srng_access_end(hal_soc, hal_ring);
 
 	for (mac_id = 0; mac_id < MAX_PDEV_CNT; mac_id++) {
 		if (rx_bufs_reaped[mac_id]) {
@@ -1680,9 +1702,18 @@ dp_rx_err_mpdu_pop(struct dp_soc *soc, uint32_t mac_id,
 	return rx_bufs_used;
 }
 
+/**
+* dp_rxdma_err_process() - RxDMA error processing functionality
+*
+* @soc: core txrx main contex
+* @mac_id: mac id which is one of 3 mac_ids
+* @hal_ring: opaque pointer to the HAL Rx Ring, which will be serviced
+* @quota: No. of units (packets) that can be serviced in one shot.
+
+* Return: num of buffers processed
+*/
 uint32_t
-dp_rxdma_err_process(struct dp_intr *int_ctx, struct dp_soc *soc,
-		     uint32_t mac_id, uint32_t quota)
+dp_rxdma_err_process(struct dp_soc *soc, uint32_t mac_id, uint32_t quota)
 {
 	struct dp_pdev *pdev = dp_get_pdev_for_mac_id(soc, mac_id);
 	int mac_for_pdev = dp_get_mac_id_for_mac(soc, mac_id);
@@ -1713,7 +1744,7 @@ dp_rxdma_err_process(struct dp_intr *int_ctx, struct dp_soc *soc,
 
 	qdf_assert(hal_soc);
 
-	if (qdf_unlikely(dp_srng_access_start(int_ctx, soc, err_dst_srng))) {
+	if (qdf_unlikely(hal_srng_access_start(hal_soc, err_dst_srng))) {
 		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
 			"%s %d : HAL Monitor Destination Ring Init \
 			Failed -- %pK",
@@ -1729,7 +1760,7 @@ dp_rxdma_err_process(struct dp_intr *int_ctx, struct dp_soc *soc,
 						&head, &tail);
 	}
 
-	dp_srng_access_end(int_ctx, soc, err_dst_srng);
+	hal_srng_access_end(hal_soc, err_dst_srng);
 
 	if (rx_bufs_used) {
 		dp_rxdma_srng = &pdev->rx_refill_buf_ring;
