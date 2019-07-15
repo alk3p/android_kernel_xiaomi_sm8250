@@ -289,11 +289,15 @@ pe_roam_synch_callback(struct mac_context *mac_ctx,
  * from firmware
  * @mac: pointer to global mac context
  * @vdev_id: VDEV in which the event was received
+ * @deauth_disassoc_frame: Deauth/disassoc frame received from firmware
+ * @deauth_disassoc_frame_len: Length of @deauth_disassoc_frame
  *
  * Return: QDF_STATUS
  */
 QDF_STATUS
-pe_disconnect_callback(struct mac_context *mac, uint8_t vdev_id);
+pe_disconnect_callback(struct mac_context *mac, uint8_t vdev_id,
+		       uint8_t *deauth_disassoc_frame,
+		       uint16_t deauth_disassoc_frame_len);
 
 #else
 static inline QDF_STATUS
@@ -306,7 +310,9 @@ pe_roam_synch_callback(struct mac_context *mac_ctx,
 }
 
 static inline QDF_STATUS
-pe_disconnect_callback(struct mac_context *mac, uint8_t vdev_id)
+pe_disconnect_callback(struct mac_context *mac, uint8_t vdev_id,
+		       uint8_t *deauth_disassoc_frame,
+		       uint16_t deauth_disassoc_frame_len)
 {
 	return QDF_STATUS_E_NOSUPPORT;
 }
@@ -332,6 +338,16 @@ void lim_update_lost_link_info(struct mac_context *mac, struct pe_session *sessi
  */
 void lim_mon_init_session(struct mac_context *mac_ptr,
 			  struct sir_create_session *msg);
+
+/**
+ * lim_mon_deinit_session() - delete PE session for monitor mode operation
+ * @mac_ptr: mac pointer
+ * @msg: Pointer to struct sir_delete_session type.
+ *
+ * Return: NONE
+ */
+void lim_mon_deinit_session(struct mac_context *mac_ptr,
+			    struct sir_delete_session *msg);
 
 #define limGetQosMode(pe_session, pVal) (*(pVal) = (pe_session)->limQosEnabled)
 #define limGetWmeMode(pe_session, pVal) (*(pVal) = (pe_session)->limWmeEnabled)
@@ -412,8 +428,9 @@ void lim_fill_join_rsp_ht_caps(struct pe_session *session,
 			       struct join_rsp *rsp)
 {}
 #endif
-QDF_STATUS lim_update_ext_cap_ie(struct mac_context *mac_ctx,
-	uint8_t *ie_data, uint8_t *local_ie_buf, uint16_t *local_ie_len);
+QDF_STATUS lim_update_ext_cap_ie(struct mac_context *mac_ctx, uint8_t *ie_data,
+				 uint8_t *local_ie_buf, uint16_t *local_ie_len,
+				 struct pe_session *session);
 
 /**
  * lim_handle_sap_beacon(): Handle the beacon received from scan module for SAP

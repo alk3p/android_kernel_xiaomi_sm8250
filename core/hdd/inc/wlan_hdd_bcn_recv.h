@@ -28,19 +28,19 @@ struct wireless_dev;
 struct wiphy;
 
 /**
- * wlan_hdd_cfg80211_bcn_rcv_start() - Process bcn recv start ind
+ * wlan_hdd_cfg80211_bcn_rcv_op() - Process beacon report operations
  * @wiphy: Pointer to wireless phy
  * @wdev: Pointer to wireless device
  * @data: Pointer to data
  * @data_len: Length of @data
  *
- * Wrapper function of __wlan_hdd_cfg80211_bcn_rcv_start()
+ * Wrapper function of __wlan_hdd_cfg80211_bcn_rcv_op()
  *
  * Return: 0 on success, negative errno on failure
  */
-int wlan_hdd_cfg80211_bcn_rcv_start(struct wiphy *wiphy,
-				    struct wireless_dev *wdev,
-				    const void *data, int data_len);
+int wlan_hdd_cfg80211_bcn_rcv_op(struct wiphy *wiphy,
+				 struct wireless_dev *wdev,
+				 const void *data, int data_len);
 
 /**
  * hdd_beacon_recv_pause_indication()- Send vendor event to user space
@@ -62,8 +62,9 @@ void hdd_beacon_recv_pause_indication(hdd_handle_t hdd_handle,
 	.info.vendor_id = QCA_NL80211_VENDOR_ID,			\
 	.info.subcmd = QCA_NL80211_VENDOR_SUBCMD_BEACON_REPORTING,	\
 	.flags = WIPHY_VENDOR_CMD_NEED_WDEV |				\
-		WIPHY_VENDOR_CMD_NEED_RUNNING,				\
-	.doit = wlan_hdd_cfg80211_bcn_rcv_start				\
+		 WIPHY_VENDOR_CMD_NEED_NETDEV |				\
+		 WIPHY_VENDOR_CMD_NEED_RUNNING,				\
+	.doit = wlan_hdd_cfg80211_bcn_rcv_op\
 },
 
 #define BCN_RECV_FEATURE_VENDOR_EVENTS			\

@@ -332,7 +332,7 @@ static void lim_send_mlm_assoc_req(struct mac_context *mac_ctx,
 	pe_debug("SessionId: %d Authenticated with BSS",
 		session_entry->peSessionId);
 
-	if (!session_entry->pLimJoinReq) {
+	if (!session_entry->lim_join_req) {
 		pe_err("Join Request is NULL");
 		/* No need to Assert. JOIN timeout will handle this error */
 		return;
@@ -352,7 +352,7 @@ static void lim_send_mlm_assoc_req(struct mac_context *mac_ctx,
 		pe_err("could not retrieve Capabilities value");
 
 	/* Clear spectrum management bit if AP doesn't support it */
-	if (!(session_entry->pLimJoinReq->bssDescription.capabilityInfo &
+	if (!(session_entry->lim_join_req->bssDescription.capabilityInfo &
 		LIM_SPECTRUM_MANAGEMENT_BIT_MASK))
 		/*
 		 * AP doesn't support spectrum management
@@ -361,19 +361,19 @@ static void lim_send_mlm_assoc_req(struct mac_context *mac_ctx,
 		caps &= (~LIM_SPECTRUM_MANAGEMENT_BIT_MASK);
 
 	/* Clear rrm bit if AP doesn't support it */
-	if (!(session_entry->pLimJoinReq->bssDescription.capabilityInfo &
+	if (!(session_entry->lim_join_req->bssDescription.capabilityInfo &
 		LIM_RRM_BIT_MASK))
 		caps &= (~LIM_RRM_BIT_MASK);
 
 	/* Clear short preamble bit if AP does not support it */
-	if (!(session_entry->pLimJoinReq->bssDescription.capabilityInfo &
+	if (!(session_entry->lim_join_req->bssDescription.capabilityInfo &
 		(LIM_SHORT_PREAMBLE_BIT_MASK))) {
 		caps &= (~LIM_SHORT_PREAMBLE_BIT_MASK);
 		pe_debug("Clearing short preamble:no AP support");
 	}
 
 	/* Clear immediate block ack bit if AP does not support it */
-	if (!(session_entry->pLimJoinReq->bssDescription.capabilityInfo &
+	if (!(session_entry->lim_join_req->bssDescription.capabilityInfo &
 		(LIM_IMMEDIATE_BLOCK_ACK_MASK))) {
 		caps &= (~LIM_IMMEDIATE_BLOCK_ACK_MASK);
 		pe_debug("Clearing Immed Blk Ack:no AP support");
@@ -1262,8 +1262,8 @@ QDF_STATUS lim_sta_send_down_link(join_params *param)
 		 * to SME
 		 */
 		lim_cleanup_rx_path(mac_ctx, sta_ds, session);
-		qdf_mem_free(session->pLimJoinReq);
-		session->pLimJoinReq = NULL;
+		qdf_mem_free(session->lim_join_req);
+		session->lim_join_req = NULL;
 		/* Cleanup if add bss failed */
 		if (session->add_bss_failed) {
 			dph_delete_hash_entry(mac_ctx,
@@ -1273,8 +1273,8 @@ QDF_STATUS lim_sta_send_down_link(join_params *param)
 		}
 		return QDF_STATUS_SUCCESS;
 	}
-	qdf_mem_free(session->pLimJoinReq);
-	session->pLimJoinReq = NULL;
+	qdf_mem_free(session->lim_join_req);
+	session->lim_join_req = NULL;
 
 error:
 	/*
@@ -1296,7 +1296,7 @@ error:
 		}
 		if (lim_set_link_state(mac_ctx, eSIR_LINK_DOWN_STATE,
 				       session->bssId,
-				       session->selfMacAddr,
+				       session->self_mac_addr,
 				       lim_join_result_callback,
 				       link_state_arg) != QDF_STATUS_SUCCESS) {
 			qdf_mem_free(link_state_arg);
@@ -1599,7 +1599,7 @@ void lim_process_sta_mlm_del_bss_rsp(struct mac_context *mac,
 			       pDelBssParams->bss_idx);
 		if (lim_set_link_state
 			    (mac, eSIR_LINK_IDLE_STATE, pe_session->bssId,
-			    pe_session->selfMacAddr, NULL,
+			    pe_session->self_mac_addr, NULL,
 			    NULL) != QDF_STATUS_SUCCESS) {
 			pe_err("Failure in setting link state to IDLE");
 			status_code = eSIR_SME_REFUSED;
@@ -1689,7 +1689,7 @@ void lim_process_ap_mlm_del_bss_rsp(struct mac_context *mac,
 		goto end;
 	}
 	status = lim_set_link_state(mac, eSIR_LINK_IDLE_STATE, nullBssid,
-				    pe_session->selfMacAddr, NULL, NULL);
+				    pe_session->self_mac_addr, NULL, NULL);
 	if (status != QDF_STATUS_SUCCESS) {
 		rc = eSIR_SME_REFUSED;
 		goto end;
@@ -2050,7 +2050,7 @@ static void lim_process_ap_mlm_add_bss_rsp(struct mac_context *mac,
 		pe_debug("WMA_ADD_BSS_RSP returned with QDF_STATUS_SUCCESS");
 		if (lim_set_link_state
 			    (mac, eSIR_LINK_AP_STATE, pe_session->bssId,
-			    pe_session->selfMacAddr, NULL,
+			    pe_session->self_mac_addr, NULL,
 			    NULL) != QDF_STATUS_SUCCESS)
 			goto end;
 		/* Set MLME state */
@@ -2184,7 +2184,7 @@ lim_process_ibss_mlm_add_bss_rsp(struct mac_context *mac,
 
 		if (lim_set_link_state
 			    (mac, eSIR_LINK_IBSS_STATE, pe_session->bssId,
-			    pe_session->selfMacAddr, NULL,
+			    pe_session->self_mac_addr, NULL,
 			    NULL) != QDF_STATUS_SUCCESS)
 			goto end;
 		/* Set MLME state */
@@ -2491,7 +2491,7 @@ lim_process_sta_mlm_add_bss_rsp(struct mac_context *mac_ctx,
 		session_entry->limMlmState = eLIM_MLM_IDLE_STATE;
 		if (lim_set_link_state(mac_ctx, eSIR_LINK_IDLE_STATE,
 					session_entry->bssId,
-					session_entry->selfMacAddr,
+					session_entry->self_mac_addr,
 					NULL, NULL) != QDF_STATUS_SUCCESS)
 			pe_err("Failed to set the LinkState");
 		/* Update PE session Id */
@@ -2984,13 +2984,13 @@ static void lim_process_switch_channel_join_req(
 		goto error;
 	}
 
-	if ((!session_entry) || (!session_entry->pLimMlmJoinReq)
-		|| (!session_entry->pLimJoinReq)) {
+	if ((!session_entry) || (!session_entry->pLimMlmJoinReq) ||
+	    (!session_entry->lim_join_req)) {
 		pe_err("invalid pointer!!");
 		goto error;
 	}
 
-	bss = &session_entry->pLimJoinReq->bssDescription;
+	bss = &session_entry->lim_join_req->bssDescription;
 	nontx_bss_id = bss->mbssid_info.profile_num;
 
 	session_entry->limPrevMlmState = session_entry->limMlmState;
@@ -3086,10 +3086,10 @@ static void lim_process_switch_channel_join_req(
 	/* include additional IE if there is */
 	lim_send_probe_req_mgmt_frame(mac_ctx, &ssId,
 		session_entry->pLimMlmJoinReq->bssDescription.bssId,
-		session_entry->currentOperChannel, session_entry->selfMacAddr,
+		session_entry->currentOperChannel, session_entry->self_mac_addr,
 		session_entry->dot11mode,
-		&session_entry->pLimJoinReq->addIEScan.length,
-		session_entry->pLimJoinReq->addIEScan.addIEdata);
+		&session_entry->lim_join_req->addIEScan.length,
+		session_entry->lim_join_req->addIEScan.addIEdata);
 
 	if (session_entry->opmode == QDF_P2P_CLIENT_MODE) {
 		/* Activate Join Periodic Probe Req timer */
@@ -3108,9 +3108,9 @@ error:
 			qdf_mem_free(session_entry->pLimMlmJoinReq);
 			session_entry->pLimMlmJoinReq = NULL;
 		}
-		if (session_entry->pLimJoinReq) {
-			qdf_mem_free(session_entry->pLimJoinReq);
-			session_entry->pLimJoinReq = NULL;
+		if (session_entry->lim_join_req) {
+			qdf_mem_free(session_entry->lim_join_req);
+			session_entry->lim_join_req = NULL;
 		}
 		join_cnf.sessionId = session_entry->peSessionId;
 	} else {
@@ -3119,6 +3119,24 @@ error:
 	join_cnf.resultCode = eSIR_SME_RESOURCES_UNAVAILABLE;
 	join_cnf.protStatusCode = eSIR_MAC_UNSPEC_FAILURE_STATUS;
 	lim_post_sme_message(mac_ctx, LIM_MLM_JOIN_CNF, (uint32_t *)&join_cnf);
+}
+
+static void lim_handle_mon_switch_channel_rsp(struct pe_session *session,
+					      QDF_STATUS status)
+{
+	if (session->bssType != eSIR_MONITOR_MODE)
+		return;
+
+	if (QDF_IS_STATUS_ERROR(status)) {
+		pe_err("Set channel failed for monitor mode");
+		wlan_vdev_mlme_sm_deliver_evt(session->vdev,
+					      WLAN_VDEV_SM_EV_START_REQ_FAIL,
+					      0, NULL);
+		return;
+	}
+
+	wlan_vdev_mlme_sm_deliver_evt(session->vdev,
+				      WLAN_VDEV_SM_EV_START_SUCCESS, 0, NULL);
 }
 
 /**
@@ -3204,7 +3222,6 @@ void lim_process_switch_channel_rsp(struct mac_context *mac, void *body)
 		}
 		break;
 	case LIM_SWITCH_CHANNEL_SAP_DFS:
-	{
 		/* Note: This event code specific to SAP mode
 		 * When SAP session issues channel change as performing
 		 * DFS, we will come here. Other sessions, for e.g. P2P
@@ -3221,8 +3238,16 @@ void lim_process_switch_channel_rsp(struct mac_context *mac, void *body)
 		policy_mgr_update_connection_info(mac->psoc,
 						pe_session->smeSessionId);
 		policy_mgr_set_do_hw_mode_change_flag(mac->psoc, true);
-	}
-	break;
+		break;
+	case LIM_SWITCH_CHANNEL_MONITOR:
+		lim_handle_mon_switch_channel_rsp(pe_session, status);
+		/*
+		 * If MCC upgrade/DBS downgrade happended during channel switch,
+		 * the policy manager connection table needs to be updated.
+		 */
+		policy_mgr_update_connection_info(mac->psoc,
+						  pe_session->smeSessionId);
+		break;
 	default:
 		break;
 	}

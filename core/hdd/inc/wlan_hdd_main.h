@@ -235,6 +235,8 @@ enum hdd_driver_flags {
 
 #define WLAN_WAIT_TIME_FW_ROAM_STATS 1000
 
+#define WLAN_WAIT_TIME_ANTENNA_ISOLATION 8000
+
 /* Maximum time(ms) to wait for RSO CMD status event */
 #define WAIT_TIME_RSO_CMD_STATUS 2000
 
@@ -1594,6 +1596,25 @@ struct hdd_dynamic_mac {
 };
 
 /**
+ * hdd_fw_ver_info - FW version info structure
+ * @major_spid: FW version - major spid.
+ * @minor_spid: FW version - minor spid
+ * @siid:       FW version - siid
+ * @sub_id:     FW version - sub id
+ * @rel_id:     FW version - release id
+ * @crmid:      FW version - crmid
+ */
+
+struct hdd_fw_ver_info {
+	uint32_t major_spid;
+	uint32_t minor_spid;
+	uint32_t siid;
+	uint32_t sub_id;
+	uint32_t rel_id;
+	uint32_t crmid;
+};
+
+/**
  * struct hdd_context - hdd shared driver and psoc/device context
  * @psoc: object manager psoc context
  * @pdev: object manager pdev context
@@ -1687,6 +1708,7 @@ struct hdd_context {
 	/* defining the firmware version */
 	uint32_t target_fw_version;
 	uint32_t target_fw_vers_ext;
+	struct hdd_fw_ver_info fw_version_info;
 
 	/* defining the chip/rom version */
 	uint32_t target_hw_version;
@@ -2368,6 +2390,17 @@ hdd_get_con_sap_adapter(struct hdd_adapter *this_sap_adapter,
 
 bool hdd_is_5g_supported(struct hdd_context *hdd_ctx);
 
+/**
+ * hdd_is_2g_supported() - check if 2GHz channels are supported
+ * @hdd_ctx:	Pointer to the hdd context
+ *
+ * HDD function to know if 2GHz channels are supported
+ *
+ * Return:  true if 2GHz channels are supported
+ */
+
+bool hdd_is_2g_supported(struct hdd_context *hdd_ctx);
+
 int wlan_hdd_scan_abort(struct hdd_adapter *adapter);
 
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
@@ -2435,12 +2468,9 @@ static inline bool hdd_scan_random_mac_addr_supported(void)
  */
 int hdd_start_vendor_acs(struct hdd_adapter *adapter);
 
-void hdd_get_fw_version(struct hdd_context *hdd_ctx,
-			uint32_t *major_spid, uint32_t *minor_spid,
-			uint32_t *siid, uint32_t *crmid);
 /**
  * hdd_acs_response_timeout_handler() - timeout handler for acs_timer
- * @context : timeout handler context
+ * @context: timeout handler context
  *
  * Return: None
  */

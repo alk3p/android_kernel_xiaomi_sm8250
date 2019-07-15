@@ -575,7 +575,7 @@ struct pe_session *pe_create_session(struct mac_context *mac,
 	/* Copy the BSSID to the session table */
 	sir_copy_mac_addr(session_ptr->bssId, bssid);
 	if (bssType == eSIR_MONITOR_MODE)
-		sir_copy_mac_addr(mac->lim.gpSession[i].selfMacAddr, bssid);
+		sir_copy_mac_addr(mac->lim.gpSession[i].self_mac_addr, bssid);
 	session_ptr->valid = true;
 	/* Initialize the SME and MLM states to IDLE */
 	session_ptr->limMlmState = eLIM_MLM_IDLE_STATE;
@@ -887,9 +887,9 @@ void pe_delete_session(struct mac_context *mac_ctx, struct pe_session *session)
 		session->pLimStartBssReq = NULL;
 	}
 
-	if (session->pLimJoinReq) {
-		qdf_mem_free(session->pLimJoinReq);
-		session->pLimJoinReq = NULL;
+	if (session->lim_join_req) {
+		qdf_mem_free(session->lim_join_req);
+		session->lim_join_req = NULL;
 	}
 
 	if (session->pLimReAssocReq) {

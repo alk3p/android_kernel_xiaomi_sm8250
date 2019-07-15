@@ -144,10 +144,10 @@ struct pe_session {
 	};
 	struct wlan_objmgr_vdev *vdev;
 
-	/* In AP role: BSSID and selfMacAddr will be the same. */
+	/* In AP role: BSSID and self_mac_addr will be the same. */
 	/* In STA role: they will be different */
 	tSirMacAddr bssId;
-	tSirMacAddr selfMacAddr;
+	tSirMacAddr self_mac_addr;
 	tSirMacSSid ssId;
 	uint8_t bss_idx;
 	uint8_t valid;
@@ -160,7 +160,7 @@ struct pe_session {
 	uint8_t operMode;       /* AP - 0; STA - 1 ; */
 	tSirNwType nwType;
 	struct start_bss_req *pLimStartBssReq; /* handle to start bss req */
-	struct join_req *pLimJoinReq;    /* handle to sme join req */
+	struct join_req *lim_join_req;    /* handle to sme join req */
 	struct join_req *pLimReAssocReq; /* handle to sme reassoc req */
 	tpLimMlmJoinReq pLimMlmJoinReq; /* handle to MLM join Req */
 	void *pLimMlmReassocRetryReq;   /* keep reasoc req for retry */

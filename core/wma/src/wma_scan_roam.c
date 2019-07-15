@@ -76,6 +76,7 @@
 #include "wlan_mlme_api.h"
 #include <wlan_mlme_main.h>
 #include <wlan_crypto_global_api.h>
+#include <cdp_txrx_mon.h>
 
 #ifdef FEATURE_WLAN_EXTSCAN
 #define WMA_EXTSCAN_CYCLE_WAKE_LOCK_DURATION WAKELOCK_DURATION_RECOMMENDED
@@ -150,6 +151,9 @@ QDF_STATUS wma_update_channel_list(WMA_HANDLE handle,
 
 		if (chan_list->ht_en)
 			chan_p->allow_ht = 1;
+
+		if (chan_list->he_en)
+			chan_p->allow_he = 1;
 
 		if (chan_list->chanParam[i].half_rate)
 			chan_p->half_rate = 1;
@@ -2640,8 +2644,8 @@ wma_roam_update_vdev(tp_wma_handle wma,
 	qdf_mem_copy(del_bss_params->bssid, wma->interfaces[vdev_id].bssid,
 			QDF_MAC_ADDR_SIZE);
 	set_link_params->state = eSIR_LINK_PREASSOC_STATE;
-	qdf_mem_copy(set_link_params->selfMacAddr,
-		roam_synch_ind_ptr->self_mac.bytes, QDF_MAC_ADDR_SIZE);
+	qdf_mem_copy(set_link_params->self_mac_addr,
+		     roam_synch_ind_ptr->self_mac.bytes, QDF_MAC_ADDR_SIZE);
 	qdf_mem_copy(set_link_params->bssid, roam_synch_ind_ptr->bssid.bytes,
 			QDF_MAC_ADDR_SIZE);
 	add_sta_params->staType = STA_ENTRY_SELF;
@@ -2883,9 +2887,16 @@ int wma_mlme_roam_synch_event_handler_cb(void *handle, uint8_t *event,
 	 * results in firmware assert.
 	 */
 	channel = wlan_freq_to_chan(wma->interfaces[synch_event->vdev_id].mhz);
-	wma_get_phy_mode_cb(channel,
-			    wma->interfaces[synch_event->vdev_id].chan_width,
-			    &wma->interfaces[synch_event->vdev_id].chanmode);
+	if (param_buf->chan) {
+		wma->interfaces[synch_event->vdev_id].chanmode =
+			WMI_GET_CHANNEL_MODE(param_buf->chan);
+	} else {
+		wma_get_phy_mode_cb(channel,
+				    wma->interfaces[synch_event->vdev_id].
+				    chan_width,
+				    &wma->interfaces[synch_event->vdev_id].
+				    chanmode);
+	}
 
 	wma->csr_roam_synch_cb((struct mac_context *)wma->mac_context,
 		roam_synch_ind_ptr, bss_desc_ptr, SIR_ROAM_SYNCH_COMPLETE);
@@ -3517,12 +3528,6 @@ void wma_set_channel(tp_wma_handle wma, tpSwitchChannelParams params)
 		}
 	}
 
-	if (QDF_GLOBAL_MONITOR_MODE == cds_get_conparam() &&
-	    wma_is_vdev_up(vdev_id)) {
-		WMA_LOGD("%s: setting channel switch to true for vdev_id:%d",
-			 __func__, req.vdev_id);
-	}
-
 	msg = wma_fill_vdev_req(wma, req.vdev_id, WMA_CHNL_SWITCH_REQ,
 			WMA_TARGET_REQ_TYPE_VDEV_START, params,
 			WMA_VDEV_START_REQUEST_TIMEOUT);
@@ -3543,9 +3548,12 @@ void wma_set_channel(tp_wma_handle wma, tpSwitchChannelParams params)
 		goto send_resp;
 	}
 
-	/* This is temporary, should be removed */
-	if (QDF_GLOBAL_MONITOR_MODE == cds_get_conparam())
-		ol_htt_mon_note_chan(pdev, req.chan);
+	/*
+	 * Record monitor mode channel here in case HW
+	 * indicate RX PPDU TLV with invalid channel number.
+	 */
+	if (intr[vdev_id].type == WMI_VDEV_TYPE_MONITOR)
+		cdp_record_monitor_chan_num(soc, pdev, req.chan);
 
 	return;
 send_resp:
@@ -5178,6 +5186,45 @@ static void wma_handle_btm_disassoc_imminent_msg(tp_wma_handle wma_handle,
 }
 
 /**
+ * wma_handle_hw_mode_in_roam_fail() - Fill hw mode info if present in policy
+ * manager.
+ * @wma: wma handle
+ * @param: roam event params
+ *
+ * Return: None
+ */
+static int wma_handle_hw_mode_transition(tp_wma_handle wma,
+					 WMI_ROAM_EVENTID_param_tlvs *param)
+{
+	struct sir_hw_mode_trans_ind *hw_mode_trans_ind;
+
+	hw_mode_trans_ind = qdf_mem_malloc(sizeof(*hw_mode_trans_ind));
+	if (!hw_mode_trans_ind)
+		return -ENOMEM;
+
+	if (param->hw_mode_transition_fixed_param) {
+		wma_process_pdev_hw_mode_trans_ind(wma,
+		    param->hw_mode_transition_fixed_param,
+		    param->wmi_pdev_set_hw_mode_response_vdev_mac_mapping,
+		    hw_mode_trans_ind);
+
+		WMA_LOGI(FL("Update HW mode"));
+		policy_mgr_hw_mode_transition_cb(
+			hw_mode_trans_ind->old_hw_mode_index,
+			hw_mode_trans_ind->new_hw_mode_index,
+			hw_mode_trans_ind->num_vdev_mac_entries,
+			hw_mode_trans_ind->vdev_mac_map,
+			wma->psoc);
+	} else {
+		WMA_LOGD(FL("hw_mode transition fixed param is NULL"));
+	}
+
+	qdf_mem_free(hw_mode_trans_ind);
+
+	return 0;
+}
+
+/**
  * wma_roam_event_callback() - roam event callback
  * @handle: wma handle
  * @event_buf: event buffer
@@ -5195,6 +5242,7 @@ int wma_roam_event_callback(WMA_HANDLE handle, uint8_t *event_buf,
 	wmi_roam_event_fixed_param *wmi_event;
 	struct roam_offload_synch_ind *roam_synch_data;
 	enum sir_roam_op_code op_code = {0};
+	uint8_t *frame = NULL;
 
 	param_buf = (WMI_ROAM_EVENTID_param_tlvs *) event_buf;
 	if (!param_buf) {
@@ -5258,6 +5306,7 @@ int wma_roam_event_callback(WMA_HANDLE handle, uint8_t *event_buf,
 	case WMI_ROAM_REASON_HO_FAILED:
 		WMA_LOGE("LFR3:Hand-Off Failed for vdevid %x",
 			 wmi_event->vdev_id);
+		wma_handle_hw_mode_transition(wma_handle, param_buf);
 		wma_roam_ho_fail_handler(wma_handle, wmi_event->vdev_id);
 		wma_handle->interfaces[wmi_event->vdev_id].
 			roaming_in_progress = false;
@@ -5291,6 +5340,7 @@ int wma_roam_event_callback(WMA_HANDLE handle, uint8_t *event_buf,
 		wma_rso_cmd_status_event_handler(wmi_event);
 		break;
 	case WMI_ROAM_REASON_INVOKE_ROAM_FAIL:
+		wma_handle_hw_mode_transition(wma_handle, param_buf);
 		roam_synch_data = qdf_mem_malloc(sizeof(*roam_synch_data));
 		if (!roam_synch_data)
 			return -ENOMEM;
@@ -5304,8 +5354,12 @@ int wma_roam_event_callback(WMA_HANDLE handle, uint8_t *event_buf,
 	case WMI_ROAM_REASON_DEAUTH:
 		WMA_LOGD("%s: Received disconnect roam event reason:%d",
 			 __func__, wmi_event->notif);
+
+		if (wmi_event->notif_params1)
+			frame = param_buf->deauth_disassoc_frame;
 		wma_handle->pe_disconnect_cb(wma_handle->mac_context,
-					     wmi_event->vdev_id);
+					     wmi_event->vdev_id,
+					     frame, wmi_event->notif_params1);
 		break;
 	default:
 		WMA_LOGD("%s:Unhandled Roam Event %x for vdevid %x", __func__,

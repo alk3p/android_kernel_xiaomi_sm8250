@@ -322,7 +322,7 @@ struct wmstatus_changecmd {
 
 struct delstafor_sessionCmd {
 	/* Session self mac addr */
-	tSirMacAddr selfMacAddr;
+	tSirMacAddr self_mac_addr;
 	csr_session_close_cb session_close_cb;
 	void *context;
 };
@@ -567,6 +567,7 @@ struct csr_disconnect_stats {
  * struct csr_roam_session - CSR per-vdev context
  * @vdev_id: ID of the vdev for which this entry is applicable
  * @is_bcn_recv_start: Allow to process bcn recv indication
+ * @beacon_report_do_not_resume: Do not resume the beacon reporting after scan
  */
 struct csr_roam_session {
 	union {
@@ -576,7 +577,7 @@ struct csr_roam_session {
 	bool sessionActive;     /* true if it is used */
 
 	/* For BT-AMP station, this serve as BSSID for self-BSS. */
-	struct qdf_mac_addr selfMacAddr;
+	struct qdf_mac_addr self_mac_addr;
 
 	csr_session_open_cb  session_open_cb;
 	csr_session_close_cb session_close_cb;
@@ -642,6 +643,7 @@ struct csr_roam_session {
 	qdf_mc_timer_t hTimerRoaming;
 #ifdef WLAN_BCN_RECV_FEATURE
 	bool is_bcn_recv_start;
+	bool beacon_report_do_not_resume;
 #endif
 	/* the roamResult that is used when the roaming timer fires */
 	eCsrRoamResult roamResult;

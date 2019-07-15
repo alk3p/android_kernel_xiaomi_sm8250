@@ -1646,7 +1646,7 @@ lim_detect_change_in_ap_capabilities(struct mac_context *mac,
 				lim_send_probe_req_mgmt_frame(mac, &pe_session->ssId,
 					      pe_session->bssId,
 					      pe_session->currentOperChannel,
-					      pe_session->selfMacAddr,
+					      pe_session->self_mac_addr,
 					      pe_session->dot11mode,
 					      NULL, NULL);
 
@@ -2261,7 +2261,9 @@ lim_copy_and_free_hlp_data_from_session(struct pe_session *session_ptr,
 #endif
 
 QDF_STATUS
-pe_disconnect_callback(struct mac_context *mac, uint8_t vdev_id)
+pe_disconnect_callback(struct mac_context *mac, uint8_t vdev_id,
+		       uint8_t *deauth_disassoc_frame,
+		       uint16_t deauth_disassoc_frame_len)
 {
 	struct pe_session *session;
 
@@ -2271,6 +2273,8 @@ pe_disconnect_callback(struct mac_context *mac, uint8_t vdev_id)
 		return QDF_STATUS_E_FAILURE;
 	}
 
+	lim_extract_ies_from_deauth_disassoc(session, deauth_disassoc_frame,
+					     deauth_disassoc_frame_len);
 	lim_tear_down_link_with_ap(mac, vdev_id,
 				   eSIR_MAC_UNSPEC_FAILURE_REASON);
 
@@ -2370,24 +2374,16 @@ pe_roam_synch_callback(struct mac_context *mac_ctx,
 	/* Update the beacon/probe filter in mac_ctx */
 	lim_set_bcn_probe_filter(mac_ctx, ft_session_ptr, NULL, 0);
 
-	sir_copy_mac_addr(ft_session_ptr->selfMacAddr,
-			  session_ptr->selfMacAddr);
+	sir_copy_mac_addr(ft_session_ptr->self_mac_addr,
+			  session_ptr->self_mac_addr);
 	sir_copy_mac_addr(roam_sync_ind_ptr->self_mac.bytes,
-			session_ptr->selfMacAddr);
+			session_ptr->self_mac_addr);
 	sir_copy_mac_addr(ft_session_ptr->limReAssocbssId, bss_desc->bssId);
 	session_ptr->bRoamSynchInProgress = true;
 	ft_session_ptr->bRoamSynchInProgress = true;
 	ft_session_ptr->limSystemRole = eLIM_STA_ROLE;
 	sir_copy_mac_addr(session_ptr->limReAssocbssId, bss_desc->bssId);
 	ft_session_ptr->csaOffloadEnable = session_ptr->csaOffloadEnable;
-
-	/* Assign default configured nss value in the new session */
-	if (IS_5G_CH(ft_session_ptr->currentOperChannel))
-		ft_session_ptr->vdev_nss = mac_ctx->vdev_type_nss_5g.sta;
-	else
-		ft_session_ptr->vdev_nss = mac_ctx->vdev_type_nss_2g.sta;
-
-	ft_session_ptr->nss = ft_session_ptr->vdev_nss;
 
 	/* Next routine will update nss and vdev_nss with AP's capabilities */
 	lim_fill_ft_session(mac_ctx, bss_desc, ft_session_ptr, session_ptr);
@@ -2746,6 +2742,17 @@ void lim_mon_init_session(struct mac_context *mac_ptr,
 	psession_entry->vhtCapability = 1;
 }
 
+void lim_mon_deinit_session(struct mac_context *mac_ptr,
+			    struct sir_delete_session *msg)
+{
+	struct pe_session *session;
+
+	session = pe_find_session_by_session_id(mac_ptr, msg->vdev_id);
+
+	if (session && session->bssType == eSIR_MONITOR_MODE)
+		pe_delete_session(mac_ptr, session);
+}
+
 /**
  * lim_update_ext_cap_ie() - Update Extended capabilities IE(if present)
  *          with capabilities of Fine Time measurements(FTM) if set in driver
@@ -2754,11 +2761,13 @@ void lim_mon_init_session(struct mac_context *mac_ptr,
  * @ie_data: Default Scan IE data
  * @local_ie_buf: Local Scan IE data
  * @local_ie_len: Pointer to length of @ie_data
+ * @session: Pointer to pe session
  *
  * Return: QDF_STATUS
  */
-QDF_STATUS lim_update_ext_cap_ie(struct mac_context *mac_ctx,
-		uint8_t *ie_data, uint8_t *local_ie_buf, uint16_t *local_ie_len)
+QDF_STATUS lim_update_ext_cap_ie(struct mac_context *mac_ctx, uint8_t *ie_data,
+				 uint8_t *local_ie_buf, uint16_t *local_ie_len,
+				 struct pe_session *session)
 {
 	uint32_t dot11mode;
 	bool vht_enabled = false;
@@ -2806,6 +2815,13 @@ QDF_STATUS lim_update_ext_cap_ie(struct mac_context *mac_ctx,
 		return QDF_STATUS_SUCCESS;
 	}
 	lim_merge_extcap_struct(&driver_ext_cap, &default_scan_ext_cap, true);
+
+	if (session)
+		populate_dot11f_twt_extended_caps(mac_ctx, session,
+						  &driver_ext_cap);
+	else
+		pe_err("Session NULL, cannot set TWT caps");
+
 	local_ie_buf[*local_ie_len + 1] = driver_ext_cap.num_bytes;
 
 	if ((*local_ie_len) > (MAX_DEFAULT_SCAN_IE_LEN -

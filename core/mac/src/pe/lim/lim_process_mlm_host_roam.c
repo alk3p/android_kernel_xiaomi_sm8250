@@ -58,7 +58,6 @@ static void lim_handle_sme_reaasoc_result(struct mac_context *, tSirResultCodes,
 void lim_process_mlm_reassoc_req(struct mac_context *mac_ctx,
 				 tLimMlmReassocReq *reassoc_req)
 {
-	uint8_t channel, sec_ch_offset;
 	struct tLimPreAuthNode *auth_node;
 	tLimMlmReassocCnf reassoc_cnf;
 	struct pe_session *session;
@@ -129,25 +128,15 @@ void lim_process_mlm_reassoc_req(struct mac_context *mac_ctx,
 	MTRACE(mac_trace(mac_ctx, TRACE_CODE_MLM_STATE, session->peSessionId,
 			 session->limMlmState));
 
-	/* Derive channel from BSS description and store it at CFG. */
-	channel = session->limReassocChannelId;
-	sec_ch_offset = session->reAssocHtSecondaryChannelOffset;
-
 	/* Apply previously set configuration at HW */
 	lim_apply_configuration(mac_ctx, session);
 
-	/* store the channel switch pe_session in the lim global var */
-	session->channelChangeReasonCode =
-		LIM_SWITCH_CHANNEL_REASSOC;
-
-	/* Switch channel to the new Operating channel for Reassoc */
-	lim_set_channel(mac_ctx, channel,
-			session->ch_center_freq_seg0,
-			session->ch_center_freq_seg1,
-			session->ch_width,
-			session->maxTxPower,
-			session->peSessionId, 0, 0);
-
+	/* store the channel switch reason code in the lim global var */
+	session->channelChangeReasonCode = LIM_SWITCH_CHANNEL_REASSOC;
+	mlme_set_chan_switch_in_progress(session->vdev, true);
+	wlan_vdev_mlme_sm_deliver_evt(session->vdev,
+				      WLAN_VDEV_SM_EV_FW_VDEV_RESTART,
+				      sizeof(struct pe_session), session);
 	return;
 end:
 	reassoc_cnf.protStatusCode = eSIR_MAC_UNSPEC_FAILURE_STATUS;
@@ -487,8 +476,8 @@ void lim_process_sta_mlm_add_bss_rsp_ft(struct mac_context *mac,
 		goto end;
 
 	/* / Add STA context at MAC HW (BMU, RHP & TFP) */
-	qdf_mem_copy((uint8_t *) pAddStaParams->staMac,
-		     (uint8_t *) pe_session->selfMacAddr,
+	qdf_mem_copy((uint8_t *)pAddStaParams->staMac,
+		     (uint8_t *)pe_session->self_mac_addr,
 		     sizeof(tSirMacAddr));
 
 	qdf_mem_copy((uint8_t *) pAddStaParams->bssId,
@@ -676,7 +665,7 @@ void lim_process_mlm_ft_reassoc_req(struct mac_context *mac,
 
 	if (lim_set_link_state
 		    (mac, eSIR_LINK_PREASSOC_STATE, session->bssId,
-		    session->selfMacAddr, NULL, NULL) != QDF_STATUS_SUCCESS) {
+		    session->self_mac_addr, NULL, NULL) != QDF_STATUS_SUCCESS) {
 		qdf_mem_free(reassoc_req);
 		return;
 	}

@@ -533,7 +533,7 @@ static void lim_generate_ap_key_auth(struct pe_session *pe_session)
 	buf += SIR_FILS_NONCE_LENGTH;
 	qdf_mem_copy(buf, pe_session->bssId, QDF_MAC_ADDR_SIZE);
 	buf += QDF_MAC_ADDR_SIZE;
-	qdf_mem_copy(buf, pe_session->selfMacAddr, QDF_MAC_ADDR_SIZE);
+	qdf_mem_copy(buf, pe_session->self_mac_addr, QDF_MAC_ADDR_SIZE);
 	buf += QDF_MAC_ADDR_SIZE;
 
 	if (qdf_get_hmac_hash(lim_get_hmac_crypto_type(fils_info->akm),
@@ -574,7 +574,7 @@ static void lim_generate_key_auth(struct pe_session *pe_session)
 	qdf_mem_copy(buf, fils_info->auth_info.fils_nonce,
 			SIR_FILS_NONCE_LENGTH);
 	buf += SIR_FILS_NONCE_LENGTH;
-	qdf_mem_copy(buf, pe_session->selfMacAddr, QDF_MAC_ADDR_SIZE);
+	qdf_mem_copy(buf, pe_session->self_mac_addr, QDF_MAC_ADDR_SIZE);
 	buf += QDF_MAC_ADDR_SIZE;
 	qdf_mem_copy(buf, pe_session->bssId, QDF_MAC_ADDR_SIZE);
 	buf += QDF_MAC_ADDR_SIZE;
@@ -644,7 +644,7 @@ static void lim_get_keys(struct pe_session *pe_session)
 
 	/* data is  SPA || AA ||SNonce || ANonce */
 	buf = data;
-	qdf_mem_copy(buf, pe_session->selfMacAddr, QDF_MAC_ADDR_SIZE);
+	qdf_mem_copy(buf, pe_session->self_mac_addr, QDF_MAC_ADDR_SIZE);
 	buf += QDF_MAC_ADDR_SIZE;
 
 	qdf_mem_copy(buf, pe_session->bssId, QDF_MAC_ADDR_SIZE);
@@ -1110,10 +1110,10 @@ void lim_add_fils_data_to_auth_frame(struct pe_session *session,
 	 * MDIE to be sent in auth frame during initial
 	 * mobility domain association
 	 */
-	if (session->pLimJoinReq->is11Rconnection) {
+	if (session->lim_join_req->is11Rconnection) {
 		struct bss_description *bss_desc;
 
-		bss_desc = &session->pLimJoinReq->bssDescription;
+		bss_desc = &session->lim_join_req->bssDescription;
 
 		if (bss_desc->mdiePresent) {
 			/* Populate MDIE received from AP */
@@ -1210,7 +1210,7 @@ static QDF_STATUS lim_generate_fils_pmkr0(struct pe_session *pe_session)
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	struct pe_fils_session *fils_info = pe_session->fils_info;
 	struct bss_description *bss_desc =
-			&pe_session->pLimJoinReq->bssDescription;
+			&pe_session->lim_join_req->bssDescription;
 
 	if (!fils_info)
 		return QDF_STATUS_E_FAILURE;
@@ -1265,7 +1265,7 @@ static QDF_STATUS lim_generate_fils_pmkr0(struct pe_session *pe_session)
 	qdf_mem_copy(key_data, fils_info->ft_ie.r0kh_id, r0kh_len);
 	key_data += r0kh_len;
 
-	qdf_mem_copy(key_data, pe_session->selfMacAddr, QDF_MAC_ADDR_SIZE);
+	qdf_mem_copy(key_data, pe_session->self_mac_addr, QDF_MAC_ADDR_SIZE);
 
 	pe_debug("FT-FILS: Derive R0-Key-Data");
 	status = lim_get_key_from_prf(lim_get_hmac_crypto_type(fils_info->akm),
@@ -1350,7 +1350,7 @@ static QDF_STATUS lim_generate_fils_pmkr1_name(struct pe_session *pe_session)
 	len[SCTR_LST_ELEM1] = FILS_PMK_NAME_LEN;
 	scatter_list[SCTR_LST_ELEM2] = fils_info->ft_ie.r1kh_id;
 	len[SCTR_LST_ELEM2] = FT_R1KH_ID_LEN;
-	scatter_list[SCTR_LST_ELEM3] = pe_session->selfMacAddr;
+	scatter_list[SCTR_LST_ELEM3] = pe_session->self_mac_addr;
 	len[SCTR_LST_ELEM3] = QDF_MAC_ADDR_SIZE;
 
 	if (qdf_get_hash(lim_get_hash_crypto_type(fils_info->akm),
@@ -2076,7 +2076,7 @@ QDF_STATUS aead_encrypt_assoc_req(struct mac_context *mac_ctx,
 
 	/* Overwrite the AEAD encrypted output @ plain_text */
 	if (fils_aead_encrypt(fils_info->kek, fils_info->kek_len,
-			      pe_session->selfMacAddr, pe_session->bssId,
+			      pe_session->self_mac_addr, pe_session->bssId,
 			      fils_info->fils_nonce,
 			      fils_info->auth_info.fils_nonce,
 			      data, data_len, plain_text, plain_text_len,
@@ -2222,7 +2222,7 @@ QDF_STATUS aead_decrypt_assoc_rsp(struct mac_context *mac_ctx,
 	data_len = (*n_frame) - fils_ies_len;
 
 	if (fils_aead_decrypt(fils_info->kek, fils_info->kek_len,
-			      session->selfMacAddr, session->bssId,
+			      session->self_mac_addr, session->bssId,
 			      fils_info->fils_nonce,
 			      fils_info->auth_info.fils_nonce,
 			      p_frame, data_len,

@@ -809,8 +809,8 @@ lim_send_del_sta_cnf(struct mac_context *mac, struct qdf_mac_addr sta_dsaddr,
 				pe_session = NULL;
 			}
 		} else {
-			qdf_mem_free(pe_session->pLimJoinReq);
-			pe_session->pLimJoinReq = NULL;
+			qdf_mem_free(pe_session->lim_join_req);
+			pe_session->lim_join_req = NULL;
 
 			pe_debug("Lim Posting eWNI_SME_JOIN_RSP to SME."
 				"resultCode: %d,status_code: %d,"
@@ -2130,7 +2130,7 @@ lim_add_sta(struct mac_context *mac_ctx,
 
 	vht_cap_info = &mac_ctx->mlme_cfg->vht_caps.vht_cap_info;
 
-	sir_copy_mac_addr(sta_mac, session_entry->selfMacAddr);
+	sir_copy_mac_addr(sta_mac, session_entry->self_mac_addr);
 
 	pe_debug("sessionid: %d update_entry = %d limsystemrole = %d",
 		session_entry->smeSessionId, update_entry,
@@ -2709,7 +2709,7 @@ static void lim_set_mbssid_info(struct pe_session *pe_session)
 {
 	struct scan_mbssid_info *mbssid_info;
 
-	mbssid_info = &pe_session->pLimJoinReq->bssDescription.mbssid_info;
+	mbssid_info = &pe_session->lim_join_req->bssDescription.mbssid_info;
 	mlme_set_mbssid_info(pe_session->vdev, mbssid_info);
 }
 
@@ -2757,7 +2757,7 @@ lim_add_sta_self(struct mac_context *mac, uint16_t staIdx, uint8_t updateSta,
 	pe_debug("Roam Channel Bonding Mode %d",
 		(int)mac->roam.configParam.uCfgDot11Mode);
 
-	sir_copy_mac_addr(staMac, pe_session->selfMacAddr);
+	sir_copy_mac_addr(staMac, pe_session->self_mac_addr);
 	pe_debug(QDF_MAC_ADDR_STR ": ", QDF_MAC_ADDR_ARRAY(staMac));
 	pAddStaParams = qdf_mem_malloc(sizeof(tAddStaParams));
 	if (!pAddStaParams)
@@ -2787,7 +2787,7 @@ lim_add_sta_self(struct mac_context *mac, uint16_t staIdx, uint8_t updateSta,
 	pAddStaParams->staIdx = staIdx;
 	pAddStaParams->updateSta = updateSta;
 	qdf_mem_copy(&pAddStaParams->mbssid_info,
-		     &pe_session->pLimJoinReq->bssDescription.mbssid_info,
+		     &pe_session->lim_join_req->bssDescription.mbssid_info,
 		     sizeof(struct scan_mbssid_info));
 
 	lim_set_mbssid_info(pe_session);
@@ -3578,9 +3578,9 @@ QDF_STATUS lim_sta_send_add_bss(struct mac_context *mac, tpSirAssocRsp pAssocRsp
 
 	qdf_mem_copy(pAddBssParams->bssId, bssDescription->bssId,
 		     sizeof(tSirMacAddr));
-	/* Fill in tAddBssParams selfMacAddr */
-	qdf_mem_copy(pAddBssParams->selfMacAddr,
-		     pe_session->selfMacAddr, sizeof(tSirMacAddr));
+	/* Fill in tAddBssParams self_mac_addr */
+	qdf_mem_copy(pAddBssParams->self_mac_addr,
+		     pe_session->self_mac_addr, sizeof(tSirMacAddr));
 
 	pe_debug("sessionid: %d updateEntry: %d limsystemrole: %d",
 		pe_session->smeSessionId, updateEntry,
@@ -4100,7 +4100,7 @@ QDF_STATUS lim_sta_send_add_bss_pre_assoc(struct mac_context *mac, uint8_t updat
 	tDot11fIEVHTCaps *vht_caps = NULL;
 	uint32_t listen_interval = MLME_CFG_LISTEN_INTERVAL;
 	struct bss_description *bssDescription =
-		&pe_session->pLimJoinReq->bssDescription;
+		&pe_session->lim_join_req->bssDescription;
 	struct mlme_vht_capabilities_info *vht_cap_info;
 
 	vht_cap_info = &mac->mlme_cfg->vht_caps.vht_cap_info;
@@ -4127,9 +4127,9 @@ QDF_STATUS lim_sta_send_add_bss_pre_assoc(struct mac_context *mac, uint8_t updat
 	qdf_mem_copy(pAddBssParams->bssId, bssDescription->bssId,
 		     sizeof(tSirMacAddr));
 
-	/* Fill in tAddBssParams selfMacAddr */
-	qdf_mem_copy(pAddBssParams->selfMacAddr,
-		     pe_session->selfMacAddr, sizeof(tSirMacAddr));
+	/* Fill in tAddBssParams self_mac_addr */
+	qdf_mem_copy(pAddBssParams->self_mac_addr,
+		     pe_session->self_mac_addr, sizeof(tSirMacAddr));
 	pe_debug("sessionid: %d updateEntry = %d limsystemrole = %d",
 		pe_session->smeSessionId, updateEntry,
 		GET_LIM_SYSTEM_ROLE(pe_session));
@@ -4827,3 +4827,28 @@ void lim_send_sme_tsm_ie_ind(struct mac_context *mac,
 	lim_sys_process_mmh_msg_api(mac, &msg);
 }
 #endif /* FEATURE_WLAN_ESE */
+
+void lim_extract_ies_from_deauth_disassoc(struct pe_session *session,
+					  uint8_t *deauth_disassoc_frame,
+					  uint16_t deauth_disassoc_frame_len)
+{
+	uint16_t reason_code, ie_offset;
+	struct wlan_ies ie;
+
+	if (!session) {
+		pe_err("NULL session");
+		return;
+	}
+
+	/* Get the offset of IEs */
+	ie_offset = sizeof(struct wlan_frame_hdr) + sizeof(reason_code);
+
+	if (!deauth_disassoc_frame || deauth_disassoc_frame_len <= ie_offset)
+		return;
+
+	ie.data = deauth_disassoc_frame + ie_offset;
+	ie.len = deauth_disassoc_frame_len - ie_offset;
+
+	mlme_set_peer_disconnect_ies(session->vdev, &ie);
+}
+

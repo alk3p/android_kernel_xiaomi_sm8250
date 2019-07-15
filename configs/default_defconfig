@@ -125,6 +125,11 @@ CONFIG_QCACLD_FEATURE_FW_STATE := y
 #Flag to enable set coex configuration
 CONFIG_QCACLD_FEATURE_COEX_CONFIG := n
 
+#Flag to enable get hw capability
+ifeq ($(CONFIG_ARCH_QCS405), y)
+CONFIG_QCACLD_FEATURE_HW_CAPABILITY := y
+endif
+
 ifeq ($(CONFIG_ARCH_MSM8998), y)
 CONFIG_QCACLD_FEATURE_METERING := y
 endif
@@ -340,6 +345,7 @@ CONFIG_DP_TRACE := y
 CONFIG_FEATURE_TSO := y
 CONFIG_TSO_DEBUG_LOG_ENABLE := y
 CONFIG_DP_LFR := y
+CONFIG_DUP_RX_DESC_WAR := y
 CONFIG_HTT_PADDR64 := y
 CONFIG_RX_OL := y
 CONFIG_TX_TID_OVERRIDE := y
@@ -636,6 +642,9 @@ CONFIG_LTE_COEX := y
 #Flag to enable/disable TARGET 11d scan
 CONFIG_TARGET_11D_SCAN := y
 
+#Flag to enable/disable Avoid acs freq feature
+CONFIG_SAP_AVOID_ACS_FREQ_LIST := y
+
 #Flag to enable HOST OPCLASS feature
 CONFIG_HOST_OPCLASS := y
 
@@ -743,6 +752,12 @@ ifeq ($(CONFIG_LITHIUM), y)
 	CONFIG_FEATURE_UNIT_TEST_SUSPEND := y
 endif
 
+ifeq ($(CONFIG_LITHIUM), y)
+	ifeq ($(CONFIG_SLUB_DEBUG_ON), y)
+		CONFIG_WLAN_FEATURE_DP_EVENT_HISTORY := y
+	endif
+	CONFIG_WLAN_DP_PER_RING_TYPE_CONFIG := y
+endif
 #Flag to enable hdd memory dump feature
 CONFIG_FEATURE_MEMDUMP_ENABLE := y
 
@@ -751,11 +766,6 @@ ifeq ($(CONFIG_PCI_MSM), y)
 ifeq ($(CONFIG_HIF_PCI), y)
 CONFIG_FEATURE_WLAN_D0WOW := y
 endif
-endif
-
-#Enable Channel Matrix restriction for all Rome only targets
-ifneq ($(CONFIG_ICNSS), y)
-CONFIG_CHNL_MATRIX_RESTRICTION := y
 endif
 
 ifeq ($(CONFIG_ARCH_MDM9607), y)
@@ -800,6 +810,9 @@ endif
 
 #Enable STATE MACHINE HISTORY
 CONFIG_SM_ENG_HIST := n
+
+#Enable OEM DATA feature
+CONFIG_FEATURE_OEM_DATA := y
 
 ifeq (y,$(findstring y,$(CONFIG_ARCH_MSM) $(CONFIG_ARCH_QCOM)))
 CONFIG_WLAN_FEATURE_DP_BUS_BANDWIDTH := y

@@ -4927,7 +4927,7 @@ static void lim_diag_fill_mgmt_event_report(struct mac_context *mac_ctx,
 	qdf_mem_zero(mgmt_event, sizeof(*mgmt_event));
 	mgmt_event->mgmt_type = mac_hdr->fc.type;
 	mgmt_event->mgmt_subtype = mac_hdr->fc.subType;
-	qdf_mem_copy(mgmt_event->self_mac_addr, session->selfMacAddr,
+	qdf_mem_copy(mgmt_event->self_mac_addr, session->self_mac_addr,
 		     QDF_MAC_ADDR_SIZE);
 	qdf_mem_copy(mgmt_event->bssid, session->bssId,
 		     QDF_MAC_ADDR_SIZE);
@@ -5492,7 +5492,7 @@ bool lim_validate_received_frame_a1_addr(struct mac_context *mac_ctx,
 		/* just for fail safe, don't handle MC/BC a1 in this routine */
 		return true;
 	}
-	if (qdf_mem_cmp(a1, session->selfMacAddr, 6)) {
+	if (qdf_mem_cmp(a1, session->self_mac_addr, 6)) {
 		pe_err("Invalid A1 address in received frame");
 		return false;
 	}
@@ -7504,8 +7504,8 @@ struct csr_roam_session *lim_get_session_by_macaddr(struct mac_context *mac_ctx,
 		session = CSR_GET_SESSION(mac_ctx, i);
 		if (!session)
 			continue;
-		else if (!qdf_mem_cmp(&session->selfMacAddr,
-			 self_mac, sizeof(tSirMacAddr))) {
+		else if (!qdf_mem_cmp(&session->self_mac_addr,
+				      self_mac, sizeof(tSirMacAddr))) {
 
 			QDF_TRACE(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_INFO,
 				  FL("session %d exists with mac address "
@@ -7835,6 +7835,15 @@ QDF_STATUS lim_sta_mlme_vdev_restart_send(struct vdev_mlme_obj *vdev_mlme,
 		case LIM_SWITCH_CHANNEL_HT_WIDTH:
 			lim_ht_switch_chnl_params(session);
 			break;
+		case LIM_SWITCH_CHANNEL_REASSOC:
+			lim_set_channel(session->mac_ctx,
+					session->limReassocChannelId,
+					session->ch_center_freq_seg0,
+					session->ch_center_freq_seg1,
+					session->ch_width,
+					session->maxTxPower,
+					session->peSessionId, 0, 0);
+			break;
 		default:
 			break;
 		}
@@ -8084,6 +8093,35 @@ QDF_STATUS lim_ap_mlme_vdev_start_req_failed(struct vdev_mlme_obj *vdev_mlme,
 	}
 
 	lim_process_mlm_start_cnf(mac_ctx, data);
+
+	return QDF_STATUS_SUCCESS;
+}
+
+QDF_STATUS lim_mon_mlme_vdev_start_send(struct vdev_mlme_obj *vdev_mlme,
+					uint16_t data_len, void *data)
+{
+	struct mac_context *mac_ctx;
+	struct pe_session *session = (struct pe_session *)data;
+
+	if (!data) {
+		pe_err("data is NULL");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	mac_ctx = session->mac_ctx;
+	if (!mac_ctx) {
+		pe_err("mac_ctx is NULL");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	lim_set_channel(mac_ctx, session->currentOperChannel,
+			session->ch_center_freq_seg0,
+			session->ch_center_freq_seg1,
+			session->ch_width,
+			session->maxTxPower,
+			session->peSessionId,
+			session->cac_duration_ms,
+			session->dfs_regdomain);
 
 	return QDF_STATUS_SUCCESS;
 }

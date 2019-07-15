@@ -76,10 +76,10 @@ typedef uint8_t tSirVersionString[SIR_VERSION_STRING_LEN];
 
 
 /* FW response timeout values in milli seconds */
-#define SIR_PEER_ASSOC_TIMEOUT (2000) /* 1 seconds */
-#define SIR_DELETE_STA_TIMEOUT (2000) /* 2 seconds */
+#define SIR_PEER_ASSOC_TIMEOUT (4000) /* 4 seconds */
+#define SIR_DELETE_STA_TIMEOUT (4000) /* 4 seconds */
 #define SIR_VDEV_START_REQUEST_TIMEOUT   (6000)
-#define SIR_VDEV_STOP_REQUEST_TIMEOUT    (2000)
+#define SIR_VDEV_STOP_REQUEST_TIMEOUT    (4000)
 #define SIR_VDEV_PLCY_MGR_TIMEOUT        (2000)
 
 /* This should not be greater than MAX_NUMBER_OF_CONC_CONNECTIONS */
@@ -376,7 +376,9 @@ struct sme_ready_req {
 	QDF_STATUS (*sme_msg_cb)(struct mac_context *mac,
 				 struct scheduler_msg *msg);
 	QDF_STATUS (*pe_disconnect_cb) (struct mac_context *mac,
-					uint8_t vdev_id);
+					uint8_t vdev_id,
+					uint8_t *deauth_disassoc_frame,
+					uint16_t deauth_disassoc_frame_len);
 };
 
 /**
@@ -884,7 +886,7 @@ struct join_req {
 	uint16_t length;
 	uint8_t sessionId;
 	tSirMacSSid ssId;
-	tSirMacAddr selfMacAddr;        /* self Mac address */
+	tSirMacAddr self_mac_addr;        /* self Mac address */
 	enum bss_type bsstype;    /* add new type for BT-AMP STA and AP Modules */
 	uint8_t dot11mode;      /* to support BT-AMP */
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
@@ -1893,6 +1895,18 @@ struct sir_create_session {
 	struct qdf_mac_addr bss_id;
 };
 
+/**
+ * struct sir_delete_session - Used for deleting session in monitor mode
+ * @type: SME host message type.
+ * @msg_len: Length of the message.
+ * @vdev_id: vdev id.
+ */
+struct sir_delete_session {
+	uint16_t type;
+	uint16_t msg_len;
+	uint8_t vdev_id;
+};
+
 /* Beacon Interval */
 struct change_bi_params {
 	uint16_t messageType;
@@ -2570,6 +2584,7 @@ typedef struct sSirUpdateChan {
 	uint8_t ht_en;
 	uint8_t vht_en;
 	uint8_t vht_24_en;
+	bool he_en;
 	tSirUpdateChanParam chanParam[1];
 } tSirUpdateChanList, *tpSirUpdateChanList;
 
@@ -2710,6 +2725,20 @@ struct sir_peer_sta_info {
 struct sir_peer_sta_ext_info {
 	uint8_t sta_num;
 	struct sir_peer_info_ext info[MAX_PEER_STA];
+};
+
+/**
+ * struct sir_isolation_resp - isolation info related structure
+ * @isolation_chain0: isolation value for chain 0
+ * @isolation_chain1: isolation value for chain 1
+ * @isolation_chain2: isolation value for chain 2
+ * @isolation_chain3: isolation value for chain 3
+ */
+struct sir_isolation_resp {
+	uint32_t isolation_chain0:8,
+		 isolation_chain1:8,
+		 isolation_chain2:8,
+		 isolation_chain3:8;
 };
 
 typedef struct sSirAddPeriodicTxPtrn {

@@ -1709,6 +1709,7 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 	uint8_t sta_id;
 	bool sendDisconInd = true;
 	mac_handle_t mac_handle;
+	struct wlan_ies disconnect_ies = {0};
 
 	if (!dev) {
 		hdd_err("net_dev is released return");
@@ -1771,6 +1772,12 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 		 * by kernel
 		 */
 		if (sendDisconInd) {
+			if (roam_info && roam_info->disconnect_ies) {
+				disconnect_ies.data =
+					roam_info->disconnect_ies->data;
+				disconnect_ies.len =
+					roam_info->disconnect_ies->len;
+			}
 			/*
 			 * To avoid wpa_supplicant sending "HANGED" CMD
 			 * to ICS UI.
@@ -1782,12 +1789,15 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 						roam_info->rxRssi);
 				wlan_hdd_cfg80211_indicate_disconnect(
 							dev, false,
-							roam_info->reasonCode);
+							roam_info->reasonCode,
+							disconnect_ies.data,
+							disconnect_ies.len);
 			} else {
 				wlan_hdd_cfg80211_indicate_disconnect(
 							dev, false,
-							WLAN_REASON_UNSPECIFIED
-							);
+							WLAN_REASON_UNSPECIFIED,
+							disconnect_ies.data,
+							disconnect_ies.len);
 			}
 
 			hdd_debug("sent disconnected event to nl80211, reason code %d",
@@ -5611,9 +5621,9 @@ int hdd_set_csr_auth_type(struct hdd_adapter *adapter,
 
 	roam_profile = hdd_roam_profile(adapter);
 	roam_profile->AuthType.numEntries = 1;
-	hdd_debug("auth_type = %d rsn_auth_type %d wpa_versions %d",
+	hdd_debug("auth_type = %d rsn_auth_type %d wpa_versions %d key_mgmt : 0x%x",
 		  sta_ctx->conn_info.auth_type, rsn_auth_type,
-		  sta_ctx->wpa_versions);
+		  sta_ctx->wpa_versions, key_mgmt);
 
 	switch (sta_ctx->conn_info.auth_type) {
 	case eCSR_AUTH_TYPE_OPEN_SYSTEM:
@@ -5711,6 +5721,10 @@ int hdd_set_csr_auth_type(struct hdd_adapter *adapter,
 				/* OWE case */
 				roam_profile->AuthType.authType[0] =
 					eCSR_AUTH_TYPE_OWE;
+			} else if (rsn_auth_type == eCSR_AUTH_TYPE_SAE) {
+				/* SAE with open authentication case */
+				roam_profile->AuthType.authType[0] =
+					eCSR_AUTH_TYPE_SAE;
 			} else if ((rsn_auth_type ==
 				  eCSR_AUTH_TYPE_SUITEB_EAP_SHA256) &&
 				  ((key_mgmt & HDD_AUTH_KEY_MGMT_802_1X)

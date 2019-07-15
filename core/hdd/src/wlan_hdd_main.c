@@ -256,6 +256,15 @@ static qdf_wake_lock_t wlan_wake_lock;
 #define IS_IDLE_STOP (!cds_is_driver_unloading() && \
 		      !cds_is_driver_recovering() && !cds_is_driver_loading())
 
+#define HDD_FW_VER_MAJOR_SPID(tgt_fw_ver)     ((tgt_fw_ver & 0xf0000000) >> 28)
+#define HDD_FW_VER_MINOR_SPID(tgt_fw_ver)     ((tgt_fw_ver & 0xf000000) >> 24)
+#define HDD_FW_VER_SIID(tgt_fw_ver)           ((tgt_fw_ver & 0xf00000) >> 20)
+#define HDD_FW_VER_CRM_ID(tgt_fw_ver)         (tgt_fw_ver & 0x7fff)
+#define HDD_FW_VER_SUB_ID(tgt_fw_ver_ext) \
+((tgt_fw_ver_ext & 0xf0000000) >> 28)
+#define HDD_FW_VER_REL_ID(tgt_fw_ver_ext) \
+((tgt_fw_ver_ext &  0xf800000) >> 23)
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0))
 static const struct wiphy_wowlan_support wowlan_support_reg_init = {
 	.flags = WIPHY_WOWLAN_ANY |
@@ -1769,6 +1778,22 @@ static void hdd_update_vhtcap_2g(struct hdd_context *hdd_ctx)
 	}
 }
 
+static void hdd_extract_fw_version_info(struct hdd_context *hdd_ctx)
+{
+	hdd_ctx->fw_version_info.major_spid =
+			HDD_FW_VER_MAJOR_SPID(hdd_ctx->target_fw_version);
+	hdd_ctx->fw_version_info.minor_spid =
+			HDD_FW_VER_MINOR_SPID(hdd_ctx->target_fw_version);
+	hdd_ctx->fw_version_info.siid =
+			HDD_FW_VER_SIID(hdd_ctx->target_fw_version);
+	hdd_ctx->fw_version_info.crmid =
+			HDD_FW_VER_CRM_ID(hdd_ctx->target_fw_version);
+	hdd_ctx->fw_version_info.sub_id =
+			HDD_FW_VER_SUB_ID(hdd_ctx->target_fw_vers_ext);
+	hdd_ctx->fw_version_info.rel_id =
+			HDD_FW_VER_REL_ID(hdd_ctx->target_fw_vers_ext);
+}
+
 int hdd_update_tgt_cfg(hdd_handle_t hdd_handle, struct wma_tgt_cfg *cfg)
 {
 	int ret;
@@ -1910,6 +1935,7 @@ int hdd_update_tgt_cfg(hdd_handle_t hdd_handle, struct wma_tgt_cfg *cfg)
 
 	hdd_ctx->target_fw_version = cfg->target_fw_version;
 	hdd_ctx->target_fw_vers_ext = cfg->target_fw_vers_ext;
+	hdd_extract_fw_version_info(hdd_ctx);
 
 	hdd_ctx->hw_bd_id = cfg->hw_bd_id;
 	qdf_mem_copy(&hdd_ctx->hw_bd_info, &cfg->hw_bd_info,
@@ -2538,7 +2564,6 @@ uint32_t hdd_wlan_get_version(struct hdd_context *hdd_ctx,
 			      const size_t version_len, uint8_t *version)
 {
 	uint32_t size;
-	uint32_t msp_id = 0, mspid = 0, siid = 0, crmid = 0, sub_id = 0;
 
 	if (!hdd_ctx) {
 		hdd_err("Invalid context, HDD context is null");
@@ -2550,16 +2575,15 @@ uint32_t hdd_wlan_get_version(struct hdd_context *hdd_ctx,
 		return 0;
 	}
 
-	msp_id = (hdd_ctx->target_fw_version & 0xf0000000) >> 28;
-	mspid = (hdd_ctx->target_fw_version & 0xf000000) >> 24;
-	siid = (hdd_ctx->target_fw_version & 0xf00000) >> 20;
-	crmid = hdd_ctx->target_fw_version & 0x7fff;
-	sub_id = (hdd_ctx->target_fw_vers_ext & 0xf0000000) >> 28;
-
 	size = scnprintf(version, version_len,
-			 "Host SW:%s, FW:%d.%d.%d.%d.%d, HW:%s, Board ver: %x Ref design id: %x, Customer id: %x, Project id: %x, Board Data Rev: %x",
+			 "Host SW:%s, FW:%d.%d.%d.%d.%d.%d, HW:%s, Board ver: %x Ref design id: %x, Customer id: %x, Project id: %x, Board Data Rev: %x",
 			 QWLAN_VERSIONSTR,
-			 msp_id, mspid, siid, crmid, sub_id,
+			 hdd_ctx->fw_version_info.major_spid,
+			 hdd_ctx->fw_version_info.minor_spid,
+			 hdd_ctx->fw_version_info.siid,
+			 hdd_ctx->fw_version_info.rel_id,
+			 hdd_ctx->fw_version_info.crmid,
+			 hdd_ctx->fw_version_info.sub_id,
 			 hdd_ctx->target_hw_name,
 			 hdd_ctx->hw_bd_info.bdf_version,
 			 hdd_ctx->hw_bd_info.ref_design_id,
@@ -3224,21 +3248,6 @@ static int hdd_open(struct net_device *net_dev)
 	return errno;
 }
 
-static bool
-hdd_is_any_sta_interface_open(struct hdd_context *hdd_ctx)
-{
-	struct hdd_adapter *adapter;
-
-	hdd_for_each_adapter(hdd_ctx, adapter) {
-		if (adapter->device_mode == QDF_STA_MODE &&
-		   (test_bit(DEVICE_IFACE_OPENED, &adapter->event_flags) ||
-		    test_bit(SME_SESSION_OPENED, &adapter->event_flags)))
-			return true;
-	}
-
-	return false;
-}
-
 /**
  * __hdd_stop() - HDD stop function
  * @dev:	Pointer to net_device structure
@@ -3322,10 +3331,6 @@ static int __hdd_stop(struct net_device *dev)
 
 	/* DeInit the adapter. This ensures datapath cleanup as well */
 	hdd_deinit_adapter(hdd_ctx, adapter, true);
-
-	/* If no STA interface is open, then flush out the BLM entries */
-	if (!hdd_is_any_sta_interface_open(hdd_ctx))
-		ucfg_blm_flush_reject_ap_list(hdd_ctx->pdev);
 
 	if (!hdd_is_any_interface_open(hdd_ctx))
 		hdd_psoc_idle_timer_start(hdd_ctx);
@@ -5596,6 +5601,7 @@ QDF_STATUS hdd_stop_adapter(struct hdd_context *hdd_ctx,
 		wlan_hdd_scan_abort(adapter);
 		hdd_deregister_hl_netdev_fc_timer(adapter);
 		hdd_deregister_tx_flow_control(adapter);
+		sme_delete_mon_session(mac_handle, adapter->vdev_id);
 		hdd_vdev_destroy(adapter);
 		break;
 
@@ -6707,7 +6713,8 @@ QDF_STATUS hdd_start_all_adapters(struct hdd_context *hdd_ctx)
 				/* indicate disconnected event to nl80211 */
 				wlan_hdd_cfg80211_indicate_disconnect(
 						adapter->dev, false,
-						WLAN_REASON_UNSPECIFIED);
+						WLAN_REASON_UNSPECIFIED,
+						NULL, 0);
 			} else if (eConnectionState_Connecting == conn_state) {
 				/*
 				 * Indicate connect failure to supplicant if we
@@ -7658,6 +7665,17 @@ bool hdd_is_5g_supported(struct hdd_context *hdd_ctx)
 		return false;
 }
 
+bool hdd_is_2g_supported(struct hdd_context *hdd_ctx)
+{
+	if (!hdd_ctx)
+		return false;
+
+	if (hdd_ctx->curr_band != BAND_5G)
+		return true;
+	else
+		return false;
+}
+
 static int hdd_wiphy_init(struct hdd_context *hdd_ctx)
 {
 	struct wiphy *wiphy;
@@ -7818,7 +7836,7 @@ static void hdd_pld_request_bus_bandwidth(struct hdd_context *hdd_ctx,
 	uint64_t temp_tx = 0, avg_rx = 0;
 	uint64_t no_rx_offload_pkts = 0, avg_no_rx_offload_pkts = 0;
 	uint64_t rx_offload_pkts = 0, avg_rx_offload_pkts = 0;
-	enum pld_bus_width_type next_vote_level = PLD_BUS_WIDTH_NONE;
+	enum pld_bus_width_type next_vote_level = PLD_BUS_WIDTH_IDLE;
 	static enum wlan_tp_level next_rx_level = WLAN_SVC_TP_NONE;
 	enum wlan_tp_level next_tx_level = WLAN_SVC_TP_NONE;
 	uint32_t delack_timer_cnt = hdd_ctx->config->tcp_delack_timer_count;
@@ -7836,10 +7854,10 @@ static void hdd_pld_request_bus_bandwidth(struct hdd_context *hdd_ctx,
 	else if (total_pkts > hdd_ctx->config->bus_bw_low_threshold)
 		next_vote_level = PLD_BUS_WIDTH_LOW;
 	else
-		next_vote_level = PLD_BUS_WIDTH_NONE;
+		next_vote_level = PLD_BUS_WIDTH_IDLE;
 
 	dptrace_high_tput_req =
-			next_vote_level > PLD_BUS_WIDTH_NONE ? true : false;
+			next_vote_level > PLD_BUS_WIDTH_IDLE ? true : false;
 
 	if (hdd_ctx->cur_vote_level != next_vote_level) {
 		hdd_debug("trigger level %d, tx_packets: %lld, rx_packets: %lld",
@@ -7848,7 +7866,7 @@ static void hdd_pld_request_bus_bandwidth(struct hdd_context *hdd_ctx,
 		vote_level_change = true;
 		pld_request_bus_bandwidth(hdd_ctx->parent_dev, next_vote_level);
 		if ((next_vote_level == PLD_BUS_WIDTH_LOW) ||
-		    (next_vote_level == PLD_BUS_WIDTH_NONE)) {
+		    (next_vote_level == PLD_BUS_WIDTH_IDLE)) {
 			if (hdd_ctx->hbw_requested) {
 				pld_remove_pm_qos(hdd_ctx->parent_dev);
 				hdd_ctx->hbw_requested = false;
@@ -9597,14 +9615,17 @@ struct hdd_context *hdd_context_create(struct device *dev)
 	}
 
 	status = cfg_parse(WLAN_INI_FILE);
-	if (QDF_IS_STATUS_ERROR(status))
+	if (QDF_IS_STATUS_ERROR(status)) {
 		hdd_err("Failed to parse cfg %s; status:%d\n",
 			WLAN_INI_FILE, status);
+		ret = qdf_status_to_os_return(status);
+		goto err_free_config;
+	}
 
 	ret = hdd_objmgr_create_and_store_psoc(hdd_ctx, DEFAULT_PSOC_ID);
 	if (ret) {
 		QDF_DEBUG_PANIC("Psoc creation fails!");
-		goto err_free_config;
+		goto err_release_store;
 	}
 
 	hdd_cfg_params_init(hdd_ctx);
@@ -9658,6 +9679,9 @@ err_deinit_hdd_context:
 
 err_hdd_objmgr_destroy:
 	hdd_objmgr_release_and_destroy_psoc(hdd_ctx);
+
+err_release_store:
+	cfg_release();
 
 err_free_config:
 	qdf_mem_free(hdd_ctx->config);
@@ -12839,29 +12863,6 @@ end:
 
 }
 
-/**
- * hdd_get_fw_version() - Get FW version
- * @hdd_ctx:     pointer to HDD context.
- * @major_spid:  FW version - major spid.
- * @minor_spid:  FW version - minor spid
- * @ssid:        FW version - ssid
- * @crmid:       FW version - crmid
- *
- * This function is called to get the firmware build version stored
- * as part of the HDD context
- *
- * Return:   None
- */
-void hdd_get_fw_version(struct hdd_context *hdd_ctx,
-			uint32_t *major_spid, uint32_t *minor_spid,
-			uint32_t *siid, uint32_t *crmid)
-{
-	*major_spid = (hdd_ctx->target_fw_version & 0xf0000000) >> 28;
-	*minor_spid = (hdd_ctx->target_fw_version & 0xf000000) >> 24;
-	*siid = (hdd_ctx->target_fw_version & 0xf00000) >> 20;
-	*crmid = hdd_ctx->target_fw_version & 0x7fff;
-}
-
 #ifdef QCA_CONFIG_SMP
 /**
  * wlan_hdd_get_cpu() - get cpu_index
@@ -12978,6 +12979,17 @@ static int wlan_hdd_state_ctrl_param_open(struct inode *inode,
 	return 0;
 }
 
+static void hdd_inform_wifi_off(void)
+{
+	struct hdd_context *hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
+
+	if (!hdd_ctx) {
+		hdd_err("Invalid hdd/pdev context");
+		return;
+	}
+	ucfg_blm_wifi_off(hdd_ctx->pdev);
+}
+
 static ssize_t wlan_hdd_state_ctrl_param_write(struct file *filp,
 						const char __user *user_buf,
 						size_t count,
@@ -12996,6 +13008,7 @@ static ssize_t wlan_hdd_state_ctrl_param_write(struct file *filp,
 
 	if (strncmp(buf, wlan_off_str, strlen(wlan_off_str)) == 0) {
 		pr_debug("Wifi turning off from UI\n");
+		hdd_inform_wifi_off();
 		goto exit;
 	}
 
@@ -13570,12 +13583,18 @@ static int hdd_mode_change_psoc_idle_shutdown(struct device *dev)
 {
 	struct hdd_context *hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 
+	if (!hdd_ctx)
+		return -EINVAL;
+
 	return hdd_wlan_stop_modules(hdd_ctx, true);
 }
 
 static int hdd_mode_change_psoc_idle_restart(struct device *dev)
 {
 	struct hdd_context *hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
+
+	if (!hdd_ctx)
+		return -EINVAL;
 
 	return hdd_wlan_start_modules(hdd_ctx, false);
 }
