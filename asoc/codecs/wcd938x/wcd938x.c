@@ -26,6 +26,7 @@
 
 #define WCD938X_DRV_NAME "wcd938x_codec"
 #define NUM_SWRS_DT_PARAMS 5
+#define WCD938X_VARIANT_ENTRY_SIZE 32
 
 #define WCD938X_VERSION_1_0 1
 #define WCD938X_VERSION_ENTRY_SIZE 32
@@ -146,14 +147,6 @@ static int wcd938x_init_reg(struct snd_soc_component *component)
 	/* 10 msec delay as per HW requirement */
 	usleep_range(10000, 10010);
 	snd_soc_component_update_bits(component, WCD938X_ANA_BIAS, 0x40, 0x00);
-	snd_soc_component_update_bits(component, WCD938X_HPH_OCP_CTL,
-								0xFF, 0x3A);
-	snd_soc_component_update_bits(component, WCD938X_RX_OCP_CTL,
-								0x0F, 0x02);
-	snd_soc_component_update_bits(component, WCD938X_HPH_R_TEST,
-								0x01, 0x01);
-	snd_soc_component_update_bits(component, WCD938X_HPH_L_TEST,
-								0x01, 0x01);
 	snd_soc_component_update_bits(component,
 				      WCD938X_HPH_NEW_INT_RDAC_GAIN_CTL,
 				      0xF0, 0x00);
@@ -173,6 +166,16 @@ static int wcd938x_init_reg(struct snd_soc_component *component)
 	snd_soc_component_update_bits(component,
 				WCD938X_TX_COM_NEW_INT_TXFE_ICTRL_STG2MAIN_ULP,
 				0x1F, 0x08);
+	snd_soc_component_update_bits(component,
+				WCD938X_DIGITAL_TX_REQ_FB_CTL_0, 0xFF, 0x55);
+	snd_soc_component_update_bits(component,
+				WCD938X_DIGITAL_TX_REQ_FB_CTL_1, 0xFF, 0x44);
+	snd_soc_component_update_bits(component,
+				WCD938X_DIGITAL_TX_REQ_FB_CTL_2, 0xFF, 0x11);
+	snd_soc_component_update_bits(component,
+				WCD938X_DIGITAL_TX_REQ_FB_CTL_3, 0xFF, 0x00);
+	snd_soc_component_update_bits(component,
+				WCD938X_DIGITAL_TX_REQ_FB_CTL_4, 0xFF, 0x00);
 
 	return 0;
 }
@@ -618,6 +621,10 @@ static int wcd938x_codec_enable_hphr_pa(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		if (wcd938x->update_wcd_event)
+			wcd938x->update_wcd_event(wcd938x->handle,
+						WCD_BOLERO_EVT_RX_MUTE,
+						(WCD_RX2 << 0x10 | 0x1));
 		ret = swr_slvdev_datapath_control(wcd938x->rx_swr_dev,
 				    wcd938x->rx_swr_dev->dev_num,
 				    true);
@@ -625,8 +632,10 @@ static int wcd938x_codec_enable_hphr_pa(struct snd_soc_dapm_widget *w,
 			     WCD_CLSH_EVENT_PRE_DAC,
 			     WCD_CLSH_STATE_HPHR,
 			     hph_mode);
+		wcd_clsh_set_hph_mode(component, CLS_H_HIFI);
 		snd_soc_component_update_bits(component, WCD938X_ANA_HPH,
 					      0x10, 0x10);
+		wcd_clsh_set_hph_mode(component, hph_mode);
 		/* 100 usec delay as per HW requirement */
 		usleep_range(100, 110);
 		set_bit(HPH_PA_DELAY, &wcd938x->status_mask);
@@ -656,26 +665,61 @@ static int wcd938x_codec_enable_hphr_pa(struct snd_soc_dapm_widget *w,
 			wcd938x->update_wcd_event(wcd938x->handle,
 						WCD_BOLERO_EVT_RX_MUTE,
 						(WCD_RX2 << 0x10));
+		wcd_enable_irq(&wcd938x->irq_info,
+					WCD938X_IRQ_HPHR_PDM_WD_INT);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
+		wcd_disable_irq(&wcd938x->irq_info,
+					WCD938X_IRQ_HPHR_PDM_WD_INT);
 		if (wcd938x->update_wcd_event)
 			wcd938x->update_wcd_event(wcd938x->handle,
 						WCD_BOLERO_EVT_RX_MUTE,
 						(WCD_RX2 << 0x10 | 0x1));
+		if (wcd938x->update_wcd_event)
+			wcd938x->update_wcd_event(wcd938x->handle,
+					WCD_BOLERO_EVT_RX_COMPANDER_SOFT_RST,
+					(WCD_RX2 << 0x10));
+		/* 7 msec delay as per HW requirement */
+		usleep_range(7000, 7100);
+		if (wcd938x->update_wcd_event)
+			wcd938x->update_wcd_event(wcd938x->handle,
+						WCD_BOLERO_EVT_RX_MUTE,
+						(WCD_RX2 << 0x10 | 0x0));
+		/* 20 msec delay as per HW requirement */
+		usleep_range(21000, 21100);
+		if (wcd938x->update_wcd_event)
+			wcd938x->update_wcd_event(wcd938x->handle,
+						WCD_BOLERO_EVT_RX_MUTE,
+						(WCD_RX2 << 0x10 | 0x1));
+		snd_soc_component_update_bits(component, WCD938X_ANA_HPH,
+						0x40, 0x00);
 		blocking_notifier_call_chain(&wcd938x->mbhc->notifier,
 					     WCD_EVENT_PRE_HPHR_PA_OFF,
 					     &wcd938x->mbhc->wcd_mbhc);
+		set_bit(HPH_PA_DELAY, &wcd938x->status_mask);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
-		/* 7 msec delay as per HW requirement */
-		usleep_range(7000, 7010);
-		snd_soc_component_update_bits(component,
-				WCD938X_DIGITAL_PDM_WD_CTL1, 0x17, 0x00);
+		/*
+		 * 7ms sleep is required if compander is enabled as per
+		 * HW requirement. If compander is disabled, then
+		 * 20ms delay is required.
+		 */
+		if (test_bit(HPH_PA_DELAY, &wcd938x->status_mask)) {
+			if (!wcd938x->comp2_enable)
+				usleep_range(20000, 20100);
+			else
+				usleep_range(7000, 7100);
+			clear_bit(HPH_PA_DELAY, &wcd938x->status_mask);
+		}
 		blocking_notifier_call_chain(&wcd938x->mbhc->notifier,
 					     WCD_EVENT_POST_HPHR_PA_OFF,
 					     &wcd938x->mbhc->wcd_mbhc);
 		snd_soc_component_update_bits(component, WCD938X_ANA_HPH,
 						0x10, 0x00);
+		/* 20 msec delay as per HW requirement */
+		usleep_range(20000, 20100);
+		snd_soc_component_update_bits(component,
+				WCD938X_DIGITAL_PDM_WD_CTL1, 0x17, 0x00);
 		wcd_cls_h_fsm(component, &wcd938x->clsh_info,
 			     WCD_CLSH_EVENT_POST_PA,
 			     WCD_CLSH_STATE_HPHR,
@@ -699,6 +743,10 @@ static int wcd938x_codec_enable_hphl_pa(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		if (wcd938x->update_wcd_event)
+			wcd938x->update_wcd_event(wcd938x->handle,
+						WCD_BOLERO_EVT_RX_MUTE,
+						(WCD_RX1 << 0x10 | 0x01));
 		ret = swr_slvdev_datapath_control(wcd938x->rx_swr_dev,
 				    wcd938x->rx_swr_dev->dev_num,
 				    true);
@@ -706,8 +754,10 @@ static int wcd938x_codec_enable_hphl_pa(struct snd_soc_dapm_widget *w,
 			     WCD_CLSH_EVENT_PRE_DAC,
 			     WCD_CLSH_STATE_HPHL,
 			     hph_mode);
+		wcd_clsh_set_hph_mode(component, CLS_H_HIFI);
 		snd_soc_component_update_bits(component, WCD938X_ANA_HPH,
 						0x20, 0x20);
+		wcd_clsh_set_hph_mode(component, hph_mode);
 		/* 100 usec delay as per HW requirement */
 		usleep_range(100, 110);
 		set_bit(HPH_PA_DELAY, &wcd938x->status_mask);
@@ -737,26 +787,61 @@ static int wcd938x_codec_enable_hphl_pa(struct snd_soc_dapm_widget *w,
 			wcd938x->update_wcd_event(wcd938x->handle,
 						WCD_BOLERO_EVT_RX_MUTE,
 						(WCD_RX1 << 0x10));
+		wcd_enable_irq(&wcd938x->irq_info,
+					WCD938X_IRQ_HPHL_PDM_WD_INT);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
+		wcd_disable_irq(&wcd938x->irq_info,
+					WCD938X_IRQ_HPHL_PDM_WD_INT);
 		if (wcd938x->update_wcd_event)
 			wcd938x->update_wcd_event(wcd938x->handle,
 						WCD_BOLERO_EVT_RX_MUTE,
 						(WCD_RX1 << 0x10 | 0x1));
+		if (wcd938x->update_wcd_event)
+			wcd938x->update_wcd_event(wcd938x->handle,
+					WCD_BOLERO_EVT_RX_COMPANDER_SOFT_RST,
+					(WCD_RX1 << 0x10));
+		/* 7 msec delay as per HW requirement */
+		usleep_range(7000, 7100);
+		if (wcd938x->update_wcd_event)
+			wcd938x->update_wcd_event(wcd938x->handle,
+						WCD_BOLERO_EVT_RX_MUTE,
+						(WCD_RX1 << 0x10 | 0x0));
+		/* 20 msec delay as per HW requirement */
+		usleep_range(21000, 21100);
+		if (wcd938x->update_wcd_event)
+			wcd938x->update_wcd_event(wcd938x->handle,
+						WCD_BOLERO_EVT_RX_MUTE,
+						(WCD_RX1 << 0x10 | 0x1));
+		snd_soc_component_update_bits(component, WCD938X_ANA_HPH,
+						0x80, 0x00);
 		blocking_notifier_call_chain(&wcd938x->mbhc->notifier,
 					     WCD_EVENT_PRE_HPHL_PA_OFF,
 					     &wcd938x->mbhc->wcd_mbhc);
+		set_bit(HPH_PA_DELAY, &wcd938x->status_mask);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
-		/* 7 msec delay as per HW requirement */
-		usleep_range(7000, 7010);
-		snd_soc_component_update_bits(component,
-				WCD938X_DIGITAL_PDM_WD_CTL0, 0x17, 0x00);
+		/*
+		 * 7ms sleep is required if compander is enabled as per
+		 * HW requirement. If compander is disabled, then
+		 * 20ms delay is required.
+		 */
+		if (test_bit(HPH_PA_DELAY, &wcd938x->status_mask)) {
+			if (!wcd938x->comp1_enable)
+				usleep_range(21000, 21100);
+			else
+				usleep_range(7000, 7100);
+			clear_bit(HPH_PA_DELAY, &wcd938x->status_mask);
+		}
 		blocking_notifier_call_chain(&wcd938x->mbhc->notifier,
 					     WCD_EVENT_POST_HPHL_PA_OFF,
 					     &wcd938x->mbhc->wcd_mbhc);
 		snd_soc_component_update_bits(component, WCD938X_ANA_HPH,
 						0x20, 0x00);
+		/* 20 msec delay as per HW requirement */
+		usleep_range(21000, 21100);
+		snd_soc_component_update_bits(component,
+				WCD938X_DIGITAL_PDM_WD_CTL0, 0x17, 0x00);
 		wcd_cls_h_fsm(component, &wcd938x->clsh_info,
 			     WCD_CLSH_EVENT_POST_PA,
 			     WCD_CLSH_STATE_HPHL,
@@ -799,8 +884,11 @@ static int wcd938x_codec_enable_aux_pa(struct snd_soc_dapm_widget *w,
 			wcd938x->update_wcd_event(wcd938x->handle,
 						WCD_BOLERO_EVT_RX_MUTE,
 						(WCD_RX3 << 0x10));
+		wcd_enable_irq(&wcd938x->irq_info, WCD938X_IRQ_AUX_PDM_WD_INT);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
+		wcd_disable_irq(&wcd938x->irq_info,
+					WCD938X_IRQ_AUX_PDM_WD_INT);
 		if (wcd938x->update_wcd_event)
 			wcd938x->update_wcd_event(wcd938x->handle,
 						WCD_BOLERO_EVT_RX_MUTE,
@@ -1684,10 +1772,56 @@ static int wcd938x_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 	return __wcd938x_codec_enable_micbias(w, event);
 }
 
-static inline int wcd938x_tx_path_get(const char *wname)
+static int __wcd938x_codec_enable_micbias_pullup(struct snd_soc_dapm_widget *w,
+						 int event)
+{
+	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
+	int micb_num;
+
+	dev_dbg(component->dev, "%s: wname: %s, event: %d\n",
+		__func__, w->name, event);
+
+	if (strnstr(w->name, "VA MIC BIAS1", sizeof("VA MIC BIAS1")))
+		micb_num = MIC_BIAS_1;
+	else if (strnstr(w->name, "VA MIC BIAS2", sizeof("VA MIC BIAS2")))
+		micb_num = MIC_BIAS_2;
+	else if (strnstr(w->name, "VA MIC BIAS3", sizeof("VA MIC BIAS3")))
+		micb_num = MIC_BIAS_3;
+	else if (strnstr(w->name, "VA MIC BIAS4", sizeof("VA MIC BIAS4")))
+		micb_num = MIC_BIAS_4;
+	else
+		return -EINVAL;
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		wcd938x_micbias_control(component, micb_num,
+					MICB_PULLUP_ENABLE, true);
+		break;
+	case SND_SOC_DAPM_POST_PMU:
+		/* 1 msec delay as per HW requirement */
+		usleep_range(1000, 1100);
+		break;
+	case SND_SOC_DAPM_POST_PMD:
+		wcd938x_micbias_control(component, micb_num,
+					MICB_PULLUP_DISABLE, true);
+		break;
+	};
+
+	return 0;
+
+}
+
+static int wcd938x_codec_enable_micbias_pullup(struct snd_soc_dapm_widget *w,
+					       struct snd_kcontrol *kcontrol,
+					       int event)
+{
+	return __wcd938x_codec_enable_micbias_pullup(w, event);
+}
+
+static inline int wcd938x_tx_path_get(const char *wname,
+				      unsigned int *path_num)
 {
 	int ret = 0;
-	unsigned int path_num;
 	char *widget_name = NULL;
 	char *w_name = NULL;
 	char *path_num_char = NULL;
@@ -1706,7 +1840,6 @@ static inline int wcd938x_tx_path_get(const char *wname)
 		ret = -EINVAL;
 		goto err;
 	}
-	path_name = widget_name;
 	path_num_char = strpbrk(path_name, "0123");
 	if (!path_num_char) {
 		pr_err("%s: tx path index not found\n",
@@ -1714,7 +1847,7 @@ static inline int wcd938x_tx_path_get(const char *wname)
 		ret = -EINVAL;
 		goto err;
 	}
-	ret = kstrtouint(path_num_char, 10, &path_num);
+	ret = kstrtouint(path_num_char, 10, path_num);
 	if (ret < 0)
 		pr_err("%s: Invalid tx path = %s\n",
 			__func__, w_name);
@@ -1727,24 +1860,23 @@ err:
 static int wcd938x_tx_mode_get(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_widget *widget =
-			snd_soc_dapm_kcontrol_widget(kcontrol);
 	struct snd_soc_component *component =
 			snd_soc_kcontrol_component(kcontrol);
 	struct wcd938x_priv *wcd938x = NULL;
-	int path = 0;
+	int ret = 0;
+	unsigned int path = 0;
 
 	if (!component)
 		return -EINVAL;
 
 	wcd938x = snd_soc_component_get_drvdata(component);
 
-	if (!widget || !widget->name || !wcd938x)
+	if (!wcd938x)
 		return -EINVAL;
 
-	path = wcd938x_tx_path_get(widget->name);
-	if (path < 0 || path >= TX_ADC_MAX)
-		return -EINVAL;
+	ret = wcd938x_tx_path_get(kcontrol->id.name, &path);
+	if (ret < 0)
+		return ret;
 
 	ucontrol->value.integer.value[0] = wcd938x->tx_mode[path];
 
@@ -1754,25 +1886,24 @@ static int wcd938x_tx_mode_get(struct snd_kcontrol *kcontrol,
 static int wcd938x_tx_mode_put(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_widget *widget =
-			snd_soc_dapm_kcontrol_widget(kcontrol);
 	struct snd_soc_component *component =
 			snd_soc_kcontrol_component(kcontrol);
 	struct wcd938x_priv *wcd938x = NULL;
 	u32 mode_val;
-	int path = 0;
+	unsigned int path = 0;
+	int ret = 0;
 
 	if (!component)
 		return -EINVAL;
 
 	wcd938x  = snd_soc_component_get_drvdata(component);
 
-	if (!widget || !widget->name || !wcd938x)
+	if (!wcd938x)
 		return -EINVAL;
 
-	path = wcd938x_tx_path_get(widget->name);
-	if (path < 0 || path >= TX_ADC_MAX)
-		return -EINVAL;
+	ret = wcd938x_tx_path_get(kcontrol->id.name, &path);
+	if (ret)
+		return ret;
 
 	mode_val = ucontrol->value.enumerated.item[0];
 
@@ -1804,11 +1935,19 @@ static int wcd938x_rx_hph_mode_put(struct snd_kcontrol *kcontrol,
 
 	dev_dbg(component->dev, "%s: mode: %d\n", __func__, mode_val);
 
-	if (mode_val == 0) {
+	if (wcd938x->variant == WCD9380) {
+		if (mode_val == CLS_H_HIFI || mode_val == CLS_AB_HIFI) {
+			dev_info(component->dev,
+				"%s:Invalid HPH Mode, default to CLS_H_ULP\n",
+				__func__);
+			mode_val = CLS_H_ULP;
+		}
+	}
+	if (mode_val == CLS_H_NORMAL) {
 		dev_info(component->dev,
 			"%s:Invalid HPH Mode, default to class_AB\n",
 			__func__);
-		mode_val = 3; /* enum will be updated later */
+		mode_val = CLS_H_ULP;
 	}
 	wcd938x->hph_mode = mode_val;
 	return 0;
@@ -1869,6 +2008,16 @@ static const struct soc_enum tx_mode_mux_enum =
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(tx_mode_mux_text),
 			    tx_mode_mux_text);
 
+static const char * const rx_hph_mode_mux_text_wcd9380[] = {
+	"CLS_H_INVALID", "CLS_H_INVALID_1", "CLS_H_LP", "CLS_AB",
+	"CLS_H_LOHIFI", "CLS_H_ULP", "CLS_H_INVALID_2", "CLS_AB_LP",
+	"CLS_AB_LOHIFI",
+};
+
+static const struct soc_enum rx_hph_mode_mux_enum_wcd9380 =
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(rx_hph_mode_mux_text_wcd9380),
+			    rx_hph_mode_mux_text_wcd9380);
+
 static const char * const rx_hph_mode_mux_text[] = {
 	"CLS_H_INVALID", "CLS_H_HIFI", "CLS_H_LP", "CLS_AB", "CLS_H_LOHIFI",
 	"CLS_H_ULP", "CLS_AB_HIFI", "CLS_AB_LP", "CLS_AB_LOHIFI",
@@ -1879,6 +2028,9 @@ static const struct soc_enum rx_hph_mode_mux_enum =
 			    rx_hph_mode_mux_text);
 
 static const struct snd_kcontrol_new wcd9380_snd_controls[] = {
+	SOC_ENUM_EXT("RX HPH Mode", rx_hph_mode_mux_enum_wcd9380,
+		wcd938x_rx_hph_mode_get, wcd938x_rx_hph_mode_put),
+
 	SOC_ENUM_EXT("TX0 MODE", tx_mode_mux_enum_wcd9380,
 			wcd938x_tx_mode_get, wcd938x_tx_mode_put),
 	SOC_ENUM_EXT("TX1 MODE", tx_mode_mux_enum_wcd9380,
@@ -1890,6 +2042,9 @@ static const struct snd_kcontrol_new wcd9380_snd_controls[] = {
 };
 
 static const struct snd_kcontrol_new wcd9385_snd_controls[] = {
+	SOC_ENUM_EXT("RX HPH Mode", rx_hph_mode_mux_enum,
+		wcd938x_rx_hph_mode_get, wcd938x_rx_hph_mode_put),
+
 	SOC_ENUM_EXT("TX0 MODE", tx_mode_mux_enum,
 			wcd938x_tx_mode_get, wcd938x_tx_mode_put),
 	SOC_ENUM_EXT("TX1 MODE", tx_mode_mux_enum,
@@ -1901,9 +2056,6 @@ static const struct snd_kcontrol_new wcd9385_snd_controls[] = {
 };
 
 static const struct snd_kcontrol_new wcd938x_snd_controls[] = {
-	SOC_ENUM_EXT("RX HPH Mode", rx_hph_mode_mux_enum,
-		wcd938x_rx_hph_mode_get, wcd938x_rx_hph_mode_put),
-
 	SOC_SINGLE_EXT("HPHL_COMP Switch", SND_SOC_NOPM, 0, 1, 0,
 		wcd938x_get_compander, wcd938x_set_compander),
 	SOC_SINGLE_EXT("HPHR_COMP Switch", SND_SOC_NOPM, 1, 1, 0,
@@ -2199,19 +2351,19 @@ static const struct snd_soc_dapm_widget wcd938x_dapm_widgets[] = {
 	SND_SOC_DAPM_PGA_E("EAR PGA", WCD938X_ANA_EAR, 7, 0, NULL, 0,
 				wcd938x_codec_enable_ear_pa,
 				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+				SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD),
 	SND_SOC_DAPM_PGA_E("AUX PGA", WCD938X_AUX_AUXPA, 7, 0, NULL, 0,
 				wcd938x_codec_enable_aux_pa,
 				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+				SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD),
 	SND_SOC_DAPM_PGA_E("HPHL PGA", WCD938X_ANA_HPH, 7, 0, NULL, 0,
 				wcd938x_codec_enable_hphl_pa,
 				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+				SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD),
 	SND_SOC_DAPM_PGA_E("HPHR PGA", WCD938X_ANA_HPH, 6, 0, NULL, 0,
 				wcd938x_codec_enable_hphr_pa,
 				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+				SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD),
 
 	SND_SOC_DAPM_DAC_E("RDAC1", NULL, SND_SOC_NOPM, 0, 0,
 				wcd938x_codec_hphl_dac_event,
@@ -2272,6 +2424,24 @@ static const struct snd_soc_dapm_widget wcd938x_dapm_widgets[] = {
 	SND_SOC_DAPM_OUTPUT("AUX"),
 	SND_SOC_DAPM_OUTPUT("HPHL"),
 	SND_SOC_DAPM_OUTPUT("HPHR"),
+
+	/* micbias pull up widgets*/
+	SND_SOC_DAPM_MICBIAS_E("VA MIC BIAS1", SND_SOC_NOPM, 0, 0,
+				wcd938x_codec_enable_micbias_pullup,
+				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
+				SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_MICBIAS_E("VA MIC BIAS2", SND_SOC_NOPM, 0, 0,
+				wcd938x_codec_enable_micbias_pullup,
+				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
+				SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_MICBIAS_E("VA MIC BIAS3", SND_SOC_NOPM, 0, 0,
+				wcd938x_codec_enable_micbias_pullup,
+				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
+				SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_MICBIAS_E("VA MIC BIAS4", SND_SOC_NOPM, 0, 0,
+				wcd938x_codec_enable_micbias_pullup,
+				SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
+				SND_SOC_DAPM_POST_PMD),
 };
 
 static const struct snd_soc_dapm_route wcd938x_audio_map[] = {
@@ -2390,12 +2560,46 @@ static struct snd_info_entry_ops wcd938x_info_ops = {
 	.read = wcd938x_version_read,
 };
 
+static ssize_t wcd938x_variant_read(struct snd_info_entry *entry,
+				    void *file_private_data,
+				    struct file *file,
+				    char __user *buf, size_t count,
+				    loff_t pos)
+{
+	struct wcd938x_priv *priv;
+	char buffer[WCD938X_VARIANT_ENTRY_SIZE];
+	int len = 0;
+
+	priv = (struct wcd938x_priv *) entry->private_data;
+	if (!priv) {
+		pr_err("%s: wcd938x priv is null\n", __func__);
+		return -EINVAL;
+	}
+
+	switch (priv->variant) {
+	case WCD9380:
+		len = snprintf(buffer, sizeof(buffer), "WCD9380\n");
+		break;
+	case WCD9385:
+		len = snprintf(buffer, sizeof(buffer), "WCD9385\n");
+		break;
+	default:
+		len = snprintf(buffer, sizeof(buffer), "VER_UNDEFINED\n");
+	}
+
+	return simple_read_from_buffer(buf, count, &pos, buffer, len);
+}
+
+static struct snd_info_entry_ops wcd938x_variant_ops = {
+	.read = wcd938x_variant_read,
+};
+
 /*
  * wcd938x_info_create_codec_entry - creates wcd938x module
  * @codec_root: The parent directory
  * @component: component instance
  *
- * Creates wcd938x module and version entry under the given
+ * Creates wcd938x module, variant and version entry under the given
  * parent directory.
  *
  * Return: 0 on success or negative error code on failure.
@@ -2404,6 +2608,7 @@ int wcd938x_info_create_codec_entry(struct snd_info_entry *codec_root,
 				   struct snd_soc_component *component)
 {
 	struct snd_info_entry *version_entry;
+	struct snd_info_entry *variant_entry;
 	struct wcd938x_priv *priv;
 	struct snd_soc_card *card;
 
@@ -2443,6 +2648,26 @@ int wcd938x_info_create_codec_entry(struct snd_info_entry *codec_root,
 		return -ENOMEM;
 	}
 	priv->version_entry = version_entry;
+
+	variant_entry = snd_info_create_card_entry(card->snd_card,
+						   "variant",
+						   priv->entry);
+	if (!variant_entry) {
+		dev_dbg(component->dev, "%s: failed to create wcd938x variant entry\n",
+			__func__);
+		return -ENOMEM;
+	}
+
+	variant_entry->private_data = priv;
+	variant_entry->size = WCD938X_VARIANT_ENTRY_SIZE;
+	variant_entry->content = SNDRV_INFO_CONTENT_DATA;
+	variant_entry->c.ops = &wcd938x_variant_ops;
+
+	if (snd_info_register(variant_entry) < 0) {
+		snd_info_free_entry(variant_entry);
+		return -ENOMEM;
+	}
+	priv->variant_entry = variant_entry;
 
 	return 0;
 }
@@ -2840,10 +3065,10 @@ static int wcd938x_bind(struct device *dev)
 			"HPHL PDM WD INT", wcd938x_wd_handle_irq, NULL);
 	wcd_request_irq(&wcd938x->irq_info, WCD938X_IRQ_AUX_PDM_WD_INT,
 			"AUX PDM WD INT", wcd938x_wd_handle_irq, NULL);
-	/* Enable watchdog interrupt for HPH and AUX */
-	wcd_enable_irq(&wcd938x->irq_info, WCD938X_IRQ_HPHR_PDM_WD_INT);
-	wcd_enable_irq(&wcd938x->irq_info, WCD938X_IRQ_HPHL_PDM_WD_INT);
-	wcd_enable_irq(&wcd938x->irq_info, WCD938X_IRQ_AUX_PDM_WD_INT);
+	/* Disable watchdog interrupt for HPH and AUX */
+	wcd_disable_irq(&wcd938x->irq_info, WCD938X_IRQ_HPHR_PDM_WD_INT);
+	wcd_disable_irq(&wcd938x->irq_info, WCD938X_IRQ_HPHL_PDM_WD_INT);
+	wcd_disable_irq(&wcd938x->irq_info, WCD938X_IRQ_AUX_PDM_WD_INT);
 
 	ret = snd_soc_register_component(dev, &soc_codec_dev_wcd938x,
 				     NULL, 0);
@@ -2865,6 +3090,9 @@ static void wcd938x_unbind(struct device *dev)
 {
 	struct wcd938x_priv *wcd938x = dev_get_drvdata(dev);
 
+	wcd_free_irq(&wcd938x->irq_info, WCD938X_IRQ_HPHR_PDM_WD_INT, NULL);
+	wcd_free_irq(&wcd938x->irq_info, WCD938X_IRQ_HPHL_PDM_WD_INT, NULL);
+	wcd_free_irq(&wcd938x->irq_info, WCD938X_IRQ_AUX_PDM_WD_INT, NULL);
 	wcd_irq_exit(&wcd938x->irq_info, wcd938x->virq);
 	snd_soc_unregister_component(dev);
 	component_unbind_all(dev, wcd938x);

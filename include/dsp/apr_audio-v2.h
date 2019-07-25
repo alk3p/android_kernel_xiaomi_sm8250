@@ -2539,6 +2539,7 @@ struct afe_port_data_cmd_rt_proxy_port_read_v2 {
 #define AFE_NON_LINEAR_DATA_PACKED_60958 0x3
 #define AFE_GENERIC_COMPRESSED           0x8
 #define AFE_LINEAR_PCM_DATA_PACKED_16BIT 0X6
+#define AFE_DSD_DOP_W_MARKER_DATA        0x9
 
 /* This param id is used to configure I2S interface */
 #define AFE_PARAM_ID_I2S_CONFIG	0x0001020D
@@ -2643,6 +2644,7 @@ struct afe_param_id_i2s_cfg {
  * - #NON_LINEAR_DATA
  * - #LINEAR_PCM_DATA_PACKED_IN_60958
  * - #NON_LINEAR_DATA_PACKED_IN_60958
+ * - #AFE_DSD_DOP_W_MARKER_DATA
  */
 		u16                  reserved;
 	/* This field must be set to zero. */
@@ -12523,6 +12525,14 @@ struct admx_sec_primary_mic_ch {
 	uint16_t sec_primary_mic_ch;
 	uint16_t reserved1;
 } __packed;
+
+#define FFECNS_MODULE_ID                                       0x00010952
+#define FLUENCE_CMN_GLOBAL_EFFECT_PARAM_ID                     0x00010EAF
+#define FFECNS_TOPOLOGY                                        0X10028003
+
+struct ffecns_effect {
+	uint32_t payload;
+};
 
 /** ID of the Voice Activity Detection (VAD) module, which is used to
  *   configure AFE VAD.
