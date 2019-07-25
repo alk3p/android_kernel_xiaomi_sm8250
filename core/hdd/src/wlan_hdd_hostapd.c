@@ -1140,6 +1140,9 @@ static void __wlan_hdd_sap_pre_cac_success(struct hdd_adapter *adapter)
 	 * switch to the pre CAC DFS channel, there is no CAC again.
 	 */
 	wlan_hdd_set_pre_cac_complete_status(ap_adapter, true);
+
+	wlan_hdd_set_sap_csa_reason(hdd_ctx->psoc, ap_adapter->vdev_id,
+				    CSA_REASON_PRE_CAC_SUCCESS);
 	i = hdd_softap_set_channel_change(ap_adapter->dev,
 			ap_adapter->pre_cac_chan,
 			CH_WIDTH_MAX, false);
@@ -2591,6 +2594,8 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 	case eSAP_ECSA_CHANGE_CHAN_IND:
 		hdd_debug("Channel change indication from peer for channel %d",
 			  sap_event->sapevt.sap_chan_cng_ind.new_chan);
+		wlan_hdd_set_sap_csa_reason(hdd_ctx->psoc, adapter->vdev_id,
+					    CSA_REASON_PEER_ACTION_FRAME);
 		if (hdd_softap_set_channel_change(dev,
 			 sap_event->sapevt.sap_chan_cng_ind.new_chan,
 			 CH_WIDTH_MAX, false))
@@ -3072,6 +3077,20 @@ void hdd_sap_restart_chan_switch_cb(struct wlan_objmgr_psoc *psoc,
 					    channel_bw, forced);
 }
 
+void wlan_hdd_set_sap_csa_reason(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
+				 uint8_t reason)
+{
+	struct sap_context *sap_ctx;
+	struct hdd_adapter *ap_adapter = wlan_hdd_get_adapter_from_vdev(
+				psoc, vdev_id);
+	if (!ap_adapter) {
+		hdd_err("ap adapter is NULL");
+		return;
+	}
+	sap_ctx = WLAN_HDD_GET_SAP_CTX_PTR(ap_adapter);
+	sap_ctx->csa_reason = reason;
+}
+
 QDF_STATUS wlan_hdd_get_channel_for_sap_restart(
 				struct wlan_objmgr_psoc *psoc,
 				uint8_t vdev_id, uint8_t *channel,
@@ -3170,6 +3189,8 @@ sap_restart:
 		 hdd_ap_ctx->sap_config.channel, intf_ch);
 	ch_params.ch_width = CH_WIDTH_MAX;
 	hdd_ap_ctx->bss_stop_reason = BSS_STOP_DUE_TO_MCC_SCC_SWITCH;
+	hdd_ap_ctx->sap_context->csa_reason =
+			CSA_REASON_CONCURRENT_STA_CHANGED_CHANNEL;
 
 	wlan_reg_set_channel_params(hdd_ctx->pdev,
 				    intf_ch,
@@ -5694,6 +5715,17 @@ static int __wlan_hdd_cfg80211_stop_ap(struct wiphy *wiphy,
 
 	hdd_enter();
 
+	ret = wlan_hdd_validate_context(hdd_ctx);
+	/**
+	 * In case of SSR and other FW down cases, validate context will
+	 * fail. But return success to upper layer so that it can clean up
+	 * kernal variables like beacon interval. If the failure status
+	 * is returned then next set beacon command will fail as beacon
+	 * interval in not reset.
+	 */
+	if (ret)
+		return 0;
+
 	if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam()) {
 		hdd_err("Command not allowed in FTM mode");
 		return -EINVAL;
@@ -5724,10 +5756,6 @@ static int __wlan_hdd_cfg80211_stop_ap(struct wiphy *wiphy,
 	clear_bit(SOFTAP_INIT_DONE, &adapter->event_flags);
 	hdd_debug("Device_mode %s(%d)",
 		  qdf_opmode_str(adapter->device_mode), adapter->device_mode);
-
-	ret = wlan_hdd_validate_context(hdd_ctx);
-	if (0 != ret)
-		return ret;
 
 	/*
 	 * If a STA connection is in progress in another adapter, disconnect

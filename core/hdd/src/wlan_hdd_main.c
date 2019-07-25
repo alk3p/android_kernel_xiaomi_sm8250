@@ -2734,6 +2734,8 @@ static void hdd_register_policy_manager_callback(
 		hdd_wapi_security_sta_exist;
 	hdd_cbacks.hdd_is_chan_switch_in_progress =
 				hdd_is_chan_switch_in_progress;
+	hdd_cbacks.wlan_hdd_set_sap_csa_reason =
+				wlan_hdd_set_sap_csa_reason;
 
 	if (QDF_STATUS_SUCCESS !=
 	    policy_mgr_register_hdd_cb(psoc, &hdd_cbacks)) {
@@ -2999,6 +3001,7 @@ int hdd_wlan_start_modules(struct hdd_context *hdd_ctx, bool reinit)
 		hdd_update_hw_sw_info(hdd_ctx);
 
 		if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam()) {
+			hdd_enable_power_management();
 			hdd_err("in ftm mode, no need to configure cds modules");
 			ret = -EINVAL;
 			break;
@@ -7832,6 +7835,12 @@ static void hdd_pld_request_bus_bandwidth(struct hdd_context *hdd_ctx,
 					  const uint64_t tx_packets,
 					  const uint64_t rx_packets)
 {
+	uint16_t index = 0;
+	bool vote_level_change = false;
+	bool rx_level_change = false;
+	bool tx_level_change = false;
+	bool rxthread_high_tput_req = false;
+	bool dptrace_high_tput_req;
 	u64 total_pkts = tx_packets + rx_packets;
 	uint64_t temp_tx = 0, avg_rx = 0;
 	uint64_t no_rx_offload_pkts = 0, avg_no_rx_offload_pkts = 0;
@@ -7840,14 +7849,10 @@ static void hdd_pld_request_bus_bandwidth(struct hdd_context *hdd_ctx,
 	static enum wlan_tp_level next_rx_level = WLAN_SVC_TP_NONE;
 	enum wlan_tp_level next_tx_level = WLAN_SVC_TP_NONE;
 	uint32_t delack_timer_cnt = hdd_ctx->config->tcp_delack_timer_count;
-	uint16_t index = 0;
-	bool vote_level_change = false;
-	bool rx_level_change = false;
-	bool tx_level_change = false;
-	bool rxthread_high_tput_req = false;
-	bool dptrace_high_tput_req;
 
-	if (total_pkts > hdd_ctx->config->bus_bw_high_threshold)
+	if (total_pkts > hdd_ctx->config->bus_bw_very_high_threshold)
+		next_vote_level = PLD_BUS_WIDTH_VERY_HIGH;
+	else if (total_pkts > hdd_ctx->config->bus_bw_high_threshold)
 		next_vote_level = PLD_BUS_WIDTH_HIGH;
 	else if (total_pkts > hdd_ctx->config->bus_bw_medium_threshold)
 		next_vote_level = PLD_BUS_WIDTH_MEDIUM;
@@ -7860,11 +7865,13 @@ static void hdd_pld_request_bus_bandwidth(struct hdd_context *hdd_ctx,
 			next_vote_level > PLD_BUS_WIDTH_IDLE ? true : false;
 
 	if (hdd_ctx->cur_vote_level != next_vote_level) {
-		hdd_debug("trigger level %d, tx_packets: %lld, rx_packets: %lld",
-			 next_vote_level, tx_packets, rx_packets);
+		hdd_debug("BW Vote level %d, tx_packets: %lld, rx_packets: %lld",
+			  next_vote_level, tx_packets, rx_packets);
 		hdd_ctx->cur_vote_level = next_vote_level;
 		vote_level_change = true;
+
 		pld_request_bus_bandwidth(hdd_ctx->parent_dev, next_vote_level);
+
 		if ((next_vote_level == PLD_BUS_WIDTH_LOW) ||
 		    (next_vote_level == PLD_BUS_WIDTH_IDLE)) {
 			if (hdd_ctx->hbw_requested) {
@@ -7942,8 +7949,6 @@ static void hdd_pld_request_bus_bandwidth(struct hdd_context *hdd_ctx,
 	if (hdd_ctx->cur_rx_level != next_rx_level) {
 		struct wlan_rx_tp_data rx_tp_data = {0};
 
-		hdd_debug("TCP DELACK trigger level %d, average_rx: %llu",
-			  next_rx_level, avg_rx);
 		hdd_ctx->cur_rx_level = next_rx_level;
 		rx_level_change = true;
 		/* Send throughput indication only if it is enabled.
@@ -7951,8 +7956,11 @@ static void hdd_pld_request_bus_bandwidth(struct hdd_context *hdd_ctx,
 		 * to default delayed ack. Note that this will disable the
 		 * dynamic delayed ack mechanism across the system
 		 */
-		if (hdd_ctx->en_tcp_delack_no_lro)
+		if (hdd_ctx->en_tcp_delack_no_lro) {
 			rx_tp_data.rx_tp_flags |= TCP_DEL_ACK_IND;
+			hdd_debug("TCP DELACK trigger level %d, average_rx: %llu",
+				  next_rx_level, avg_rx);
+		}
 
 		if (hdd_ctx->config->enable_tcp_adv_win_scale)
 			rx_tp_data.rx_tp_flags |= TCP_ADV_WIN_SCL;
@@ -8207,9 +8215,10 @@ void wlan_hdd_display_tx_rx_histogram(struct hdd_context *hdd_ctx)
 	int i;
 
 #ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
-	hdd_nofl_info("BW compute Interval: %dms",
+	hdd_nofl_info("BW compute Interval: %d ms",
 		      hdd_ctx->config->bus_bw_compute_interval);
-	hdd_nofl_info("BW High TH: %d BW Med TH: %d BW Low TH: %d",
+	hdd_nofl_info("BW TH - Very High: %d High: %d Med: %d Low: %d",
+		      hdd_ctx->config->bus_bw_very_high_threshold,
 		      hdd_ctx->config->bus_bw_high_threshold,
 		      hdd_ctx->config->bus_bw_medium_threshold,
 		      hdd_ctx->config->bus_bw_low_threshold);
@@ -8769,9 +8778,13 @@ void hdd_unsafe_channel_restart_sap(struct hdd_context *hdd_ctxt)
 			hdd_ctxt->acs_policy.acs_channel = AUTO_CHANNEL_SELECT;
 			ucfg_mlme_get_sap_internal_restart(hdd_ctxt->psoc,
 							   &value);
-			if (value)
+			if (value) {
+				wlan_hdd_set_sap_csa_reason(hdd_ctxt->psoc,
+						adapter->vdev_id,
+						CSA_REASON_UNSAFE_CHANNEL);
 				hdd_switch_sap_channel(adapter, restart_chan,
 						       true);
+			}
 			else {
 				hdd_debug("sending coex indication");
 				wlan_hdd_send_svc_nlink_msg(
@@ -8841,6 +8854,8 @@ static void hdd_lte_coex_restart_sap(struct hdd_adapter *adapter,
 
 	wlan_hdd_send_svc_nlink_msg(hdd_ctx->radio_index,
 				    WLAN_SVC_LTE_COEX_IND, NULL, 0);
+	wlan_hdd_set_sap_csa_reason(hdd_ctx->psoc, adapter->vdev_id,
+				    CSA_REASON_LTE_COEX);
 	hdd_switch_sap_channel(adapter, restart_chan, true);
 }
 
@@ -14958,7 +14973,8 @@ void hdd_check_and_restart_sap_with_non_dfs_acs(void)
 		if (!restart_chan ||
 		    wlan_reg_is_dfs_ch(hdd_ctx->pdev, restart_chan))
 			restart_chan = SAP_DEFAULT_5GHZ_CHANNEL;
-
+		wlan_hdd_set_sap_csa_reason(hdd_ctx->psoc, ap_adapter->vdev_id,
+					CSA_REASON_STA_CONNECT_DFS_TO_NON_DFS);
 		hdd_switch_sap_channel(ap_adapter, restart_chan, true);
 	}
 }
