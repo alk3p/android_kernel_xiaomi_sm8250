@@ -33,6 +33,8 @@
 		writel_relaxed(PLL_CALC_DATA(addr0, addr1, data0, data1), \
 			(base) + (offset))
 
+#define upper_8_bit(x) ((((x) >> 2) & 0x100) >> 8)
+
 enum {
 	MDSS_DSI_PLL_10NM,
 	MDSS_DP_PLL_10NM,
@@ -40,6 +42,7 @@ enum {
 	MDSS_DSI_PLL_7NM_V2,
 	MDSS_DSI_PLL_7NM_V4_1,
 	MDSS_DP_PLL_7NM,
+	MDSS_DP_PLL_7NM_V2,
 	MDSS_DSI_PLL_28LPM,
 	MDSS_DSI_PLL_14NM,
 	MDSS_DP_PLL_14NM,
@@ -51,30 +54,23 @@ enum {
 	MDSS_PLL_TARGET_8996,
 };
 
-#define DFPS_MAX_NUM_OF_FRAME_RATES 20
-
-struct dfps_panel_info {
-	uint32_t enabled;
-	uint32_t frame_rate_cnt;
-	uint32_t frame_rate[DFPS_MAX_NUM_OF_FRAME_RATES]; /* hz */
-};
+#define DFPS_MAX_NUM_OF_FRAME_RATES 16
 
 struct dfps_pll_codes {
 	uint32_t pll_codes_1;
 	uint32_t pll_codes_2;
+	uint32_t pll_codes_3;
 };
 
 struct dfps_codes_info {
 	uint32_t is_valid;
-	uint32_t frame_rate;	/* hz */
 	uint32_t clk_rate;	/* hz */
 	struct dfps_pll_codes pll_codes;
 };
 
 struct dfps_info {
-	struct dfps_panel_info panel_dfps;
+	uint32_t vco_rate_cnt;
 	struct dfps_codes_info codes_dfps[DFPS_MAX_NUM_OF_FRAME_RATES];
-	void *dfps_fb_base;
 };
 
 struct mdss_pll_resources {
@@ -89,7 +85,11 @@ struct mdss_pll_resources {
 	void __iomem	*pll_base;
 	void __iomem	*phy_base;
 	void __iomem	*ln_tx0_base;
+	void __iomem	*ln_tx0_tran_base;
+	void __iomem	*ln_tx0_vmode_base;
 	void __iomem	*ln_tx1_base;
+	void __iomem	*ln_tx1_tran_base;
+	void __iomem	*ln_tx1_vmode_base;
 	void __iomem	*gdsc_base;
 	void __iomem	*dyn_pll_base;
 
@@ -149,7 +149,7 @@ struct mdss_pll_resources {
 	/*
 	 * caching the pll trim codes in the case of dynamic refresh
 	 */
-	int		cache_pll_trim_codes[2];
+	int		cache_pll_trim_codes[3];
 
 	/*
 	 * for maintaining the status of saving trim codes
@@ -191,6 +191,11 @@ struct mdss_pll_resources {
 	 */
 	struct dfps_info *dfps;
 
+	/*
+	 * for cases where dfps trigger happens before first
+	 * suspend/resume and handoff is not finished.
+	 */
+	bool dfps_trigger;
 };
 
 struct mdss_pll_vco_calc {

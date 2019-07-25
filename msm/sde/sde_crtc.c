@@ -276,7 +276,7 @@ static ssize_t measured_fps_show(struct device *device,
 	struct drm_crtc *crtc;
 	struct sde_crtc *sde_crtc;
 	unsigned int fps_int, fps_decimal;
-	u64 fps = 0, frame_count = 1;
+	u64 fps = 0, frame_count = 0;
 	ktime_t current_time;
 	int i = 0, current_time_index;
 	u64 diff_us;
@@ -355,7 +355,7 @@ static ssize_t measured_fps_show(struct device *device,
 	fps_int = (unsigned int) sde_crtc->fps_info.measured_fps;
 	fps_decimal = do_div(fps_int, 10);
 	return scnprintf(buf, PAGE_SIZE,
-		"fps: %d.%d duration:%d frame_count:%lld", fps_int, fps_decimal,
+	"fps: %d.%d duration:%d frame_count:%lld\n", fps_int, fps_decimal,
 			sde_crtc->fps_info.fps_periodic_duration, frame_count);
 }
 
@@ -430,8 +430,9 @@ static bool sde_crtc_mode_fixup(struct drm_crtc *crtc,
 	SDE_DEBUG("\n");
 
 	if ((msm_is_mode_seamless(adjusted_mode) ||
-			msm_is_mode_seamless_vrr(adjusted_mode)) &&
-		(!crtc->enabled)) {
+	     (msm_is_mode_seamless_vrr(adjusted_mode) ||
+	      msm_is_mode_seamless_dyn_clk(adjusted_mode))) &&
+	    (!crtc->enabled)) {
 		SDE_ERROR("crtc state prevents seamless transition\n");
 		return false;
 	}
@@ -722,7 +723,7 @@ static int _sde_crtc_set_crtc_roi(struct drm_crtc *crtc,
 		if (!conn_state || conn_state->crtc != crtc)
 			continue;
 
-		rc = sde_connector_get_mode_info(conn_state, &mode_info);
+		rc = sde_connector_state_get_mode_info(conn_state, &mode_info);
 		if (rc) {
 			SDE_ERROR("failed to get mode info\n");
 			return -EINVAL;
@@ -1065,7 +1066,7 @@ static int _sde_crtc_check_rois(struct drm_crtc *crtc,
 		if (!conn || !conn->state)
 			continue;
 
-		rc = sde_connector_get_mode_info(conn->state, &mode_info);
+		rc = sde_connector_state_get_mode_info(conn->state, &mode_info);
 		if (rc) {
 			SDE_ERROR("failed to get mode info\n");
 			return -EINVAL;
@@ -4056,7 +4057,9 @@ static void sde_crtc_enable(struct drm_crtc *crtc,
 
 	/* return early if crtc is already enabled, do this after UIDLE check */
 	if (sde_crtc->enabled) {
-		if (msm_is_mode_seamless_dms(&crtc->state->adjusted_mode))
+		if (msm_is_mode_seamless_dms(&crtc->state->adjusted_mode) ||
+		msm_is_mode_seamless_dyn_clk(&crtc->state->adjusted_mode))
+
 			SDE_DEBUG("%s extra crtc enable expected during DMS\n",
 					sde_crtc->name);
 		else
@@ -5022,7 +5025,8 @@ static int sde_crtc_atomic_set_property(struct drm_crtc *crtc,
 	struct sde_crtc *sde_crtc;
 	struct sde_crtc_state *cstate;
 	int idx, ret;
-	uint64_t fence_fd;
+	uint64_t fence_user_fd;
+	uint64_t __user prev_user_fd;
 
 	if (!crtc || !state || !property) {
 		SDE_ERROR("invalid argument(s)\n");
@@ -5082,19 +5086,34 @@ static int sde_crtc_atomic_set_property(struct drm_crtc *crtc,
 		if (!val)
 			goto exit;
 
-		ret = _sde_crtc_get_output_fence(crtc, state, &fence_fd);
+		ret = copy_from_user(&prev_user_fd, (void __user *)val,
+				sizeof(uint64_t));
 		if (ret) {
-			SDE_ERROR("fence create failed rc:%d\n", ret);
+			SDE_ERROR("copy from user failed rc:%d\n", ret);
+			ret = -EFAULT;
 			goto exit;
 		}
 
-		ret = copy_to_user((uint64_t __user *)(uintptr_t)val, &fence_fd,
-				sizeof(uint64_t));
-		if (ret) {
-			SDE_ERROR("copy to user failed rc:%d\n", ret);
-			put_unused_fd(fence_fd);
-			ret = -EFAULT;
-			goto exit;
+		/*
+		 * client is expected to reset the property to -1 before
+		 * requesting for the release fence
+		 */
+		if (prev_user_fd == -1) {
+			ret = _sde_crtc_get_output_fence(crtc, state,
+					&fence_user_fd);
+			if (ret) {
+				SDE_ERROR("fence create failed rc:%d\n", ret);
+				goto exit;
+			}
+
+			ret = copy_to_user((uint64_t __user *)(uintptr_t)val,
+					&fence_user_fd, sizeof(uint64_t));
+			if (ret) {
+				SDE_ERROR("copy to user failed rc:%d\n", ret);
+				put_unused_fd(fence_user_fd);
+				ret = -EFAULT;
+				goto exit;
+			}
 		}
 		break;
 	default:

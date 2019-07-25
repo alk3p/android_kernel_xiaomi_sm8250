@@ -8,6 +8,7 @@
 #include <linux/slab.h>
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
+#include <linux/pwm.h>
 #include <video/mipi_display.h>
 
 #include "dsi_panel.h"
@@ -24,8 +25,6 @@
 #define MAX_TOPOLOGY 5
 
 #define DSI_PANEL_DEFAULT_LABEL  "Default dsi panel"
-
-#define DEFAULT_MDP_TRANSFER_TIME 14000
 
 #define DEFAULT_PANEL_JITTER_NUMERATOR		2
 #define DEFAULT_PANEL_JITTER_DENOMINATOR	1
@@ -284,6 +283,16 @@ static int dsi_panel_gpio_request(struct dsi_panel *panel)
 		}
 	}
 
+	if (gpio_is_valid(panel->panel_test_gpio)) {
+		rc = gpio_request(panel->panel_test_gpio, "panel_test_gpio");
+		if (rc) {
+			pr_warn("request for panel_test_gpio failed, rc=%d\n",
+				 rc);
+			panel->panel_test_gpio = -1;
+			rc = 0;
+		}
+	}
+
 	goto error;
 error_release_mode_sel:
 	if (gpio_is_valid(panel->bl_config.en_gpio))
@@ -314,6 +323,9 @@ static int dsi_panel_gpio_release(struct dsi_panel *panel)
 
 	if (gpio_is_valid(panel->reset_config.lcd_mode_sel_gpio))
 		gpio_free(panel->reset_config.lcd_mode_sel_gpio);
+
+	if (gpio_is_valid(panel->panel_test_gpio))
+		gpio_free(panel->panel_test_gpio);
 
 	return rc;
 }
@@ -399,6 +411,14 @@ static int dsi_panel_reset(struct dsi_panel *panel)
 		if (rc)
 			pr_err("unable to set dir for mode gpio rc=%d\n", rc);
 	}
+
+	if (gpio_is_valid(panel->panel_test_gpio)) {
+		rc = gpio_direction_input(panel->panel_test_gpio);
+		if (rc)
+			pr_warn("unable to set dir for panel test gpio rc=%d\n",
+			       rc);
+	}
+
 exit:
 	return rc;
 }
@@ -589,17 +609,16 @@ error:
 static int dsi_panel_wled_register(struct dsi_panel *panel,
 		struct dsi_backlight_config *bl)
 {
-	int rc = 0;
 	struct backlight_device *bd;
 
 	bd = backlight_device_get_by_type(BACKLIGHT_RAW);
 	if (!bd) {
 		pr_err("[%s] fail raw backlight register\n", panel->name);
-		rc = -EINVAL;
+		return -EPROBE_DEFER;
 	}
 
 	bl->raw_bd = bd;
-	return rc;
+	return 0;
 }
 
 static int dsi_panel_update_backlight(struct dsi_panel *panel,
@@ -622,6 +641,57 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 	return rc;
 }
 
+static int dsi_panel_update_pwm_backlight(struct dsi_panel *panel,
+	u32 bl_lvl)
+{
+	int rc = 0;
+	u32 duty = 0;
+	u32 period_ns = 0;
+	struct dsi_backlight_config *bl;
+
+	if (!panel) {
+		pr_err("Invalid Params\n");
+		return -EINVAL;
+	}
+
+	bl = &panel->bl_config;
+	if (!bl->pwm_bl) {
+		pr_err("pwm device not found\n");
+		return -EINVAL;
+	}
+
+	period_ns = bl->pwm_period_usecs * NSEC_PER_USEC;
+	duty = bl_lvl * period_ns;
+	duty /= bl->bl_max_level;
+
+	rc = pwm_config(bl->pwm_bl, duty, period_ns);
+	if (rc) {
+		pr_err("[%s] failed to change pwm config, rc=\n", panel->name,
+			rc);
+		goto error;
+	}
+
+	if (bl_lvl == 0 && bl->pwm_enabled) {
+		pwm_disable(bl->pwm_bl);
+		bl->pwm_enabled = false;
+		return 0;
+	}
+
+	if (!bl->pwm_enabled) {
+		rc = pwm_enable(bl->pwm_bl);
+		if (rc) {
+			pr_err("[%s] failed to enable pwm, rc=\n", panel->name,
+				rc);
+			goto error;
+		}
+
+		bl->pwm_enabled = true;
+	}
+
+error:
+	return rc;
+}
+
 int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 {
 	int rc = 0;
@@ -639,6 +709,9 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		rc = dsi_panel_update_backlight(panel, bl_lvl);
 		break;
 	case DSI_BACKLIGHT_EXTERNAL:
+		break;
+	case DSI_BACKLIGHT_PWM:
+		rc = dsi_panel_update_pwm_backlight(panel, bl_lvl);
 		break;
 	default:
 		pr_err("Backlight type(%d) not supported\n", bl->type);
@@ -664,6 +737,7 @@ static u32 dsi_panel_get_brightness(struct dsi_backlight_config *bl)
 		break;
 	case DSI_BACKLIGHT_DCS:
 	case DSI_BACKLIGHT_EXTERNAL:
+	case DSI_BACKLIGHT_PWM:
 	default:
 		/*
 		 * Ideally, we should read the backlight level from the
@@ -683,6 +757,22 @@ void dsi_panel_bl_handoff(struct dsi_panel *panel)
 	bl->bl_level = dsi_panel_get_brightness(bl);
 }
 
+static int dsi_panel_pwm_register(struct dsi_panel *panel)
+{
+	int rc = 0;
+	struct dsi_backlight_config *bl = &panel->bl_config;
+
+	bl->pwm_bl = devm_of_pwm_get(panel->parent, panel->panel_of_node, NULL);
+	if (IS_ERR_OR_NULL(bl->pwm_bl)) {
+		rc = PTR_ERR(bl->pwm_bl);
+		pr_err("[%s] failed to request pwm, rc=%d\n", panel->name,
+			rc);
+		return rc;
+	}
+
+	return 0;
+}
+
 static int dsi_panel_bl_register(struct dsi_panel *panel)
 {
 	int rc = 0;
@@ -699,6 +789,9 @@ static int dsi_panel_bl_register(struct dsi_panel *panel)
 		break;
 	case DSI_BACKLIGHT_EXTERNAL:
 		break;
+	case DSI_BACKLIGHT_PWM:
+		rc = dsi_panel_pwm_register(panel);
+		break;
 	default:
 		pr_err("Backlight type(%d) not supported\n", bl->type);
 		rc = -ENOTSUPP;
@@ -707,6 +800,13 @@ static int dsi_panel_bl_register(struct dsi_panel *panel)
 
 error:
 	return rc;
+}
+
+static void dsi_panel_pwm_unregister(struct dsi_panel *panel)
+{
+	struct dsi_backlight_config *bl = &panel->bl_config;
+
+	devm_pwm_put(panel->parent, bl->pwm_bl);
 }
 
 static int dsi_panel_bl_unregister(struct dsi_panel *panel)
@@ -723,6 +823,9 @@ static int dsi_panel_bl_unregister(struct dsi_panel *panel)
 	case DSI_BACKLIGHT_DCS:
 		break;
 	case DSI_BACKLIGHT_EXTERNAL:
+		break;
+	case DSI_BACKLIGHT_PWM:
+		dsi_panel_pwm_unregister(panel);
 		break;
 	default:
 		pr_err("Backlight type(%d) not supported\n", bl->type);
@@ -763,8 +866,7 @@ static int dsi_panel_parse_timing(struct dsi_mode_info *mode,
 		display_mode->priv_info->mdp_transfer_time_us =
 			mode->mdp_transfer_time_us;
 	else
-		display_mode->priv_info->mdp_transfer_time_us =
-			DEFAULT_MDP_TRANSFER_TIME;
+		display_mode->priv_info->mdp_transfer_time_us = 0;
 
 	rc = utils->read_u32(utils->data,
 				"qcom,mdss-dsi-panel-framerate",
@@ -1088,6 +1190,44 @@ static int dsi_panel_parse_misc_host_config(struct dsi_host_common_cfg *host,
 	return 0;
 }
 
+static void dsi_panel_parse_split_link_config(struct dsi_host_common_cfg *host,
+					struct dsi_parser_utils *utils,
+					const char *name)
+{
+	int rc = 0;
+	u32 val = 0;
+	bool supported = false;
+	struct dsi_split_link_config *split_link = &host->split_link;
+
+	supported = utils->read_bool(utils->data, "qcom,split-link-enabled");
+
+	if (!supported) {
+		pr_debug("[%s] Split link is not supported\n", name);
+		split_link->split_link_enabled = false;
+		return;
+	}
+
+	rc = utils->read_u32(utils->data, "qcom,sublinks-count", &val);
+	if (rc || val < 1) {
+		pr_debug("[%s] Using default sublinks count\n", name);
+		split_link->num_sublinks = 2;
+	} else {
+		split_link->num_sublinks = val;
+	}
+
+	rc = utils->read_u32(utils->data, "qcom,lanes-per-sublink", &val);
+	if (rc || val < 1) {
+		pr_debug("[%s] Using default lanes per sublink\n", name);
+		split_link->lanes_per_sublink = 2;
+	} else {
+		split_link->lanes_per_sublink = val;
+	}
+
+	pr_debug("[%s] Split link is supported %d-%d\n", name,
+		split_link->num_sublinks, split_link->lanes_per_sublink);
+	split_link->split_link_enabled = true;
+}
+
 static int dsi_panel_parse_host_config(struct dsi_panel *panel)
 {
 	int rc = 0;
@@ -1133,6 +1273,9 @@ static int dsi_panel_parse_host_config(struct dsi_panel *panel)
 		goto error;
 	}
 
+	dsi_panel_parse_split_link_config(&panel->host_config, utils,
+						panel->name);
+
 error:
 	return rc;
 }
@@ -1155,6 +1298,48 @@ static int dsi_panel_parse_qsync_caps(struct dsi_panel *panel,
 	return rc;
 }
 
+static int dsi_panel_parse_dyn_clk_caps(struct dsi_panel *panel)
+{
+	int rc = 0;
+	bool supported = false;
+	struct dsi_dyn_clk_caps *dyn_clk_caps = &panel->dyn_clk_caps;
+	struct dsi_parser_utils *utils = &panel->utils;
+	const char *name = panel->name;
+
+	supported = utils->read_bool(utils->data, "qcom,dsi-dyn-clk-enable");
+
+	if (!supported) {
+		dyn_clk_caps->dyn_clk_support = false;
+		return rc;
+	}
+
+	dyn_clk_caps->bit_clk_list_len = utils->count_u32_elems(utils->data,
+			"qcom,dsi-dyn-clk-list");
+
+	if (dyn_clk_caps->bit_clk_list_len < 1) {
+		pr_err("[%s] failed to get supported bit clk list\n", name);
+		return -EINVAL;
+	}
+
+	dyn_clk_caps->bit_clk_list = kcalloc(dyn_clk_caps->bit_clk_list_len,
+			sizeof(u32), GFP_KERNEL);
+	if (!dyn_clk_caps->bit_clk_list)
+		return -ENOMEM;
+
+	rc = utils->read_u32_array(utils->data, "qcom,dsi-dyn-clk-list",
+			dyn_clk_caps->bit_clk_list,
+			dyn_clk_caps->bit_clk_list_len);
+
+	if (rc) {
+		pr_err("[%s] failed to parse supported bit clk list\n", name);
+		return -EINVAL;
+	}
+
+	dyn_clk_caps->dyn_clk_support = true;
+
+	return 0;
+}
+
 static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 {
 	int rc = 0;
@@ -1163,7 +1348,7 @@ static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 	struct dsi_parser_utils *utils = &panel->utils;
 	const char *name = panel->name;
 	const char *type;
-	u32 val = 0;
+	u32 i;
 
 	supported = utils->read_bool(utils->data,
 			"qcom,mdss-dsi-pan-enable-dynamic-fps");
@@ -1171,66 +1356,64 @@ static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 	if (!supported) {
 		pr_debug("[%s] DFPS is not supported\n", name);
 		dfps_caps->dfps_support = false;
+		return rc;
+	}
+
+	type = utils->get_property(utils->data,
+			"qcom,mdss-dsi-pan-fps-update", NULL);
+	if (!type) {
+		pr_err("[%s] dfps type not defined\n", name);
+		rc = -EINVAL;
+		goto error;
+	} else if (!strcmp(type, "dfps_suspend_resume_mode")) {
+		dfps_caps->type = DSI_DFPS_SUSPEND_RESUME;
+	} else if (!strcmp(type, "dfps_immediate_clk_mode")) {
+		dfps_caps->type = DSI_DFPS_IMMEDIATE_CLK;
+	} else if (!strcmp(type, "dfps_immediate_porch_mode_hfp")) {
+		dfps_caps->type = DSI_DFPS_IMMEDIATE_HFP;
+	} else if (!strcmp(type, "dfps_immediate_porch_mode_vfp")) {
+		dfps_caps->type = DSI_DFPS_IMMEDIATE_VFP;
 	} else {
+		pr_err("[%s] dfps type is not recognized\n", name);
+		rc = -EINVAL;
+		goto error;
+	}
 
-		type = utils->get_property(utils->data,
-				       "qcom,mdss-dsi-pan-fps-update",
-				       NULL);
-		if (!type) {
-			pr_err("[%s] dfps type not defined\n", name);
-			rc = -EINVAL;
-			goto error;
-		} else if (!strcmp(type, "dfps_suspend_resume_mode")) {
-			dfps_caps->type = DSI_DFPS_SUSPEND_RESUME;
-		} else if (!strcmp(type, "dfps_immediate_clk_mode")) {
-			dfps_caps->type = DSI_DFPS_IMMEDIATE_CLK;
-		} else if (!strcmp(type, "dfps_immediate_porch_mode_hfp")) {
-			dfps_caps->type = DSI_DFPS_IMMEDIATE_HFP;
-		} else if (!strcmp(type, "dfps_immediate_porch_mode_vfp")) {
-			dfps_caps->type = DSI_DFPS_IMMEDIATE_VFP;
-		} else {
-			pr_err("[%s] dfps type is not recognized\n", name);
-			rc = -EINVAL;
-			goto error;
-		}
+	dfps_caps->dfps_list_len = utils->count_u32_elems(utils->data,
+				  "qcom,dsi-supported-dfps-list");
+	if (dfps_caps->dfps_list_len < 1) {
+		pr_err("[%s] dfps refresh list not present\n", name);
+		rc = -EINVAL;
+		goto error;
+	}
 
-		rc = utils->read_u32(utils->data,
-					  "qcom,mdss-dsi-min-refresh-rate",
-					  &val);
-		if (rc) {
-			pr_err("[%s] Min refresh rate is not defined\n", name);
-			rc = -EINVAL;
-			goto error;
-		}
-		dfps_caps->min_refresh_rate = val;
+	dfps_caps->dfps_list = kcalloc(dfps_caps->dfps_list_len, sizeof(u32),
+			GFP_KERNEL);
+	if (!dfps_caps->dfps_list) {
+		rc = -ENOMEM;
+		goto error;
+	}
 
-		rc = utils->read_u32(utils->data,
-					  "qcom,mdss-dsi-max-refresh-rate",
-					  &val);
-		if (rc) {
-			pr_debug("[%s] Using default refresh rate\n", name);
-			rc = utils->read_u32(utils->data,
-						"qcom,mdss-dsi-panel-framerate",
-						&val);
-			if (rc) {
-				pr_err("[%s] max refresh rate is not defined\n",
-				       name);
-				rc = -EINVAL;
-				goto error;
-			}
-		}
-		dfps_caps->max_refresh_rate = val;
+	rc = utils->read_u32_array(utils->data,
+			"qcom,dsi-supported-dfps-list",
+			dfps_caps->dfps_list,
+			dfps_caps->dfps_list_len);
+	if (rc) {
+		pr_err("[%s] dfps refresh rate list parse failed\n", name);
+		rc = -EINVAL;
+		goto error;
+	}
+	dfps_caps->dfps_support = true;
 
-		if (dfps_caps->min_refresh_rate > dfps_caps->max_refresh_rate) {
-			pr_err("[%s] min rate > max rate\n", name);
-			rc = -EINVAL;
-		}
+	/* calculate max and min fps */
+	dfps_caps->max_refresh_rate = dfps_caps->dfps_list[0];
+	dfps_caps->min_refresh_rate = dfps_caps->dfps_list[0];
 
-		pr_debug("[%s] DFPS is supported %d-%d, mode %d\n", name,
-				dfps_caps->min_refresh_rate,
-				dfps_caps->max_refresh_rate,
-				dfps_caps->type);
-		dfps_caps->dfps_support = true;
+	for (i = 1; i < dfps_caps->dfps_list_len; i++) {
+		if (dfps_caps->dfps_list[i] < dfps_caps->min_refresh_rate)
+			dfps_caps->min_refresh_rate = dfps_caps->dfps_list[i];
+		else if (dfps_caps->dfps_list[i] > dfps_caps->max_refresh_rate)
+			dfps_caps->max_refresh_rate = dfps_caps->dfps_list[i];
 	}
 
 error:
@@ -1973,6 +2156,13 @@ static int dsi_panel_parse_gpios(struct dsi_panel *panel)
 		goto error;
 	}
 
+	panel->panel_test_gpio = utils->get_named_gpio(utils->data,
+					"qcom,mdss-dsi-panel-test-pin",
+					0);
+	if (!gpio_is_valid(panel->panel_test_gpio))
+		pr_debug("%s:%d panel test gpio not specified\n", __func__,
+			 __LINE__);
+
 error:
 	return rc;
 }
@@ -1984,33 +2174,13 @@ static int dsi_panel_parse_bl_pwm_config(struct dsi_panel *panel)
 	struct dsi_backlight_config *config = &panel->bl_config;
 	struct dsi_parser_utils *utils = &panel->utils;
 
-	rc = utils->read_u32(utils->data, "qcom,dsi-bl-pmic-bank-select",
+	rc = utils->read_u32(utils->data, "qcom,bl-pmic-pwm-period-usecs",
 				  &val);
 	if (rc) {
-		pr_err("bl-pmic-bank-select is not defined, rc=%d\n", rc);
-		goto error;
-	}
-	config->pwm_pmic_bank = val;
-
-	rc = utils->read_u32(utils->data, "qcom,dsi-bl-pmic-pwm-frequency",
-				  &val);
-	if (rc) {
-		pr_err("bl-pmic-bank-select is not defined, rc=%d\n", rc);
+		pr_err("bl-pmic-pwm-period-usecs is not defined, rc=%d\n", rc);
 		goto error;
 	}
 	config->pwm_period_usecs = val;
-
-	config->pwm_pmi_control = utils->read_bool(utils->data,
-						"qcom,mdss-dsi-bl-pwm-pmi");
-
-	config->pwm_gpio = utils->get_named_gpio(utils->data,
-					     "qcom,mdss-dsi-pwm-gpio",
-					     0);
-	if (!gpio_is_valid(config->pwm_gpio)) {
-		pr_err("pwm gpio is invalid\n");
-		rc = -EINVAL;
-		goto error;
-	}
 
 error:
 	return rc;
@@ -2102,9 +2272,17 @@ static int dsi_panel_parse_bl_config(struct dsi_panel *panel)
 					      "qcom,platform-bklight-en-gpio",
 					      0);
 	if (!gpio_is_valid(panel->bl_config.en_gpio)) {
-		pr_debug("[%s] failed get bklt gpio, rc=%d\n", panel->name, rc);
-		rc = 0;
-		goto error;
+		if (panel->bl_config.en_gpio == -EPROBE_DEFER) {
+			pr_debug("[%s] failed to get bklt gpio, rc=%d\n",
+					panel->name, rc);
+			rc = -EPROBE_DEFER;
+			goto error;
+		} else {
+			pr_debug("[%s] failed to get bklt gpio, rc=%d\n",
+					 panel->name, rc);
+			rc = 0;
+			goto error;
+		}
 	}
 
 error:
@@ -2304,12 +2482,15 @@ int dsi_dsc_populate_static_param(struct msm_display_dsc_info *dsc)
 
 
 static int dsi_panel_parse_phy_timing(struct dsi_display_mode *mode,
-				struct dsi_parser_utils *utils)
+		struct dsi_parser_utils *utils)
 {
 	const char *data;
 	u32 len, i;
 	int rc = 0;
 	struct dsi_display_mode_priv_info *priv_info;
+
+	if (!mode || !mode->priv_info)
+		return -EINVAL;
 
 	priv_info = mode->priv_info;
 
@@ -2329,9 +2510,17 @@ static int dsi_panel_parse_phy_timing(struct dsi_display_mode *mode,
 		priv_info->phy_timing_len = len;
 	}
 
-	mode->pixel_clk_khz = (DSI_H_TOTAL_DSC(&mode->timing) *
-			DSI_V_TOTAL(&mode->timing) *
-			mode->timing.refresh_rate) / 1000;
+	if (mode->panel_mode == DSI_OP_VIDEO_MODE) {
+		/*
+		 *  For command mode we update the pclk as part of
+		 *  function dsi_panel_calc_dsi_transfer_time( )
+		 *  as we set it based on dsi clock or mdp transfer time.
+		 */
+		mode->pixel_clk_khz = (DSI_H_TOTAL_DSC(&mode->timing) *
+				DSI_V_TOTAL(&mode->timing) *
+				mode->timing.refresh_rate) / 1000;
+	}
+
 	return rc;
 }
 
@@ -3053,6 +3242,10 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 			pr_err("failed to parse qsync features, rc=%d\n", rc);
 	}
 
+	rc = dsi_panel_parse_dyn_clk_caps(panel);
+	if (rc)
+		pr_err("failed to parse dynamic clk config, rc=%d\n", rc);
+
 	rc = dsi_panel_parse_phy_props(panel);
 	if (rc) {
 		pr_err("failed to parse panel physical dimension, rc=%d\n", rc);
@@ -3070,9 +3263,11 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 		pr_err("failed to parse power config, rc=%d\n", rc);
 
 	rc = dsi_panel_parse_bl_config(panel);
-	if (rc)
+	if (rc) {
 		pr_err("failed to parse backlight config, rc=%d\n", rc);
-
+		if (rc == -EPROBE_DEFER)
+			goto error;
+	}
 
 	rc = dsi_panel_parse_misc_features(panel);
 	if (rc)
@@ -3097,6 +3292,13 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 		pr_debug("failed to parse esd config, rc=%d\n", rc);
 
 	drm_panel_init(&panel->drm_panel);
+	panel->drm_panel.dev = &panel->mipi_device.dev;
+	panel->mipi_device.dev.of_node = of_node;
+
+	rc = drm_panel_add(&panel->drm_panel);
+	if (rc)
+		goto error;
+
 	mutex_init(&panel->panel_lock);
 
 	return panel;
@@ -3107,6 +3309,8 @@ error:
 
 void dsi_panel_put(struct dsi_panel *panel)
 {
+	drm_panel_remove(&panel->drm_panel);
+
 	/* free resources allocated for ESD check */
 	dsi_panel_esd_config_deinit(&panel->esd_config);
 
@@ -3309,19 +3513,20 @@ void dsi_panel_put_mode(struct dsi_display_mode *mode)
 }
 
 void dsi_panel_calc_dsi_transfer_time(struct dsi_host_common_cfg *config,
-		struct dsi_mode_info *timing)
+		struct dsi_display_mode *mode, u32 frame_threshold_us)
 {
 	u32 frame_time_us,nslices;
-	u64 min_bitclk, total_active_pixels, bits_per_line;
-	struct msm_display_dsc_info *dsc = timing->dsc;
+	u64 min_bitclk_hz, total_active_pixels, bits_per_line, pclk_rate_hz;
+	struct msm_display_dsc_info *dsc = mode->timing.dsc;
+	struct dsi_mode_info *timing = &mode->timing;
+	struct dsi_display_mode *display_mode;
 
 	/* Packet overlead in bits,2 bytes header + 2 bytes checksum
 	 * + 1 byte dcs data command.
         */
 	const u32 packet_overhead = 56;
 
-	/* Default time between pingpong done to TE in microsecs */
-	const u32 max_tx_threshold_time = 2166;
+	display_mode = container_of(timing, struct dsi_display_mode, timing);
 
 	frame_time_us = mult_frac(1000, 1000, (timing->refresh_rate));
 
@@ -3334,26 +3539,38 @@ void dsi_panel_calc_dsi_transfer_time(struct dsi_host_common_cfg *config,
 				packet_overhead) * nslices;
 		bits_per_line = bits_per_line / (config->num_data_lanes);
 
-		min_bitclk = (bits_per_line * timing->v_active *
+		min_bitclk_hz = (bits_per_line * timing->v_active *
 					timing->refresh_rate);
 	} else {
 		total_active_pixels = ((DSI_H_ACTIVE_DSC(timing)
 					* timing->v_active));
 		/* calculate the actual bitclk needed to transfer the frame */
-		min_bitclk = (total_active_pixels * (timing->refresh_rate) *
+		min_bitclk_hz = (total_active_pixels * (timing->refresh_rate) *
 				(config->bpp)) / (config->num_data_lanes);
 	}
 
-	timing->min_dsi_clk_hz = min_bitclk;
+	timing->min_dsi_clk_hz = min_bitclk_hz;
 
 	if (timing->clk_rate_hz) {
 		/* adjust the transfer time proportionately for bit clk*/
 		timing->dsi_transfer_time_us = mult_frac(frame_time_us,
-				min_bitclk, timing->clk_rate_hz);
+				min_bitclk_hz, timing->clk_rate_hz);
+	} else if (mode->priv_info->mdp_transfer_time_us) {
+		timing->dsi_transfer_time_us =
+			mode->priv_info->mdp_transfer_time_us;
 	} else {
 		timing->dsi_transfer_time_us = frame_time_us -
-			max_tx_threshold_time;
+			frame_threshold_us;
 	}
+
+	/* Calculate pclk_khz to update modeinfo */
+	pclk_rate_hz = mult_frac(min_bitclk_hz, frame_time_us,
+			timing->dsi_transfer_time_us);
+
+	display_mode->pixel_clk_khz = mult_frac(pclk_rate_hz,
+			config->num_data_lanes, config->bpp);
+
+	do_div(display_mode->pixel_clk_khz, 1000);
 }
 
 
@@ -3475,6 +3692,7 @@ int dsi_panel_get_host_cfg_for_mode(struct dsi_panel *panel,
 				    struct dsi_host_config *config)
 {
 	int rc = 0;
+	struct dsi_dyn_clk_caps *dyn_clk_caps = &panel->dyn_clk_caps;
 
 	if (!panel || !mode || !config) {
 		pr_err("invalid params\n");
@@ -3502,7 +3720,11 @@ int dsi_panel_get_host_cfg_for_mode(struct dsi_panel *panel,
 	config->video_timing.dsc_enabled = mode->priv_info->dsc_enabled;
 	config->video_timing.dsc = &mode->priv_info->dsc;
 
-	config->bit_clk_rate_hz_override = mode->priv_info->clk_rate_hz;
+	if (dyn_clk_caps->dyn_clk_support)
+		config->bit_clk_rate_hz_override = mode->timing.clk_rate_hz;
+	else
+		config->bit_clk_rate_hz_override = mode->priv_info->clk_rate_hz;
+
 	config->esc_clk_rate_hz = 19200000;
 	mutex_unlock(&panel->panel_lock);
 	return rc;
@@ -3581,10 +3803,14 @@ int dsi_panel_set_lp1(struct dsi_panel *panel)
 	}
 
 	mutex_lock(&panel->panel_lock);
+	if (!panel->panel_initialized)
+		goto exit;
+
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LP1);
 	if (rc)
 		pr_err("[%s] failed to send DSI_CMD_SET_LP1 cmd, rc=%d\n",
 		       panel->name, rc);
+exit:
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -3599,10 +3825,14 @@ int dsi_panel_set_lp2(struct dsi_panel *panel)
 	}
 
 	mutex_lock(&panel->panel_lock);
+	if (!panel->panel_initialized)
+		goto exit;
+
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LP2);
 	if (rc)
 		pr_err("[%s] failed to send DSI_CMD_SET_LP2 cmd, rc=%d\n",
 		       panel->name, rc);
+exit:
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -3617,10 +3847,14 @@ int dsi_panel_set_nolp(struct dsi_panel *panel)
 	}
 
 	mutex_lock(&panel->panel_lock);
+	if (!panel->panel_initialized)
+		goto exit;
+
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_NOLP);
 	if (rc)
 		pr_err("[%s] failed to send DSI_CMD_SET_NOLP cmd, rc=%d\n",
 		       panel->name, rc);
+exit:
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -3665,7 +3899,7 @@ static int dsi_panel_roi_prepare_dcs_cmds(struct dsi_panel_cmd_set *set,
 	int rc = 0;
 
 	/* DTYPE_DCS_LWRITE */
-	static char *caset, *paset;
+	char *caset, *paset;
 
 	set->cmds = NULL;
 
@@ -3812,6 +4046,7 @@ int dsi_panel_send_roi_dcs(struct dsi_panel *panel, int ctrl_idx,
 	mutex_unlock(&panel->panel_lock);
 
 	dsi_panel_destroy_cmd_packets(set);
+	dsi_panel_dealloc_cmd_packets(set);
 
 	return rc;
 }
@@ -3948,11 +4183,11 @@ int dsi_panel_enable(struct dsi_panel *panel)
 	mutex_lock(&panel->panel_lock);
 
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_ON);
-	if (rc) {
+	if (rc)
 		pr_err("[%s] failed to send DSI_CMD_SET_ON cmds, rc=%d\n",
 		       panel->name, rc);
-	}
-	panel->panel_initialized = true;
+	else
+		panel->panel_initialized = true;
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }

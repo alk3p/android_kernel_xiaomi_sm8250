@@ -917,6 +917,8 @@ static void dp_display_clean(struct dp_display_private *dp)
 			continue;
 
 		dp_panel = dp->active_panels[idx];
+		if (dp_panel->audio_supported)
+			dp_panel->audio->off(dp_panel->audio);
 
 		dp_display_stream_pre_disable(dp, dp_panel);
 		dp_display_stream_disable(dp, dp_panel);
@@ -924,6 +926,7 @@ static void dp_display_clean(struct dp_display_private *dp)
 	}
 
 	dp->power_on = false;
+	dp->is_connected = false;
 
 	dp->ctrl->off(dp->ctrl);
 }
@@ -1026,8 +1029,14 @@ static void dp_display_mst_attention(struct dp_display_private *dp)
 
 	if (dp->mst.mst_active && dp->mst.cbs.hpd_irq) {
 		hpd_irq.mst_hpd_sim = dp->debug->mst_hpd_sim;
+		hpd_irq.mst_sim_add_con = dp->debug->mst_sim_add_con;
+		hpd_irq.mst_sim_remove_con = dp->debug->mst_sim_remove_con;
+		hpd_irq.mst_sim_remove_con_id = dp->debug->mst_sim_remove_con_id;
+		hpd_irq.edid = dp->debug->get_edid(dp->debug);
 		dp->mst.cbs.hpd_irq(&dp->dp_display, &hpd_irq);
 		dp->debug->mst_hpd_sim = false;
+		dp->debug->mst_sim_add_con = false;
+		dp->debug->mst_sim_remove_con = false;
 	}
 
 	DP_MST_DEBUG("mst_attention_work. mst_active:%d\n", dp->mst.mst_active);
@@ -1860,7 +1869,8 @@ end:
 
 static enum drm_mode_status dp_display_validate_mode(
 		struct dp_display *dp_display,
-		void *panel, struct drm_display_mode *mode)
+		void *panel, struct drm_display_mode *mode,
+		const struct msm_resource_caps_info *avail_res)
 {
 	struct dp_display_private *dp;
 	struct drm_dp_link *link_info;
@@ -1873,8 +1883,10 @@ static enum drm_mode_status dp_display_validate_mode(
 	int hdis, vdis, vref, ar, _hdis, _vdis, _vref, _ar, rate;
 	struct dp_display_mode dp_mode;
 	bool dsc_en;
+	u32 num_lm = 0;
 
-	if (!dp_display || !mode || !panel) {
+	if (!dp_display || !mode || !panel ||
+			!avail_res || !avail_res->max_mixer_width) {
 		pr_err("invalid params\n");
 		return mode_status;
 	}
@@ -1914,6 +1926,15 @@ static enum drm_mode_status dp_display_validate_mode(
 	if (mode->clock > dp_display->max_pclk_khz) {
 		DP_MST_DEBUG("clk:%d, max:%d\n", mode->clock,
 				dp_display->max_pclk_khz);
+		goto end;
+	}
+
+	num_lm = (avail_res->max_mixer_width <= mode->hdisplay) ?
+			2 : 1;
+	if (num_lm > avail_res->num_lm ||
+			(num_lm == 2 && !avail_res->num_3dmux)) {
+		DP_MST_DEBUG("num_lm:%d, req lm:%d 3dmux:%d\n", num_lm,
+				avail_res->num_lm, avail_res->num_3dmux);
 		goto end;
 	}
 
