@@ -525,6 +525,23 @@ enum wlan_op_mode {
 };
 
 /**
+ * enum wlan_op_subtype - Virtual device subtype
+ * @wlan_op_subtype_none: Subtype not applicable
+ * @wlan_op_subtype_p2p_device: P2P device
+ * @wlan_op_subtye_p2p_cli: P2P Client
+ * @wlan_op_subtype_p2p_go: P2P GO
+ *
+ * This enum lists the subtypes of a particular virtual
+ * device.
+ */
+enum wlan_op_subtype {
+	wlan_op_subtype_none,
+	wlan_op_subtype_p2p_device,
+	wlan_op_subtype_p2p_cli,
+	wlan_op_subtype_p2p_go,
+};
+
+/**
  * connectivity_stats_pkt_status - data pkt type
  * @PKT_TYPE_REQ: Request packet
  * @PKT_TYPE_RSP: Response packet
@@ -615,6 +632,15 @@ typedef bool (*ol_txrx_tx_flow_control_is_pause_fp)(void *osif_dev);
  * @msdu_list - list of network buffers
  */
 typedef QDF_STATUS(*ol_txrx_rx_fp)(void *osif_dev, qdf_nbuf_t msdu_list);
+
+/**
+ * ol_txrx_rx_gro_flush_ind - function to send GRO flush indication to stack
+ * for a given RX Context Id.
+ * @osif_dev - handle to the OSIF virtual device object
+ * @rx_ctx_id - Rx context Id for which gro flush should happen
+ */
+typedef QDF_STATUS(*ol_txrx_rx_gro_flush_ind_fp)(void *osif_dev,
+						 int rx_ctx_id);
 
 /**
  * ol_txrx_stats_rx_fp - receive function to hand batches of data
@@ -735,6 +761,7 @@ typedef void (*ol_txrx_pktdump_cb)(ol_txrx_soc_handle soc,
  * @rx.stack - function to give packets to the stack. Differs from @rx.rx.
  * In case RX Threads are enabled, this pointer holds the callback to give
  * packets to the stack.
+ * @rx.rx_gro_flush - GRO flush indication to stack for a given RX CTX ID
  * @rx.wai_check - the tx function pointer for WAPI frames
  * @rx.mon - the OS shim rx monitor function to deliver
  * monitor data to Though in practice, it is probable
@@ -767,6 +794,7 @@ struct ol_txrx_ops {
 	struct {
 		ol_txrx_rx_fp           rx;
 		ol_txrx_rx_fp           rx_stack;
+		ol_txrx_rx_gro_flush_ind_fp           rx_gro_flush;
 		ol_txrx_rx_check_wai_fp wai_check;
 		ol_txrx_rx_mon_fp       mon;
 		ol_txrx_stats_rx_fp           stats_rx;
