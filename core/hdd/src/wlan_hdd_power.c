@@ -1612,10 +1612,8 @@ static int __wlan_hdd_cfg80211_resume_wlan(struct wiphy *wiphy)
 		goto exit_with_code;
 	}
 
-	if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam() ||
-	    QDF_GLOBAL_MONITOR_MODE == hdd_get_conparam()) {
-		hdd_err("Command not allowed in mode %d",
-			hdd_get_conparam());
+	if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam()) {
+		hdd_err("Command not allowed in FTM mode");
 		exit_code = -EINVAL;
 		goto exit_with_code;
 	}
@@ -1719,10 +1717,8 @@ static int __wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 
 	hdd_enter();
 
-	if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam() ||
-	    QDF_GLOBAL_MONITOR_MODE == hdd_get_conparam()) {
-		hdd_err("Command not allowed in mode %d",
-			hdd_get_conparam());
+	if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam()) {
+		hdd_err("Command not allowed in FTM mode");
 		return -EINVAL;
 	}
 
