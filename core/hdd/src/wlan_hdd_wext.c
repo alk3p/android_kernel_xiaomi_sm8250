@@ -3115,7 +3115,7 @@ void hdd_wlan_get_stats(struct hdd_adapter *adapter, uint16_t *length,
 			"\n[classified] BK %u, BE %u, VI %u, VO %u"
 			"\n\nReceive[%lu] - "
 			"packets %u, dropped %u, unsolict_arp_n_mcast_drp %u, delivered %u, refused %u\n"
-			"GRO - agg %u non-agg %u disabled(conc %u low-tput %u)\n",
+			"GRO - agg %u non-agg %u flush-skip %u disabled(conc %u low-tput %u)\n",
 			qdf_system_ticks(),
 			stats->tx_called,
 			stats->tx_dropped,
@@ -3134,6 +3134,7 @@ void hdd_wlan_get_stats(struct hdd_adapter *adapter, uint16_t *length,
 			total_rx_delv,
 			total_rx_refused,
 			stats->rx_aggregated, stats->rx_non_aggregated,
+			stats->rx_gro_flush_skip,
 			qdf_atomic_read(&hdd_ctx->disable_rx_ol_in_concurrency),
 			qdf_atomic_read(&hdd_ctx->disable_rx_ol_in_low_tput));
 
@@ -4866,6 +4867,13 @@ static int hdd_we_set_amsdu(struct hdd_adapter *adapter, int amsdu)
 		return -EINVAL;
 	}
 
+	status = ucfg_mlme_set_max_amsdu_num(hdd_ctx->psoc,
+					     amsdu);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		hdd_err("Failed to set Max AMSDU Num to cfg");
+		return -EINVAL;
+	}
+
 	if (amsdu > 1)
 		sme_set_amsdu(mac_handle, true);
 	else
@@ -4878,11 +4886,6 @@ static int hdd_we_set_amsdu(struct hdd_adapter *adapter, int amsdu)
 		hdd_err("Failed to set firmware, errno %d", errno);
 		return errno;
 	}
-
-	status = ucfg_mlme_set_max_amsdu_num(hdd_ctx->psoc,
-					     amsdu);
-	if (QDF_IS_STATUS_ERROR(status))
-		hdd_err("Failed to set Max AMSDU Num to cfg");
 
 	return 0;
 }

@@ -375,8 +375,20 @@ static int check_for_probe_defer(int ret)
 }
 #endif
 
-void hdd_soc_idle_restart_lock(void)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0))
+static void hdd_abort_system_suspend(struct device *dev)
 {
+	pm_wakeup_hard_event(dev);
+}
+#else
+static void hdd_abort_system_suspend(struct device *dev)
+{
+}
+#endif
+
+void hdd_soc_idle_restart_lock(struct device *dev)
+{
+	hdd_abort_system_suspend(dev);
 	hdd_prevent_suspend(WIFI_POWER_EVENT_WAKELOCK_DRIVER_IDLE_RESTART);
 }
 
@@ -1308,6 +1320,9 @@ static int wlan_hdd_runtime_suspend(struct device *dev)
 						   hdd_pld_runtime_suspend_cb);
 	err = qdf_status_to_os_return(status);
 
+	if (status == QDF_STATUS_SUCCESS)
+		hdd_bus_bw_compute_timer_stop(hdd_ctx);
+
 	hdd_debug("Runtime suspend done result: %d", err);
 
 	return err;
@@ -1355,8 +1370,12 @@ static int wlan_hdd_runtime_resume(struct device *dev)
 
 	status = ucfg_pmo_psoc_bus_runtime_resume(hdd_ctx->psoc,
 						  hdd_pld_runtime_resume_cb);
-	if (status != QDF_STATUS_SUCCESS)
+	if (status != QDF_STATUS_SUCCESS) {
 		hdd_err("PMO Runtime resume failed: %d", status);
+	} else {
+		if (policy_mgr_get_connection_count(hdd_ctx->psoc))
+			hdd_bus_bw_compute_timer_start(hdd_ctx);
+	}
 
 	hdd_debug("Runtime resume done");
 

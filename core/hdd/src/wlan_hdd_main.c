@@ -4542,7 +4542,13 @@ static void hdd_cleanup_adapter(struct hdd_context *hdd_ctx,
 		return;
 	}
 
-	hdd_nud_deinit_tracking(adapter);
+	/*
+	 * NUD tracking is enabled only for STA mode
+	 */
+	if (adapter->device_mode == QDF_STA_MODE &&
+	    hdd_ctx->config->enable_nud_tracking)
+		hdd_nud_deinit_tracking(adapter);
+
 	qdf_mutex_destroy(&adapter->disconnection_status_lock);
 	hdd_apf_context_destroy(adapter);
 	qdf_spinlock_destroy(&adapter->vdev_lock);
@@ -7488,7 +7494,6 @@ void hdd_wlan_exit(struct hdd_context *hdd_ctx)
 
 	hdd_wlan_stop_modules(hdd_ctx, false);
 
-	hdd_bus_bw_compute_timer_stop(hdd_ctx);
 	hdd_bus_bandwidth_deinit(hdd_ctx);
 	hdd_driver_memdump_deinit();
 
@@ -9450,7 +9455,7 @@ static int __hdd_psoc_idle_restart(struct hdd_context *hdd_ctx)
 {
 	int ret;
 
-	hdd_soc_idle_restart_lock();
+	hdd_soc_idle_restart_lock(hdd_ctx->parent_dev);
 
 	ret = hdd_wlan_start_modules(hdd_ctx, false);
 
@@ -9483,7 +9488,7 @@ int hdd_trigger_psoc_idle_restart(struct hdd_context *hdd_ctx)
 		return 0;
 	}
 
-	hdd_soc_idle_restart_lock();
+	hdd_soc_idle_restart_lock(hdd_ctx->parent_dev);
 	ret = pld_idle_restart(hdd_ctx->parent_dev, hdd_psoc_idle_restart);
 	hdd_soc_idle_restart_unlock();
 
@@ -11524,6 +11529,7 @@ int hdd_wlan_stop_modules(struct hdd_context *hdd_ctx, bool ftm_mode)
 			hdd_psoc_idle_timer_start(hdd_ctx);
 			cds_set_module_stop_in_progress(false);
 
+			hdd_bus_bw_compute_timer_stop(hdd_ctx);
 			return 0;
 		}
 	}
@@ -11671,6 +11677,7 @@ int hdd_wlan_stop_modules(struct hdd_context *hdd_ctx, bool ftm_mode)
 	hdd_info("Wlan transitioned (now CLOSED)");
 
 	pld_request_bus_bandwidth(hdd_ctx->parent_dev, PLD_BUS_WIDTH_NONE);
+	hdd_bus_bw_compute_timer_stop(hdd_ctx);
 
 done:
 	cds_set_module_stop_in_progress(false);
@@ -13770,7 +13777,7 @@ static int hdd_mode_change_psoc_idle_restart(struct device *dev)
 
 	if (!hdd_ctx)
 		return -EINVAL;
-	hdd_soc_idle_restart_lock();
+	hdd_soc_idle_restart_lock(dev);
 	ret = hdd_wlan_start_modules(hdd_ctx, false);
 	hdd_soc_idle_restart_unlock();
 
