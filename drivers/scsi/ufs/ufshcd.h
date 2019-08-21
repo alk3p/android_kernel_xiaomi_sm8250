@@ -412,6 +412,7 @@ struct ufs_hba_variant_ops {
  *						   according to tag parameter
  * @crypto_engine_reset: perform reset to the cryptographic engine
  * @crypto_engine_get_status: get errors status of the cryptographic engine
+ * @crypto_get_req_status: Check if crypto driver still holds request or not
  */
 struct ufs_hba_crypto_variant_ops {
 	int	(*crypto_req_setup)(struct ufs_hba *hba,
@@ -424,6 +425,7 @@ struct ufs_hba_crypto_variant_ops {
 					 struct request *req);
 	int	(*crypto_engine_reset)(struct ufs_hba *hba);
 	int	(*crypto_engine_get_status)(struct ufs_hba *hba, u32 *status);
+	int     (*crypto_get_req_status)(struct ufs_hba *);
 };
 
 /**
@@ -1659,4 +1661,14 @@ static inline unsigned int ufshcd_vops_get_user_cap_mode(struct ufs_hba *hba)
 		return hba->var->vops->get_user_cap_mode(hba);
 	return 0;
 }
+
+static inline int ufshcd_vops_crypto_engine_get_req_status(struct ufs_hba *hba)
+
+{
+	if (hba->var && hba->var->crypto_vops &&
+	    hba->var->crypto_vops->crypto_get_req_status)
+		return hba->var->crypto_vops->crypto_get_req_status(hba);
+	return 0;
+}
+
 #endif /* End of Header */
