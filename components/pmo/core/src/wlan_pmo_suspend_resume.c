@@ -25,6 +25,7 @@
 #include "wlan_pmo_main.h"
 #include "wlan_pmo_obj_mgmt_public_struct.h"
 #include "wlan_pmo_lphb.h"
+#include "wlan_pmo_hw_filter.h"
 #include "wlan_pmo_suspend_resume.h"
 #include "cdp_txrx_ops.h"
 #include "cdp_txrx_misc.h"
@@ -421,6 +422,32 @@ void pmo_core_configure_dynamic_wake_events(struct wlan_objmgr_psoc *psoc)
 
 }
 
+static void pmo_core_enable_runtime_pm_offloads(struct wlan_objmgr_psoc *psoc)
+{
+	uint8_t vdev_id;
+	struct wlan_objmgr_vdev *vdev;
+
+	/* Iterate through VDEV list */
+	for (vdev_id = 0; vdev_id < WLAN_UMAC_PSOC_MAX_VDEVS; vdev_id++) {
+		vdev = pmo_psoc_get_vdev(psoc, vdev_id);
+		if (!vdev)
+			continue;
+	}
+}
+
+static void pmo_core_disable_runtime_pm_offloads(struct wlan_objmgr_psoc *psoc)
+{
+	uint8_t vdev_id;
+	struct wlan_objmgr_vdev *vdev;
+
+	/* Iterate through VDEV list */
+	for (vdev_id = 0; vdev_id < WLAN_UMAC_PSOC_MAX_VDEVS; vdev_id++) {
+		vdev = pmo_psoc_get_vdev(psoc, vdev_id);
+		if (!vdev)
+			continue;
+	}
+}
+
 /**
  * pmo_core_psoc_configure_suspend(): configure suspend req events
  * @psoc: objmgr psoc
@@ -438,6 +465,9 @@ static QDF_STATUS pmo_core_psoc_configure_suspend(struct wlan_objmgr_psoc *psoc,
 	pmo_enter();
 
 	psoc_ctx = pmo_psoc_get_priv(psoc);
+
+	if (is_runtime_pm)
+		pmo_core_enable_runtime_pm_offloads(psoc);
 
 	if (pmo_core_is_wow_applicable(psoc)) {
 		pmo_debug("WOW Suspend");
@@ -645,6 +675,8 @@ static QDF_STATUS pmo_core_psoc_configure_resume(struct wlan_objmgr_psoc *psoc,
 	pmo_enter();
 
 	psoc_ctx = pmo_psoc_get_priv(psoc);
+	if (is_runtime_pm)
+		pmo_core_disable_runtime_pm_offloads(psoc);
 
 	/*
 	 * For runtime PM, since system is awake, DTIM related commands
@@ -767,11 +799,15 @@ pmo_core_enable_wow_in_fw(struct wlan_objmgr_psoc *psoc,
 		psoc_ctx->wow.wow_state = pmo_wow_state_unified_d0;
 	}
 
-	if (qdf_is_drv_connected()) {
-		pmo_info("drv wow is enabled");
-		param.flags |= WMI_WOW_FLAG_ENABLE_DRV_PCIE_L1SS_SLEEP;
+	if (htc_can_suspend_link(pmo_core_psoc_get_htc_handle(psoc))) {
+		if (qdf_is_drv_connected()) {
+			pmo_info("drv wow is enabled");
+			param.flags |= WMI_WOW_FLAG_ENABLE_DRV_PCIE_L1SS_SLEEP;
+		} else {
+			pmo_info("non-drv wow is enabled");
+		}
 	} else {
-		pmo_info("non-drv wow is enabled");
+		pmo_info("Prevent link down, non-drv wow is enabled");
 	}
 
 	status = pmo_tgt_psoc_send_wow_enable_req(psoc, &param);

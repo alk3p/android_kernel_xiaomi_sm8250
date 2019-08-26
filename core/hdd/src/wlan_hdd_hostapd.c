@@ -2870,6 +2870,7 @@ int hdd_softap_set_channel_change(struct net_device *dev, int target_channel,
 	struct hdd_context *hdd_ctx = NULL;
 	struct hdd_adapter *sta_adapter;
 	struct hdd_station_ctx *sta_ctx;
+	struct sap_context *sap_ctx;
 	uint8_t conc_rule1 = 0;
 	uint8_t scc_on_lte_coex = 0;
 	bool is_p2p_go_session = false;
@@ -2879,6 +2880,12 @@ int hdd_softap_set_channel_change(struct net_device *dev, int target_channel,
 	if (ret)
 		return ret;
 
+	if (adapter->device_mode != QDF_SAP_MODE &&
+	    adapter->device_mode != QDF_P2P_GO_MODE)
+		return -EINVAL;
+	sap_ctx = WLAN_HDD_GET_SAP_CTX_PTR(adapter);
+	if (!sap_ctx)
+		return -EINVAL;
 	/*
 	 * If sta connection is in progress do not allow SAP channel change from
 	 * user space as it may change the HW mode requirement, for which sta is
@@ -2943,7 +2950,9 @@ int hdd_softap_set_channel_change(struct net_device *dev, int target_channel,
 				policy_mgr_convert_device_mode_to_qdf_type(
 					adapter->device_mode),
 				target_channel,
-				adapter->vdev_id)) {
+				adapter->vdev_id,
+				forced,
+				sap_ctx->csa_reason)) {
 		hdd_err("Channel switch failed due to concurrency check failure");
 		qdf_atomic_set(&adapter->ch_switch_in_progress, 0);
 		return -EINVAL;
@@ -3147,7 +3156,7 @@ QDF_STATUS wlan_hdd_get_channel_for_sap_restart(
 	 * Need to take care of 3 port cases with 2 STA iface in future.
 	 */
 	intf_ch = wlansap_check_cc_intf(hdd_ap_ctx->sap_context);
-	hdd_info("intf_ch: %d", intf_ch);
+	hdd_info("sap_vdev %d intf_ch: %d", vdev_id, intf_ch);
 	if (QDF_MCC_TO_SCC_SWITCH_FORCE_PREFERRED_WITHOUT_DISCONNECTION !=
 		mcc_to_scc_switch) {
 		policy_mgr_get_chan_by_session_id(psoc, vdev_id, &sap_ch);
@@ -5687,10 +5696,9 @@ static int __wlan_hdd_cfg80211_stop_ap(struct wiphy *wiphy,
 {
 	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
 	struct hdd_context *hdd_ctx = wiphy_priv(wiphy);
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
+	QDF_STATUS status;
 	QDF_STATUS qdf_status = QDF_STATUS_E_FAILURE;
 	tSirUpdateIE update_ie;
-	struct hdd_beacon_data *old;
 	int ret;
 	mac_handle_t mac_handle;
 
@@ -5764,12 +5772,6 @@ static int __wlan_hdd_cfg80211_stop_ap(struct wiphy *wiphy,
 				     WLAN_STOP_ALL_NETIF_QUEUE_N_CARRIER,
 				     WLAN_CONTROL_PATH);
 
-	old = adapter->session.ap.beacon;
-	if (!old) {
-		hdd_err("Session id: %d beacon data points to NULL",
-		       adapter->vdev_id);
-		return -EINVAL;
-	}
 	wlan_hdd_cleanup_actionframe(adapter);
 	wlan_hdd_cleanup_remain_on_channel_ctx(adapter);
 	mutex_lock(&hdd_ctx->sap_lock);
@@ -5799,9 +5801,17 @@ static int __wlan_hdd_cfg80211_stop_ap(struct wiphy *wiphy,
 						adapter->vdev_id);
 		hdd_green_ap_start_state_mc(hdd_ctx, adapter->device_mode,
 					    false);
-		adapter->session.ap.beacon = NULL;
-		qdf_mem_free(old);
+
+		if (adapter->session.ap.beacon) {
+			qdf_mem_free(adapter->session.ap.beacon);
+			adapter->session.ap.beacon = NULL;
+		}
+	} else {
+		hdd_debug("SAP already down");
+		mutex_unlock(&hdd_ctx->sap_lock);
+		return 0;
 	}
+
 	mutex_unlock(&hdd_ctx->sap_lock);
 
 	mac_handle = hdd_ctx->mac_handle;

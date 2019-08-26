@@ -872,7 +872,6 @@ static int con_mode;
 
 static int con_mode_ftm;
 int con_mode_epping;
-int con_mode_monitor;
 
 /* Variable to hold connection mode including module parameter con_mode */
 static int curr_con_mode;
@@ -1795,6 +1794,43 @@ static void hdd_extract_fw_version_info(struct hdd_context *hdd_ctx)
 			HDD_FW_VER_REL_ID(hdd_ctx->target_fw_vers_ext);
 }
 
+#if defined(WLAN_FEATURE_11AX) && \
+	   (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
+static void hdd_update_wiphy_he_cap(struct hdd_context *hdd_ctx)
+{
+	tDot11fIEhe_cap he_cap_cfg;
+	struct ieee80211_supported_band *band_2g =
+			hdd_ctx->wiphy->bands[HDD_NL80211_BAND_2GHZ];
+	struct ieee80211_supported_band *band_5g =
+			hdd_ctx->wiphy->bands[HDD_NL80211_BAND_5GHZ];
+	QDF_STATUS status;
+
+	status = ucfg_mlme_cfg_get_he_caps(hdd_ctx->psoc, &he_cap_cfg);
+
+	if (QDF_IS_STATUS_ERROR(status))
+		return;
+
+	if (band_2g) {
+		hdd_ctx->iftype_data_2g->types_mask =
+			(BIT(NL80211_IFTYPE_STATION) | BIT(NL80211_IFTYPE_AP));
+		hdd_ctx->iftype_data_2g->he_cap.has_he = he_cap_cfg.present;
+		band_2g->n_iftype_data = 1;
+		band_2g->iftype_data = hdd_ctx->iftype_data_2g;
+	}
+	if (band_5g) {
+		hdd_ctx->iftype_data_5g->types_mask =
+			(BIT(NL80211_IFTYPE_STATION) | BIT(NL80211_IFTYPE_AP));
+		hdd_ctx->iftype_data_5g->he_cap.has_he = he_cap_cfg.present;
+		band_5g->n_iftype_data = 1;
+		band_5g->iftype_data = hdd_ctx->iftype_data_5g;
+	}
+}
+#else
+static void hdd_update_wiphy_he_cap(struct hdd_context *hdd_ctx)
+{
+}
+#endif
+
 int hdd_update_tgt_cfg(hdd_handle_t hdd_handle, struct wma_tgt_cfg *cfg)
 {
 	int ret;
@@ -1968,6 +2004,7 @@ int hdd_update_tgt_cfg(hdd_handle_t hdd_handle, struct wma_tgt_cfg *cfg)
 	if (cfg->services.en_11ax) {
 		hdd_info("11AX: 11ax is enabled - update HDD config");
 		hdd_update_tgt_he_cap(hdd_ctx, cfg);
+		hdd_update_wiphy_he_cap(hdd_ctx);
 	}
 	hdd_update_tgt_twt_cap(hdd_ctx, cfg);
 
@@ -2816,6 +2853,70 @@ static inline void hdd_check_for_leaks(struct hdd_context *hdd_ctx, bool is_ssr)
 #define hdd_debug_domain_set(domain)
 #endif /* CONFIG_LEAK_DETECTION */
 
+#ifdef FEATURE_WLAN_AP_AP_ACS_OPTIMIZE
+/**
+ * hdd_skip_acs_scan_timer_handler() - skip ACS scan timer timeout handler
+ * @data: pointer to struct hdd_context
+ *
+ * This function will reset acs_scan_status to eSAP_DO_NEW_ACS_SCAN.
+ * Then new ACS request will do a fresh scan without reusing the cached
+ * scan information.
+ *
+ * Return: void
+ */
+static void hdd_skip_acs_scan_timer_handler(void *data)
+{
+	struct hdd_context *hdd_ctx = data;
+	mac_handle_t mac_handle;
+
+	hdd_debug("ACS Scan result expired. Reset ACS scan skip");
+	hdd_ctx->skip_acs_scan_status = eSAP_DO_NEW_ACS_SCAN;
+	qdf_spin_lock(&hdd_ctx->acs_skip_lock);
+	qdf_mem_free(hdd_ctx->last_acs_channel_list);
+	hdd_ctx->last_acs_channel_list = NULL;
+	hdd_ctx->num_of_channels = 0;
+	qdf_spin_unlock(&hdd_ctx->acs_skip_lock);
+
+	mac_handle = hdd_ctx->mac_handle;
+	if (!mac_handle)
+		return;
+}
+
+static void hdd_skip_acs_scan_timer_init(struct hdd_context *hdd_ctx)
+{
+	QDF_STATUS status;
+
+	status = qdf_mc_timer_init(&hdd_ctx->skip_acs_scan_timer,
+				   QDF_TIMER_TYPE_SW,
+				   hdd_skip_acs_scan_timer_handler,
+				   hdd_ctx);
+	if (QDF_IS_STATUS_ERROR(status))
+		hdd_err("Failed to init ACS Skip timer");
+	qdf_spinlock_create(&hdd_ctx->acs_skip_lock);
+}
+
+static void hdd_skip_acs_scan_timer_deinit(struct hdd_context *hdd_ctx)
+{
+	if (QDF_TIMER_STATE_RUNNING ==
+	    qdf_mc_timer_get_current_state(&hdd_ctx->skip_acs_scan_timer)) {
+		qdf_mc_timer_stop(&hdd_ctx->skip_acs_scan_timer);
+	}
+
+	if (!QDF_IS_STATUS_SUCCESS
+		    (qdf_mc_timer_destroy(&hdd_ctx->skip_acs_scan_timer))) {
+		hdd_err("Cannot deallocate ACS Skip timer");
+	}
+	qdf_spin_lock(&hdd_ctx->acs_skip_lock);
+	qdf_mem_free(hdd_ctx->last_acs_channel_list);
+	hdd_ctx->last_acs_channel_list = NULL;
+	hdd_ctx->num_of_channels = 0;
+	qdf_spin_unlock(&hdd_ctx->acs_skip_lock);
+}
+#else
+static void hdd_skip_acs_scan_timer_init(struct hdd_context *hdd_ctx) {}
+static void hdd_skip_acs_scan_timer_deinit(struct hdd_context *hdd_ctx) {}
+#endif
+
 /**
  * hdd_update_country_code - Update country code
  * @hdd_ctx: HDD context
@@ -3015,6 +3116,8 @@ int hdd_wlan_start_modules(struct hdd_context *hdd_ctx, bool reinit)
 		}
 
 		hdd_enable_power_management();
+
+		hdd_skip_acs_scan_timer_init(hdd_ctx);
 
 		break;
 
@@ -7438,23 +7541,6 @@ void hdd_wlan_exit(struct hdd_context *hdd_ctx)
 
 	hdd_unregister_notifiers(hdd_ctx);
 
-#ifdef FEATURE_WLAN_AP_AP_ACS_OPTIMIZE
-	if (QDF_TIMER_STATE_RUNNING ==
-	    qdf_mc_timer_get_current_state(&hdd_ctx->skip_acs_scan_timer)) {
-		qdf_mc_timer_stop(&hdd_ctx->skip_acs_scan_timer);
-	}
-
-	if (!QDF_IS_STATUS_SUCCESS
-		    (qdf_mc_timer_destroy(&hdd_ctx->skip_acs_scan_timer))) {
-		hdd_err("Cannot deallocate ACS Skip timer");
-	}
-	qdf_spin_lock(&hdd_ctx->acs_skip_lock);
-	qdf_mem_free(hdd_ctx->last_acs_channel_list);
-	hdd_ctx->last_acs_channel_list = NULL;
-	hdd_ctx->num_of_channels = 0;
-	qdf_spin_unlock(&hdd_ctx->acs_skip_lock);
-#endif
-
 	/*
 	 * Powersave Offload Case
 	 * Disable Idle Power Save Mode
@@ -7529,36 +7615,6 @@ void hdd_wlan_exit(struct hdd_context *hdd_ctx)
 	mutex_destroy(&hdd_ctx->avoid_freq_lock);
 #endif
 }
-
-#ifdef FEATURE_WLAN_AP_AP_ACS_OPTIMIZE
-/**
- * hdd_skip_acs_scan_timer_handler() - skip ACS scan timer timeout handler
- * @data: pointer to struct hdd_context
- *
- * This function will reset acs_scan_status to eSAP_DO_NEW_ACS_SCAN.
- * Then new ACS request will do a fresh scan without reusing the cached
- * scan information.
- *
- * Return: void
- */
-static void hdd_skip_acs_scan_timer_handler(void *data)
-{
-	struct hdd_context *hdd_ctx = (struct hdd_context *) data;
-	mac_handle_t mac_handle;
-
-	hdd_debug("ACS Scan result expired. Reset ACS scan skip");
-	hdd_ctx->skip_acs_scan_status = eSAP_DO_NEW_ACS_SCAN;
-	qdf_spin_lock(&hdd_ctx->acs_skip_lock);
-	qdf_mem_free(hdd_ctx->last_acs_channel_list);
-	hdd_ctx->last_acs_channel_list = NULL;
-	hdd_ctx->num_of_channels = 0;
-	qdf_spin_unlock(&hdd_ctx->acs_skip_lock);
-
-	mac_handle = hdd_ctx->mac_handle;
-	if (!mac_handle)
-		return;
-}
-#endif
 
 /**
  * hdd_wlan_notify_modem_power_state() - notify FW with modem power status
@@ -8796,6 +8852,32 @@ int hdd_update_acs_timer_reason(struct hdd_adapter *adapter, uint8_t reason)
 
 #if defined(FEATURE_WLAN_CH_AVOID)
 /**
+ * hdd_store_sap_restart_channel() - store sap restart channel
+ * @restart_chan: restart channel
+ * @restart_chan_store: pointer to restart channel store
+ *
+ * The function will store new sap restart channel.
+ *
+ * Return - none
+ */
+static void
+hdd_store_sap_restart_channel(uint8_t restart_chan, uint8_t *restart_chan_store)
+{
+	uint8_t i;
+
+	for (i = 0; i < SAP_MAX_NUM_SESSION; i++) {
+		if (*(restart_chan_store + i) == restart_chan)
+			return;
+
+		if (*(restart_chan_store + i))
+			continue;
+
+		*(restart_chan_store + i) = restart_chan;
+		return;
+	}
+}
+
+/**
  * hdd_unsafe_channel_restart_sap() - restart sap if sap is on unsafe channel
  * @hdd_ctx: hdd context pointer
  *
@@ -8810,6 +8892,7 @@ void hdd_unsafe_channel_restart_sap(struct hdd_context *hdd_ctxt)
 	struct hdd_adapter *adapter;
 	uint32_t i;
 	bool found = false;
+	uint8_t restart_chan_store[SAP_MAX_NUM_SESSION] = {0};
 	uint8_t restart_chan;
 	uint8_t scc_on_lte_coex = 0;
 	bool value;
@@ -8858,6 +8941,9 @@ void hdd_unsafe_channel_restart_sap(struct hdd_context *hdd_ctxt)
 			}
 		}
 		if (!found) {
+			hdd_store_sap_restart_channel(
+				adapter->session.ap.operating_channel,
+				restart_chan_store);
 			hdd_debug("ch:%d is safe. no need to change channel",
 				  adapter->session.ap.operating_channel);
 			continue;
@@ -8879,10 +8965,27 @@ void hdd_unsafe_channel_restart_sap(struct hdd_context *hdd_ctxt)
 			hdd_update_acs_timer_reason(adapter,
 				QCA_WLAN_VENDOR_ACS_SELECT_REASON_LTE_COEX);
 			continue;
-		} else
+		}
+
+		restart_chan = 0;
+		for (i = 0; i < SAP_MAX_NUM_SESSION; i++) {
+			if (!restart_chan_store[i])
+				continue;
+
+			if (policy_mgr_is_force_scc(hdd_ctxt->psoc) &&
+			    WLAN_REG_IS_SAME_BAND_CHANNELS(
+							restart_chan_store[i],
+							adapter->session.ap.
+							operating_channel)) {
+				restart_chan = restart_chan_store[i];
+				break;
+			}
+		}
+		if (!restart_chan)
 			restart_chan =
 				wlansap_get_safe_channel_from_pcl_and_acs_range(
 					WLAN_HDD_GET_SAP_CTX_PTR(adapter));
+
 		if (!restart_chan) {
 			hdd_err("fail to restart SAP");
 		} else {
@@ -8902,6 +9005,9 @@ void hdd_unsafe_channel_restart_sap(struct hdd_context *hdd_ctxt)
 						CSA_REASON_UNSAFE_CHANNEL);
 				hdd_switch_sap_channel(adapter, restart_chan,
 						       true);
+				hdd_store_sap_restart_channel(
+							restart_chan,
+							restart_chan_store);
 			}
 			else {
 				hdd_debug("sending coex indication");
@@ -9368,6 +9474,7 @@ void hdd_psoc_idle_timer_start(struct hdd_context *hdd_ctx)
 	}
 
 	hdd_debug("Starting psoc idle timer");
+	timeout_ms += HDD_PSOC_IDLE_SHUTDOWN_SUSPEND_DELAY;
 	qdf_delayed_work_start(&hdd_ctx->psoc_idle_timeout_work, timeout_ms);
 	hdd_prevent_suspend_timeout(timeout_ms, reason);
 }
@@ -9438,6 +9545,7 @@ static int __hdd_mode_change_psoc_idle_shutdown(struct hdd_context *hdd_ctx)
 
 int hdd_psoc_idle_shutdown(struct device *dev)
 {
+	int ret;
 	struct hdd_context *hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 
 	if (!hdd_ctx) {
@@ -9446,9 +9554,13 @@ int hdd_psoc_idle_shutdown(struct device *dev)
 	}
 
 	if (is_mode_change_psoc_idle_shutdown)
-		return __hdd_mode_change_psoc_idle_shutdown(hdd_ctx);
+		ret = __hdd_mode_change_psoc_idle_shutdown(hdd_ctx);
 	else
-		return __hdd_psoc_idle_shutdown(hdd_ctx);
+		ret =  __hdd_psoc_idle_shutdown(hdd_ctx);
+
+	cds_set_recovery_in_progress(false);
+
+	return ret;
 }
 
 static int __hdd_psoc_idle_restart(struct hdd_context *hdd_ctx)
@@ -9503,6 +9615,7 @@ int hdd_trigger_psoc_idle_restart(struct hdd_context *hdd_ctx)
  */
 static void hdd_psoc_idle_timeout_callback(void *priv)
 {
+	int ret;
 	struct hdd_context *hdd_ctx = priv;
 
 	if (wlan_hdd_validate_context(hdd_ctx))
@@ -9510,7 +9623,11 @@ static void hdd_psoc_idle_timeout_callback(void *priv)
 
 	hdd_info("Psoc idle timeout elapsed; starting psoc shutdown");
 
-	pld_idle_shutdown(hdd_ctx->parent_dev, hdd_psoc_idle_shutdown);
+	ret = pld_idle_shutdown(hdd_ctx->parent_dev, hdd_psoc_idle_shutdown);
+	if (-EAGAIN == ret || hdd_ctx->is_wiphy_suspended) {
+		hdd_debug("System suspend in progress. Restart idle shutdown timer");
+		hdd_psoc_idle_timer_start(hdd_ctx);
+	}
 }
 
 #ifdef WLAN_LOGGING_SOCK_SVC_ENABLE
@@ -11553,6 +11670,8 @@ int hdd_wlan_stop_modules(struct hdd_context *hdd_ctx, bool ftm_mode)
 		    hdd_get_conparam() == QDF_GLOBAL_EPPING_MODE)
 			break;
 
+		hdd_skip_acs_scan_timer_deinit(hdd_ctx);
+
 		hdd_disable_power_management();
 		if (hdd_deconfigure_cds(hdd_ctx)) {
 			hdd_err("Failed to de-configure CDS");
@@ -12100,16 +12219,6 @@ int hdd_wlan_startup(struct hdd_context *hdd_ctx)
 	osif_request_manager_init();
 	hdd_driver_memdump_init();
 	hdd_bus_bandwidth_init(hdd_ctx);
-
-#ifdef FEATURE_WLAN_AP_AP_ACS_OPTIMIZE
-		status = qdf_mc_timer_init(&hdd_ctx->skip_acs_scan_timer,
-					   QDF_TIMER_TYPE_SW,
-					   hdd_skip_acs_scan_timer_handler,
-					   hdd_ctx);
-		if (QDF_IS_STATUS_ERROR(status))
-			hdd_err("Failed to init ACS Skip timer");
-		qdf_spinlock_create(&hdd_ctx->acs_skip_lock);
-#endif
 
 	errno = hdd_wlan_start_modules(hdd_ctx, false);
 	if (errno) {
@@ -14037,6 +14146,7 @@ pld_deinit:
 	hdd_driver_mode_change_unregister();
 	pld_deinit();
 
+	hdd_start_complete(errno);
 param_destroy:
 	wlan_hdd_state_ctrl_param_destroy();
 wakelock_destroy:
@@ -14321,26 +14431,6 @@ static int con_mode_handler_epping(const char *kmessage,
 
 	hdd_set_conparam(con_mode_epping);
 	con_mode = con_mode_epping;
-
-	return ret;
-}
-#endif
-
-#ifdef FEATURE_MONITOR_MODE_SUPPORT
-static int con_mode_handler_monitor(const char *kmessage,
-				    const struct kernel_param *kp)
-{
-	int ret;
-
-	ret = param_set_int(kmessage, kp);
-
-	if (con_mode_monitor != QDF_GLOBAL_MONITOR_MODE) {
-		pr_err("Only Monitor mode supported!");
-		return -ENOTSUPP;
-	}
-
-	hdd_set_conparam(con_mode_monitor);
-	con_mode = con_mode_monitor;
 
 	return ret;
 }
@@ -15360,13 +15450,6 @@ static const struct kernel_param_ops con_mode_epping_ops = {
 };
 #endif
 
-#ifdef FEATURE_MONITOR_MODE_SUPPORT
-static const struct kernel_param_ops con_mode_monitor_ops = {
-	.set = con_mode_handler_monitor,
-	.get = param_get_int,
-};
-#endif
-
 static const struct kernel_param_ops fwpath_ops = {
 	.set = fwpath_changed_handler,
 	.get = param_get_string,
@@ -15381,11 +15464,6 @@ module_param_cb(con_mode_ftm, &con_mode_ftm_ops, &con_mode_ftm,
 #ifdef WLAN_FEATURE_EPPING
 module_param_cb(con_mode_epping, &con_mode_epping_ops,
 		&con_mode_epping, 0644);
-#endif
-
-#ifdef FEATURE_MONITOR_MODE_SUPPORT
-module_param_cb(con_mode_monitor, &con_mode_monitor_ops, &con_mode_monitor,
-		S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 #endif
 
 module_param_cb(fwpath, &fwpath_ops, &fwpath,

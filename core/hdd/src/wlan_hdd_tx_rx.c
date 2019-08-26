@@ -1607,6 +1607,7 @@ QDF_STATUS hdd_gro_rx_dp_thread(struct hdd_adapter *adapter,
 {
 	struct napi_struct *napi_to_use = NULL;
 	QDF_STATUS status = QDF_STATUS_E_FAILURE;
+	struct hdd_context *hdd_ctx = adapter->hdd_ctx;
 
 	if (!adapter->hdd_ctx->enable_dp_rx_threads) {
 		hdd_dp_err_rl("gro not supported without DP RX thread!");
@@ -1621,6 +1622,9 @@ QDF_STATUS hdd_gro_rx_dp_thread(struct hdd_adapter *adapter,
 		hdd_dp_err_rl("no napi to use for GRO!");
 		return status;
 	}
+
+	if (qdf_atomic_read(&hdd_ctx->disable_rx_ol_in_low_tput))
+		return status;
 
 	status = hdd_gro_rx_bh_disable(adapter, napi_to_use, skb);
 
@@ -3087,4 +3091,25 @@ void hdd_dp_cfg_update(struct wlan_objmgr_psoc *psoc,
 	config->cfg_wmi_credit_cnt = cfg_get(psoc, CFG_DP_HTC_WMI_CREDIT_CNT);
 	hdd_dp_dp_trace_cfg_update(config, psoc);
 	hdd_dp_nud_tracking_cfg_update(config, psoc);
+}
+
+bool wlan_hdd_rx_rpm_mark_last_busy(struct hdd_context *hdd_ctx,
+				    void *hif_ctx)
+{
+	uint64_t duration_us, dp_rx_busy_us, current_us;
+	uint32_t rpm_delay_ms;
+
+	if (!hif_pm_runtime_is_dp_rx_busy(hif_ctx))
+		return false;
+
+	dp_rx_busy_us = hif_pm_runtime_get_dp_rx_busy_mark(hif_ctx);
+	current_us = qdf_get_log_timestamp_usecs();
+	duration_us = (unsigned long)((ULONG_MAX - dp_rx_busy_us) +
+				      current_us + 1);
+	rpm_delay_ms = ucfg_pmo_get_runtime_pm_delay(hdd_ctx->psoc);
+
+	if ((duration_us / 1000) < rpm_delay_ms)
+		return true;
+	else
+		return false;
 }

@@ -93,7 +93,8 @@ static struct ol_if_ops  dp_ol_if_ops = {
 	.lro_hash_config = target_if_lro_hash_config,
 	.rx_mic_error = wma_rx_mic_error_ind,
 	.rx_invalid_peer = wma_rx_invalid_peer_ind,
-	.is_roam_inprogress = wma_is_roam_in_progress
+	.is_roam_inprogress = wma_is_roam_in_progress,
+	.get_con_mode = cds_get_conparam
     /* TODO: Add any other control path calls required to OL_IF/WMA layer */
 };
 #else
@@ -738,11 +739,7 @@ QDF_STATUS cds_dp_open(struct wlan_objmgr_psoc *psoc)
 	QDF_STATUS qdf_status;
 	struct dp_txrx_config dp_config;
 
-	if (cdp_txrx_intr_attach(gp_cds_context->dp_soc)
-				!= QDF_STATUS_SUCCESS) {
-		cds_alert("Failed to attach interrupts");
-		goto close;
-	}
+	cdp_set_intr_mode(cds_get_context(QDF_MODULE_ID_SOC));
 
 	cds_set_context(QDF_MODULE_ID_TXRX,
 		cdp_pdev_attach(cds_get_context(QDF_MODULE_ID_SOC),
@@ -753,17 +750,25 @@ QDF_STATUS cds_dp_open(struct wlan_objmgr_psoc *psoc)
 		/* Critical Error ...  Cannot proceed further */
 		cds_alert("Failed to open TXRX");
 		QDF_ASSERT(0);
-		goto intr_close;
+		goto close;
+	}
+
+	if (cdp_txrx_intr_attach(gp_cds_context->dp_soc)
+				!= QDF_STATUS_SUCCESS) {
+		cds_alert("Failed to attach interrupts");
+		goto pdev_detach;
 	}
 
 	dp_config.enable_rx_threads =
-		gp_cds_context->cds_cfg->enable_dp_rx_threads;
+		(cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE) ?
+		false : gp_cds_context->cds_cfg->enable_dp_rx_threads;
+
 	qdf_status = dp_txrx_init(cds_get_context(QDF_MODULE_ID_SOC),
 				  cds_get_context(QDF_MODULE_ID_TXRX),
 				  &dp_config);
 
 	if (!QDF_IS_STATUS_SUCCESS(qdf_status))
-		goto pdev_detach;
+		goto intr_close;
 
 	ucfg_pmo_psoc_set_txrx_handle(psoc, gp_cds_context->pdev_txrx_ctx);
 	ucfg_ocb_set_txrx_handle(psoc, gp_cds_context->pdev_txrx_ctx);
@@ -772,11 +777,13 @@ QDF_STATUS cds_dp_open(struct wlan_objmgr_psoc *psoc)
 
 	return 0;
 
+intr_close:
+	cdp_txrx_intr_detach(gp_cds_context->dp_soc);
+
 pdev_detach:
 	cdp_pdev_detach(gp_cds_context->dp_soc,
 			cds_get_context(QDF_MODULE_ID_TXRX), false);
-intr_close:
-	cdp_txrx_intr_detach(gp_cds_context->dp_soc);
+
 close:
 	return QDF_STATUS_E_FAILURE;
 }

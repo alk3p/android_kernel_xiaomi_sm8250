@@ -186,6 +186,7 @@ static inline bool in_compat_syscall(void) { return is_compat_task(); }
 #define NUM_CPUS 1
 #endif
 
+#define HDD_PSOC_IDLE_SHUTDOWN_SUSPEND_DELAY (1000)
 /**
  * enum hdd_adapter_flags - event bitmap flags registered net device
  * @NET_DEVICE_REGISTERED: Adapter is registered with the kernel
@@ -1622,6 +1623,8 @@ struct hdd_fw_ver_info {
  * struct hdd_context - hdd shared driver and psoc/device context
  * @psoc: object manager psoc context
  * @pdev: object manager pdev context
+ * @iftype_data_2g: Interface data for 2g band
+ * @iftype_data_5g: Interface data for 5g band
  * @bus_bw_work: work for periodically computing DDR bus bandwidth requirements
  * @g_event_flags: a bitmap of hdd_driver_flags
  * @psoc_idle_timeout_work: delayed work for psoc idle shutdown
@@ -1653,6 +1656,11 @@ struct hdd_context {
 	/* Pointer for wiphy 2G/5G band channels */
 	struct ieee80211_channel *channels_2ghz;
 	struct ieee80211_channel *channels_5ghz;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
+	struct ieee80211_sband_iftype_data *iftype_data_2g;
+	struct ieee80211_sband_iftype_data *iftype_data_5g;
+#endif
 
 	/* Completion  variable to indicate Mc Thread Suspended */
 	struct completion mc_sus_event_var;
