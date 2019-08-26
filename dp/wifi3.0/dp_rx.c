@@ -1613,10 +1613,14 @@ void dp_rx_deliver_to_stack_no_peer(struct dp_soc *soc, qdf_nbuf_t nbuf)
 	msdu_len = QDF_NBUF_CB_RX_PKT_LEN(nbuf);
 	pkt_len = msdu_len + l2_hdr_offset + RX_PKT_TLVS_LEN;
 
-	qdf_nbuf_set_pktlen(nbuf, pkt_len);
-	qdf_nbuf_pull_head(nbuf,
-			   RX_PKT_TLVS_LEN +
-			   l2_hdr_offset);
+	if (qdf_unlikely(qdf_nbuf_is_frag(nbuf))) {
+		qdf_nbuf_pull_head(nbuf, RX_PKT_TLVS_LEN);
+	} else {
+		qdf_nbuf_set_pktlen(nbuf, pkt_len);
+		qdf_nbuf_pull_head(nbuf,
+				   RX_PKT_TLVS_LEN +
+				   l2_hdr_offset);
+	}
 
 	/* only allow special frames */
 	if (!dp_is_special_data(nbuf))
@@ -1704,7 +1708,7 @@ uint32_t dp_rx_process(struct dp_intr *int_ctx, void *hal_ring,
 	qdf_assert_always(hal_soc);
 
 	scn = soc->hif_handle;
-	hif_pm_runtime_mark_last_busy(scn);
+	hif_pm_runtime_mark_dp_rx_busy(scn);
 	intr_id = int_ctx->dp_intr_id;
 
 more_data:
@@ -2174,7 +2178,7 @@ done:
 				goto more_data;
 		}
 
-		if (vdev->osif_gro_flush && rx_ol_pkt_cnt) {
+		if (vdev && vdev->osif_gro_flush && rx_ol_pkt_cnt) {
 			vdev->osif_gro_flush(vdev->osif_vdev,
 					     reo_ring_num);
 		}

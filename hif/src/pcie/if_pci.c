@@ -1129,7 +1129,8 @@ static void hif_pm_runtime_start(struct hif_pci_softc *sc)
 		return;
 	}
 
-	if (mode == QDF_GLOBAL_FTM_MODE || QDF_IS_EPPING_ENABLED(mode)) {
+	if (mode == QDF_GLOBAL_FTM_MODE || QDF_IS_EPPING_ENABLED(mode) ||
+	    mode == QDF_GLOBAL_MONITOR_MODE) {
 		HIF_INFO("%s: RUNTIME PM is disabled for FTM/EPPING mode\n",
 				__func__);
 		return;
@@ -1162,7 +1163,8 @@ static void hif_pm_runtime_stop(struct hif_pci_softc *sc)
 	if (!ol_sc->hif_config.enable_runtime_pm)
 		return;
 
-	if (mode == QDF_GLOBAL_FTM_MODE || QDF_IS_EPPING_ENABLED(mode))
+	if (mode == QDF_GLOBAL_FTM_MODE || QDF_IS_EPPING_ENABLED(mode) ||
+	    mode == QDF_GLOBAL_MONITOR_MODE)
 		return;
 
 	hif_runtime_exit(sc->dev);
@@ -2845,6 +2847,7 @@ void hif_process_runtime_resume_success(struct hif_opaque_softc *hif_ctx)
  */
 int hif_runtime_suspend(struct hif_opaque_softc *hif_ctx)
 {
+	struct hif_pci_softc *sc = HIF_GET_PCI_SOFTC(hif_ctx);
 	int errno;
 
 	errno = hif_bus_suspend(hif_ctx);
@@ -2861,6 +2864,8 @@ int hif_runtime_suspend(struct hif_opaque_softc *hif_ctx)
 		hif_pm_runtime_set_monitor_wake_intr(hif_ctx, 0);
 		goto bus_resume;
 	}
+
+	qdf_atomic_set(&sc->pm_dp_rx_busy, 0);
 
 	return 0;
 
@@ -4503,6 +4508,58 @@ void hif_pm_runtime_set_monitor_wake_intr(struct hif_opaque_softc *hif_ctx,
 
 	qdf_atomic_set(&sc->monitor_wake_intr, val);
 }
+
+/**
+ * hif_pm_runtime_mark_dp_rx_busy() - Set last busy mark my data path
+ * @hif_ctx: HIF context
+ *
+ * Return: void
+ */
+void hif_pm_runtime_mark_dp_rx_busy(struct hif_opaque_softc *hif_ctx)
+{
+	struct hif_pci_softc *sc = HIF_GET_PCI_SOFTC(hif_ctx);
+
+	if (!sc)
+		return;
+
+	qdf_atomic_set(&sc->pm_dp_rx_busy, 1);
+	sc->dp_last_busy_timestamp = qdf_get_log_timestamp_usecs();
+
+	hif_pm_runtime_mark_last_busy(hif_ctx);
+}
+
+/**
+ * hif_pm_runtime_is_dp_rx_busy() - Check if last mark busy by dp rx
+ * @hif_ctx: HIF context
+ *
+ * Return: dp rx busy set value
+ */
+int hif_pm_runtime_is_dp_rx_busy(struct hif_opaque_softc *hif_ctx)
+{
+	struct hif_pci_softc *sc = HIF_GET_PCI_SOFTC(hif_ctx);
+
+	if (!sc)
+		return 0;
+
+	return qdf_atomic_read(&sc->pm_dp_rx_busy);
+}
+
+/**
+ * hif_pm_runtime_get_dp_rx_busy_mark() - Get last busy by dp rx timestamp
+ * @hif_ctx: HIF context
+ *
+ * Return: timestamp of last mark busy by dp rx
+ */
+qdf_time_t hif_pm_runtime_get_dp_rx_busy_mark(struct hif_opaque_softc *hif_ctx)
+{
+	struct hif_pci_softc *sc = HIF_GET_PCI_SOFTC(hif_ctx);
+
+	if (!sc)
+		return 0;
+
+	return sc->dp_last_busy_timestamp;
+}
+
 #endif /* FEATURE_RUNTIME_PM */
 
 int hif_pci_legacy_map_ce_to_irq(struct hif_softc *scn, int ce_id)
