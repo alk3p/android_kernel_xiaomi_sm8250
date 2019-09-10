@@ -3094,7 +3094,8 @@ static QDF_STATUS send_scan_chan_list_cmd_tlv(wmi_unified_t wmi_handle,
 					    tchan_info->reg_class_id);
 		WMI_SET_CHANNEL_MAX_TX_POWER(chan_info,
 					     tchan_info->maxregpower);
-
+		WMI_SET_CHANNEL_MAX_BANDWIDTH(chan_info,
+					      tchan_info->max_bw_supported);
 		WMI_LOGD("chan[%d] = %u", i, chan_info->mhz);
 
 		tchan_info++;
@@ -10123,6 +10124,7 @@ static uint16_t wmi_set_htc_tx_tag_tlv(wmi_unified_t wmi_handle,
 	case WMI_WOW_HOSTWAKEUP_FROM_SLEEP_CMDID:
 	case WMI_PDEV_RESUME_CMDID:
 	case WMI_HB_SET_ENABLE_CMDID:
+	case WMI_WOW_SET_ACTION_WAKE_UP_CMDID:
 #ifdef FEATURE_WLAN_D0WOW
 	case WMI_D0_WOW_ENABLE_DISABLE_CMDID:
 #endif
@@ -12301,6 +12303,8 @@ static void populate_tlv_events_id(uint32_t *event_ids)
 #endif
 	event_ids[wmi_coex_report_antenna_isolation_event_id] =
 				WMI_COEX_REPORT_ANTENNA_ISOLATION_EVENTID;
+	event_ids[wmi_roam_auth_offload_event_id] =
+				WMI_ROAM_PREAUTH_START_EVENTID;
 }
 
 /**
@@ -12564,6 +12568,10 @@ static void populate_tlv_service(uint32_t *wmi_service)
 			WMI_SERVICE_TX_COMPL_TSF64;
 	wmi_service[wmi_service_data_stall_recovery_support] =
 			WMI_SERVICE_DSM_ROAM_FILTER;
+	wmi_service[wmi_service_sae_roam_support] =
+			WMI_SERVICE_WPA3_SAE_ROAM_SUPPORT;
+	wmi_service[wmi_service_owe_roam_support] =
+			WMI_SERVICE_WPA3_OWE_ROAM_SUPPORT;
 }
 
 /**
