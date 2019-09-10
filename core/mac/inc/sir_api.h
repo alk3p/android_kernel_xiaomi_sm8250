@@ -74,13 +74,23 @@ typedef uint8_t tSirVersionString[SIR_VERSION_STRING_LEN];
 #define PERIODIC_TX_PTRN_MAX_SIZE 1536
 #define MAXNUM_PERIODIC_TX_PTRNS 6
 
-
 /* FW response timeout values in milli seconds */
 #define SIR_PEER_ASSOC_TIMEOUT (4000) /* 4 seconds */
+#ifdef FEATURE_RUNTIME_PM
+/* Add extra PMO_RESUME_TIMEOUT for runtime PM resume timeout */
+#define SIR_DELETE_STA_TIMEOUT (4000 + PMO_RESUME_TIMEOUT)
+#define SIR_VDEV_START_REQUEST_TIMEOUT   (6000 + PMO_RESUME_TIMEOUT)
+#define SIR_VDEV_STOP_REQUEST_TIMEOUT    (4000 + PMO_RESUME_TIMEOUT)
+#define SIR_VDEV_DELETE_REQUEST_TIMEOUT  (4000 + PMO_RESUME_TIMEOUT)
+#define SIR_VDEV_PLCY_MGR_TIMEOUT        (2000 + PMO_RESUME_TIMEOUT)
+#else
 #define SIR_DELETE_STA_TIMEOUT (4000) /* 4 seconds */
 #define SIR_VDEV_START_REQUEST_TIMEOUT   (6000)
 #define SIR_VDEV_STOP_REQUEST_TIMEOUT    (4000)
 #define SIR_VDEV_PLCY_MGR_TIMEOUT        (2000)
+#define SIR_VDEV_DELETE_REQUEST_TIMEOUT  (4000)
+#endif
+
 
 /* This should not be greater than MAX_NUMBER_OF_CONC_CONNECTIONS */
 #define MAX_VDEV_SUPPORTED                        4
@@ -371,6 +381,9 @@ struct sme_ready_req {
 	uint16_t messageType;   /* eWNI_SME_SYS_READY_IND */
 	uint16_t length;
 	void *csr_roam_synch_cb;
+	QDF_STATUS (*csr_roam_auth_event_handle_cb)(struct mac_context *mac,
+						    uint8_t vdev_id,
+						    struct qdf_mac_addr bssid);
 	void *pe_roam_synch_cb;
 	void *stop_roaming_cb;
 	QDF_STATUS (*sme_msg_cb)(struct mac_context *mac,
@@ -2236,6 +2249,16 @@ struct mawc_params {
 	uint8_t mawc_roam_rssi_low_adjust;
 };
 
+/**
+ * struct roam_init_params - Firmware roam module initialization parameters
+ * @vdev_id: vdev for which the roaming has to be enabled/disabled
+ * @enable:  flag to init/deinit roam module
+ */
+struct roam_init_params {
+	uint8_t vdev_id;
+	uint8_t enable;
+};
+
 struct roam_offload_scan_req {
 	uint16_t message_type;
 	uint16_t length;
@@ -2330,6 +2353,7 @@ struct roam_offload_scan_req {
 	uint32_t btm_query_bitmask;
 	struct roam_trigger_min_rssi min_rssi_params[NUM_OF_ROAM_TRIGGERS];
 	struct roam_trigger_score_delta score_delta_param[NUM_OF_ROAM_TRIGGERS];
+	uint32_t full_roam_scan_period;
 };
 
 struct roam_offload_scan_rsp {

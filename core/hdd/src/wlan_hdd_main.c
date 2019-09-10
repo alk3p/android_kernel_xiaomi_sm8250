@@ -1990,11 +1990,6 @@ int hdd_update_tgt_cfg(hdd_handle_t hdd_handle, struct wma_tgt_cfg *cfg)
 	hdd_lpass_target_config(hdd_ctx, cfg);
 
 	hdd_ctx->ap_arpns_support = cfg->ap_arpns_support;
-	status = ucfg_mlme_set_fw_supported_roaming_akm(
-						hdd_ctx->psoc,
-						cfg->ft_akm_service_bitmap);
-	if (QDF_IS_STATUS_ERROR(status))
-		hdd_err("Failed to set ft akm suites bitmap");
 
 	hdd_update_tgt_services(hdd_ctx, &cfg->services);
 
@@ -4548,6 +4543,10 @@ QDF_STATUS hdd_init_station_mode(struct hdd_adapter *adapter)
 	/* rcpi info initialization */
 	qdf_mem_zero(&adapter->rcpi, sizeof(adapter->rcpi));
 
+	if (adapter->device_mode == QDF_STA_MODE)
+		mlme_set_roam_trigger_bitmap(hdd_ctx->psoc, adapter->vdev_id,
+					     DEFAULT_ROAM_TRIGGER_BITMAP);
+
 	return QDF_STATUS_SUCCESS;
 
 error_wmm_init:
@@ -5632,14 +5631,21 @@ QDF_STATUS hdd_stop_adapter(struct hdd_context *hdd_ctx,
 					mac_handle,
 					adapter->vdev_id,
 					eCSR_DISCONNECT_REASON_IBSS_LEAVE);
-			else if (adapter->device_mode == QDF_STA_MODE)
-				wlan_hdd_disconnect(adapter,
-					eCSR_DISCONNECT_REASON_DEAUTH);
-			else
+			else if (adapter->device_mode == QDF_STA_MODE) {
+				rc = wlan_hdd_disconnect(
+						adapter,
+						eCSR_DISCONNECT_REASON_DEAUTH);
+				if (rc != 0 && ucfg_ipa_is_enabled()) {
+					hdd_err("STA disconnect failed");
+					ucfg_ipa_uc_cleanup_sta(hdd_ctx->pdev,
+								adapter->dev);
+				}
+			} else {
 				status = sme_roam_disconnect(
 					mac_handle,
 					adapter->vdev_id,
 					eCSR_DISCONNECT_REASON_UNSPECIFIED);
+			}
 			/* success implies disconnect is queued */
 			if (QDF_IS_STATUS_SUCCESS(status) &&
 			    adapter->device_mode != QDF_STA_MODE) {
@@ -7973,6 +7979,7 @@ static void hdd_pld_request_bus_bandwidth(struct hdd_context *hdd_ctx,
 	static enum wlan_tp_level next_rx_level = WLAN_SVC_TP_NONE;
 	enum wlan_tp_level next_tx_level = WLAN_SVC_TP_NONE;
 	uint32_t delack_timer_cnt = hdd_ctx->config->tcp_delack_timer_count;
+	uint32_t bus_low_cnt_threshold = hdd_ctx->config->bus_low_cnt_threshold;
 	cpumask_t pm_qos_cpu_mask;
 	bool rx_pm_qos_high = false;
 	bool tx_pm_qos_high = false;
@@ -7992,6 +7999,14 @@ static void hdd_pld_request_bus_bandwidth(struct hdd_context *hdd_ctx,
 
 	dptrace_high_tput_req =
 			next_vote_level > PLD_BUS_WIDTH_IDLE ? true : false;
+
+	if (next_vote_level == PLD_BUS_WIDTH_LOW) {
+		if (++hdd_ctx->bus_low_vote_cnt >= bus_low_cnt_threshold)
+			qdf_atomic_set(&hdd_ctx->low_tput_gro_enable, 1);
+	} else {
+		hdd_ctx->bus_low_vote_cnt = 0;
+		qdf_atomic_set(&hdd_ctx->low_tput_gro_enable, 0);
+	}
 
 	if (hdd_ctx->cur_vote_level != next_vote_level) {
 		hdd_debug("BW Vote level %d, tx_packets: %lld, rx_packets: %lld",
@@ -9485,18 +9500,6 @@ void hdd_psoc_idle_timer_stop(struct hdd_context *hdd_ctx)
 	hdd_debug("Stopped psoc idle timer");
 }
 
-/*
- * enum hdd_block_shutdown - Control if driver allows modem shutdown
- * @HDD_UNBLOCK_MODEM_SHUTDOWN: Unblock shutdown
- * @HDD_BLOCK_MODEM_SHUTDOWN: Block shutdown
- *
- * On calling pld_block_shutdown API with the given values, modem
- * graceful shutdown is blocked/unblocked.
- */
-enum hdd_block_shutdown {
-	HDD_UNBLOCK_MODEM_SHUTDOWN,
-	HDD_BLOCK_MODEM_SHUTDOWN,
-};
 
 /**
  * __hdd_psoc_idle_shutdown() - perform an idle shutdown on the given psoc
@@ -9521,16 +9524,12 @@ static int __hdd_psoc_idle_shutdown(struct hdd_context *hdd_ctx)
 		hdd_info("psoc busy, abort idle shutdown; errno:%d", errno);
 		goto exit;
 	}
-	/* Block the modem graceful shutdown till stop modules is completed */
-	pld_block_shutdown(hdd_ctx->parent_dev, HDD_BLOCK_MODEM_SHUTDOWN);
 
 	osif_psoc_sync_wait_for_ops(psoc_sync);
 
-	QDF_BUG(!hdd_wlan_stop_modules(hdd_ctx, false));
+	errno = hdd_wlan_stop_modules(hdd_ctx, false);
 
 	osif_psoc_sync_trans_stop(psoc_sync);
-
-	pld_block_shutdown(hdd_ctx->parent_dev, HDD_UNBLOCK_MODEM_SHUTDOWN);
 
 exit:
 	hdd_exit();
@@ -11647,7 +11646,7 @@ int hdd_wlan_stop_modules(struct hdd_context *hdd_ctx, bool ftm_mode)
 			cds_set_module_stop_in_progress(false);
 
 			hdd_bus_bw_compute_timer_stop(hdd_ctx);
-			return 0;
+			return -EAGAIN;
 		}
 	}
 
@@ -12639,7 +12638,8 @@ void hdd_softap_sta_disassoc(struct hdd_adapter *adapter,
 			     param);
 }
 
-void wlan_hdd_disable_roaming(struct hdd_adapter *cur_adapter)
+void wlan_hdd_disable_roaming(struct hdd_adapter *cur_adapter,
+			      uint32_t mlme_operation_requestor)
 {
 	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(cur_adapter);
 	struct hdd_adapter *adapter = NULL;
@@ -12661,12 +12661,14 @@ void wlan_hdd_disable_roaming(struct hdd_adapter *cur_adapter)
 			hdd_debug("%d Disable roaming", adapter->vdev_id);
 			sme_stop_roaming(hdd_ctx->mac_handle,
 					 adapter->vdev_id,
-					 ecsr_driver_disabled);
+					 REASON_DRIVER_DISABLED,
+					 mlme_operation_requestor);
 		}
 	}
 }
 
-void wlan_hdd_enable_roaming(struct hdd_adapter *cur_adapter)
+void wlan_hdd_enable_roaming(struct hdd_adapter *cur_adapter,
+			     uint32_t mlme_operation_requestor)
 {
 	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(cur_adapter);
 	struct hdd_adapter *adapter = NULL;
@@ -12688,7 +12690,8 @@ void wlan_hdd_enable_roaming(struct hdd_adapter *cur_adapter)
 			hdd_debug("%d Enable roaming", adapter->vdev_id);
 			sme_start_roaming(hdd_ctx->mac_handle,
 					  adapter->vdev_id,
-					  REASON_DRIVER_ENABLED);
+					  REASON_DRIVER_ENABLED,
+					  mlme_operation_requestor);
 		}
 	}
 }
@@ -15422,7 +15425,7 @@ void hdd_hidden_ssid_enable_roaming(hdd_handle_t hdd_handle, uint8_t vdev_id)
 		return;
 	}
 	/* enable roaming on all adapters once hdd get hidden ssid rsp */
-	wlan_hdd_enable_roaming(adapter);
+	wlan_hdd_enable_roaming(adapter, RSO_START_BSS);
 }
 
 /* Register the module init/exit functions */

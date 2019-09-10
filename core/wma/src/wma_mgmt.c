@@ -79,6 +79,10 @@
 #include <wlan_crypto_global_api.h>
 #include <wlan_mlme_main.h>
 
+#if !defined(REMOVE_PKT_LOG)
+#include <wlan_logging_sock_svc.h>
+#endif
+
 /**
  * wma_send_bcn_buf_ll() - prepare and send beacon buffer to fw for LL
  * @wma: wma handle
@@ -1286,8 +1290,8 @@ QDF_STATUS wma_send_peer_assoc(tp_wma_handle wma,
 	phymode = wma_peer_phymode(nw_type, params->staType,
 				   params->htCapable, params->ch_width,
 				   params->vhtCapable, is_he);
-	if (phymode > intr->chanmode) {
-		WMA_LOGD("Peer phymode %d is not allowed. Set it equal to sap phymode %d",
+	if ((intr->type == WMI_VDEV_TYPE_AP) && (phymode > intr->chanmode)) {
+		WMA_LOGD("Peer phymode %d is not allowed. Set it equal to sap/go phymode %d",
 			 phymode, intr->chanmode);
 		phymode = intr->chanmode;
 	}
@@ -3221,6 +3225,38 @@ static inline void wma_mgmt_unmap_buf(tp_wma_handle wma_handle, qdf_nbuf_t buf)
 	qdf_nbuf_unmap_single(wma_handle->qdf_dev, buf, QDF_DMA_TO_DEVICE);
 }
 #endif
+
+#if !defined(REMOVE_PKT_LOG)
+/**
+ * wma_mgmt_pktdump_status_map() - map MGMT Tx completion status with
+ * packet dump Tx status
+ * @status: MGMT Tx completion status
+ *
+ * Return: packet dump tx_status enum
+ */
+static inline enum tx_status
+wma_mgmt_pktdump_status_map(WMI_MGMT_TX_COMP_STATUS_TYPE status)
+{
+	enum tx_status pktdump_status;
+
+	switch (status) {
+	case WMI_MGMT_TX_COMP_TYPE_COMPLETE_OK:
+		pktdump_status = tx_status_ok;
+		break;
+	case WMI_MGMT_TX_COMP_TYPE_DISCARD:
+		pktdump_status = tx_status_discard;
+		break;
+	case WMI_MGMT_TX_COMP_TYPE_COMPLETE_NO_ACK:
+		pktdump_status = tx_status_no_ack;
+		break;
+	default:
+		pktdump_status = tx_status_discard;
+		break;
+	}
+	return pktdump_status;
+}
+#endif
+
 /**
  * wma_process_mgmt_tx_completion() - process mgmt completion
  * @wma_handle: wma handle
@@ -3240,6 +3276,7 @@ static int wma_process_mgmt_tx_completion(tp_wma_handle wma_handle,
 	struct cdp_vdev *txrx_vdev;
 	ol_txrx_pktdump_cb packetdump_cb;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
+	enum tx_status pktdump_status;
 #endif
 
 	if (!wma_handle) {
@@ -3266,9 +3303,10 @@ static int wma_process_mgmt_tx_completion(tp_wma_handle wma_handle,
 	vdev_id = mgmt_txrx_get_vdev_id(pdev, desc_id);
 	txrx_vdev = wma_find_vdev_by_id(wma_handle, vdev_id);
 	packetdump_cb = wma_handle->wma_mgmt_tx_packetdump_cb;
+	pktdump_status = wma_mgmt_pktdump_status_map(status);
 	if (packetdump_cb)
 		packetdump_cb(soc, txrx_vdev,
-			      buf, QDF_STATUS_SUCCESS, TX_MGMT_PKT);
+			      buf, pktdump_status, TX_MGMT_PKT);
 #endif
 
 	ret = mgmt_txrx_tx_completion_handler(pdev, desc_id, status, NULL);
@@ -4397,6 +4435,7 @@ QDF_STATUS wma_de_register_mgmt_frm_client(void)
  * wma_register_roaming_callbacks() - Register roaming callbacks
  * @csr_roam_synch_cb: CSR roam synch callback routine pointer
  * @pe_roam_synch_cb: PE roam synch callback routine pointer
+ * @csr_roam_auth_event_handle_cb: CSR callback routine pointer
  *
  * Register the SME and PE callback routines with WMA for
  * handling roaming
@@ -4408,6 +4447,9 @@ QDF_STATUS wma_register_roaming_callbacks(
 		struct roam_offload_synch_ind *roam_synch_data,
 		struct bss_description *bss_desc_ptr,
 		enum sir_roam_op_code reason),
+	QDF_STATUS (*csr_roam_auth_event_handle_cb)(struct mac_context *mac,
+						    uint8_t vdev_id,
+						    struct qdf_mac_addr bssid),
 	QDF_STATUS (*pe_roam_synch_cb)(struct mac_context *mac,
 		struct roam_offload_synch_ind *roam_synch_data,
 		struct bss_description *bss_desc_ptr,
@@ -4425,6 +4467,7 @@ QDF_STATUS wma_register_roaming_callbacks(
 		return QDF_STATUS_E_FAILURE;
 	}
 	wma->csr_roam_synch_cb = csr_roam_synch_cb;
+	wma->csr_roam_auth_event_handle_cb = csr_roam_auth_event_handle_cb;
 	wma->pe_roam_synch_cb = pe_roam_synch_cb;
 	wma->pe_disconnect_cb = pe_disconnect_cb;
 	WMA_LOGD("Registered roam synch callbacks with WMA successfully");

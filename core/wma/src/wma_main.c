@@ -3664,6 +3664,11 @@ QDF_STATUS wma_open(struct wlan_objmgr_psoc *psoc,
 				   wmi_roam_synch_frame_event_id,
 				   wma_roam_synch_frame_event_handler,
 				   WMA_RX_SERIALIZER_CTX);
+
+	wmi_unified_register_event_handler(wma_handle->wmi_handle,
+					   wmi_roam_auth_offload_event_id,
+					   wma_roam_auth_offload_event_handler,
+					   WMA_RX_SERIALIZER_CTX);
 #endif /* WLAN_FEATURE_ROAM_OFFLOAD */
 	wmi_unified_register_event_handler(wma_handle->wmi_handle,
 				wmi_rssi_breach_event_id,
@@ -5748,16 +5753,6 @@ static int wma_update_hdd_cfg(tp_wma_handle wma_handle)
 
 	tgt_cfg.max_intf_count = wlan_res_cfg->num_vdevs;
 
-	if (wmi_service_enabled(wmi_handle, wmi_service_wpa3_ft_sae_support))
-		tgt_cfg.ft_akm_service_bitmap |= (1 << AKM_FT_SAE);
-
-	if (wmi_service_enabled(wmi_handle,
-				wmi_service_wpa3_ft_suite_b_support))
-		tgt_cfg.ft_akm_service_bitmap |= (1 << AKM_FT_SUITEB_SHA384);
-
-	if (wmi_service_enabled(wmi_handle, wmi_service_ft_fils))
-		tgt_cfg.ft_akm_service_bitmap |= (1 << AKM_FT_FILS);
-
 	qdf_mem_copy(tgt_cfg.hw_macaddr.bytes, wma_handle->hwaddr,
 		     ATH_MAC_LEN);
 
@@ -5929,6 +5924,7 @@ static void wma_set_mlme_caps(struct wlan_objmgr_psoc *psoc)
 {
 	tp_wma_handle wma;
 	bool tgt_cap;
+	uint32_t akm_bitmap = 0;
 	QDF_STATUS status;
 
 	wma = cds_get_context(QDF_MODULE_ID_WMA);
@@ -5943,6 +5939,36 @@ static void wma_set_mlme_caps(struct wlan_objmgr_psoc *psoc)
 	status = ucfg_mlme_set_tgt_adaptive_11r_cap(psoc, tgt_cap);
 	if (QDF_IS_STATUS_ERROR(status))
 		WMA_LOGE("Failed to set adaptive 11r cap");
+
+	tgt_cap = wmi_service_enabled(wma->wmi_handle,
+				      wmi_service_wpa3_ft_sae_support);
+	if (tgt_cap)
+		 akm_bitmap |= (1 << AKM_FT_SAE);
+
+	tgt_cap = wmi_service_enabled(wma->wmi_handle,
+				      wmi_service_wpa3_ft_suite_b_support);
+	if (tgt_cap)
+		akm_bitmap |= (1 << AKM_FT_SUITEB_SHA384);
+
+	tgt_cap = wmi_service_enabled(wma->wmi_handle,
+				      wmi_service_ft_fils);
+	if (tgt_cap)
+		akm_bitmap |= (1 << AKM_FT_FILS);
+
+	tgt_cap = wmi_service_enabled(wma->wmi_handle,
+				      wmi_service_owe_roam_support);
+	if (tgt_cap)
+		akm_bitmap |= (1 << AKM_OWE);
+
+	tgt_cap = wmi_service_enabled(wma->wmi_handle,
+				      wmi_service_sae_roam_support);
+	if (tgt_cap)
+		akm_bitmap |= (1 << AKM_SAE);
+
+
+	status = mlme_set_tgt_wpa3_roam_cap(psoc, akm_bitmap);
+	if (QDF_IS_STATUS_ERROR(status))
+		WMA_LOGE("Failed to set sae roam support");
 }
 
 static void wma_set_component_caps(struct wlan_objmgr_psoc *psoc)
@@ -8694,6 +8720,11 @@ static QDF_STATUS wma_mc_process_msg(struct scheduler_msg *msg)
 		wma_process_roaming_config(wma_handle, msg->bodyptr);
 		break;
 
+	case WMA_ROAM_PRE_AUTH_STATUS:
+		wma_send_roam_preauth_status(wma_handle, msg->bodyptr);
+		qdf_mem_free(msg->bodyptr);
+		break;
+
 	case WMA_RATE_UPDATE_IND:
 		wma_process_rate_update_indicate(wma_handle,
 				(tSirRateUpdateInd *) msg->bodyptr);
@@ -9202,6 +9233,14 @@ static QDF_STATUS wma_mc_process_msg(struct scheduler_msg *msg)
 		qdf_mem_free(msg->bodyptr);
 		break;
 #endif
+	case WMA_SET_ROAM_TRIGGERS:
+		wma_set_roam_triggers(wma_handle, msg->bodyptr);
+		qdf_mem_free(msg->bodyptr);
+		break;
+	case WMA_ROAM_INIT_PARAM:
+		wma_update_roam_offload_flag(wma_handle, msg->bodyptr);
+		qdf_mem_free(msg->bodyptr);
+		break;
 	default:
 		WMA_LOGD("Unhandled WMA message of type %d", msg->type);
 		if (msg->bodyptr)

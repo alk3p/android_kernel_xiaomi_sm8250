@@ -2608,7 +2608,8 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		 */
 		qdf_atomic_set(&adapter->ch_switch_in_progress, 0);
 		policy_mgr_set_chan_switch_complete_evt(hdd_ctx->psoc);
-		wlan_hdd_enable_roaming(adapter);
+		wlan_hdd_enable_roaming(adapter,
+					RSO_SAP_CHANNEL_CHANGE);
 		return QDF_STATUS_SUCCESS;
 
 	default:
@@ -2979,7 +2980,7 @@ int hdd_softap_set_channel_change(struct net_device *dev, int target_channel,
 		return -EINVAL;
 	}
 	/* Disable Roaming on all adapters before doing channel change */
-	wlan_hdd_disable_roaming(adapter);
+	wlan_hdd_disable_roaming(adapter, RSO_SAP_CHANNEL_CHANGE);
 
 	/*
 	 * Post the Channel Change request to SAP.
@@ -3008,7 +3009,8 @@ int hdd_softap_set_channel_change(struct net_device *dev, int target_channel,
 		 * If Posting of the Channel Change request fails
 		 * enable roaming on all adapters
 		 */
-		wlan_hdd_enable_roaming(adapter);
+		wlan_hdd_enable_roaming(adapter,
+					RSO_SAP_CHANNEL_CHANGE);
 
 		ret = -EINVAL;
 	}
@@ -3078,7 +3080,8 @@ void wlan_hdd_set_sap_csa_reason(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 		return;
 	}
 	sap_ctx = WLAN_HDD_GET_SAP_CTX_PTR(ap_adapter);
-	sap_ctx->csa_reason = reason;
+	if (sap_ctx)
+		sap_ctx->csa_reason = reason;
 }
 
 QDF_STATUS wlan_hdd_get_channel_for_sap_restart(
@@ -3179,7 +3182,8 @@ sap_restart:
 		 hdd_ap_ctx->sap_config.channel, intf_ch);
 	ch_params.ch_width = CH_WIDTH_MAX;
 	hdd_ap_ctx->bss_stop_reason = BSS_STOP_DUE_TO_MCC_SCC_SWITCH;
-	hdd_ap_ctx->sap_context->csa_reason =
+	if (hdd_ap_ctx->sap_context)
+		hdd_ap_ctx->sap_context->csa_reason =
 			CSA_REASON_CONCURRENT_STA_CHANGED_CHANNEL;
 
 	wlan_reg_set_channel_params(hdd_ctx->pdev,
@@ -5012,7 +5016,7 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 	}
 
 	/* Disable Roaming on all adapters before starting bss */
-	wlan_hdd_disable_roaming(adapter);
+	wlan_hdd_disable_roaming(adapter, RSO_START_BSS);
 
 	sme_config = qdf_mem_malloc(sizeof(*sme_config));
 	if (!sme_config) {
@@ -5652,7 +5656,7 @@ error:
 
 free:
 	/* Enable Roaming after start bss in case of failure/success */
-	wlan_hdd_enable_roaming(adapter);
+	wlan_hdd_enable_roaming(adapter, RSO_START_BSS);
 	qdf_mem_free(sme_config);
 	return ret;
 }

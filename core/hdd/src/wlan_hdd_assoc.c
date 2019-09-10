@@ -1909,7 +1909,8 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 	hdd_print_bss_info(sta_ctx);
 
 	if (policy_mgr_is_sta_active_connection_exists(hdd_ctx->psoc))
-		sme_enable_roaming_on_connected_sta(mac_handle);
+		sme_enable_roaming_on_connected_sta(mac_handle,
+						    adapter->vdev_id);
 
 	return status;
 }
@@ -2793,7 +2794,7 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 	 * Firmware dosent support connection on one STA iface while
 	 * roaming on other STA iface
 	 */
-	wlan_hdd_enable_roaming(adapter);
+	wlan_hdd_enable_roaming(adapter, RSO_CONNECT_START);
 
 	/* HDD has initiated disconnect, do not send connect result indication
 	 * to kernel as it will be handled by __cfg80211_disconnect.
@@ -4664,7 +4665,8 @@ static void hdd_roam_channel_switch_handler(struct hdd_adapter *adapter,
 	/* Enable Roaming on STA interface which was disabled before CSA */
 	if (adapter->device_mode == QDF_STA_MODE)
 		sme_start_roaming(mac_handle, adapter->vdev_id,
-				  REASON_DRIVER_ENABLED);
+				  REASON_DRIVER_ENABLED,
+				  RSO_CHANNEL_SWITCH);
 
 	chan_change.chan = roam_info->chan_info.chan_id;
 	chan_change.chan_params.ch_width =

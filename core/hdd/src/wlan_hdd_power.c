@@ -542,6 +542,33 @@ static void hdd_disable_hw_filter(struct hdd_adapter *adapter)
 	hdd_exit();
 }
 
+static void hdd_enable_action_frame_patterns(struct hdd_adapter *adapter)
+{
+	QDF_STATUS status;
+
+	hdd_enter();
+
+	status = ucfg_pmo_enable_action_frame_patterns(adapter->vdev,
+						       QDF_SYSTEM_SUSPEND);
+	if (QDF_IS_STATUS_ERROR(status))
+		hdd_info("Failed to enable action frame patterns");
+
+	hdd_exit();
+}
+
+static void hdd_disable_action_frame_patterns(struct hdd_adapter *adapter)
+{
+	QDF_STATUS status;
+
+	hdd_enter();
+
+	status = ucfg_pmo_disable_action_frame_patterns(adapter->vdev);
+	if (QDF_IS_STATUS_ERROR(status))
+		hdd_info("Failed to disable action frame patterns");
+
+	hdd_exit();
+}
+
 void hdd_enable_host_offloads(struct hdd_adapter *adapter,
 	enum pmo_offload_trigger trigger)
 {
@@ -564,6 +591,7 @@ void hdd_enable_host_offloads(struct hdd_adapter *adapter,
 	hdd_enable_ns_offload(adapter, trigger);
 	hdd_enable_mc_addr_filtering(adapter, trigger);
 	hdd_enable_hw_filter(adapter);
+	hdd_enable_action_frame_patterns(adapter);
 out:
 	hdd_exit();
 
@@ -591,6 +619,7 @@ void hdd_disable_host_offloads(struct hdd_adapter *adapter,
 	hdd_disable_ns_offload(adapter, trigger);
 	hdd_disable_mc_addr_filtering(adapter, trigger);
 	hdd_disable_hw_filter(adapter);
+	hdd_disable_action_frame_patterns(adapter);
 out:
 	hdd_exit();
 
@@ -1673,12 +1702,12 @@ exit_with_code:
 
 static int _wlan_hdd_cfg80211_resume_wlan(struct wiphy *wiphy)
 {
-	void *hif_ctx = cds_get_context(QDF_MODULE_ID_HIF);
+	void *hif_ctx;
 	struct hdd_context *hdd_ctx = wiphy_priv(wiphy);
 	int errno;
 
 	errno = wlan_hdd_validate_context(hdd_ctx);
-	if (0 != errno)
+	if (errno)
 		return errno;
 
 	if (hdd_ctx->driver_status != DRIVER_MODULES_ENABLED) {
@@ -1686,6 +1715,7 @@ static int _wlan_hdd_cfg80211_resume_wlan(struct wiphy *wiphy)
 		return 0;
 	}
 
+	hif_ctx = cds_get_context(QDF_MODULE_ID_HIF);
 	errno = __wlan_hdd_cfg80211_resume_wlan(wiphy);
 	hif_pm_runtime_put(hif_ctx);
 
@@ -1894,12 +1924,12 @@ resume_tx:
 static int _wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 					   struct cfg80211_wowlan *wow)
 {
-	void *hif_ctx = cds_get_context(QDF_MODULE_ID_HIF);
+	void *hif_ctx;
 	struct hdd_context *hdd_ctx = wiphy_priv(wiphy);
 	int errno;
 
 	errno = wlan_hdd_validate_context(hdd_ctx);
-	if (0 != errno)
+	if (errno)
 		return errno;
 
 	if (hdd_ctx->driver_status != DRIVER_MODULES_ENABLED) {
@@ -1907,6 +1937,7 @@ static int _wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 		return 0;
 	}
 
+	hif_ctx = cds_get_context(QDF_MODULE_ID_HIF);
 	errno = hif_pm_runtime_get_sync(hif_ctx);
 	if (errno)
 		return errno;
