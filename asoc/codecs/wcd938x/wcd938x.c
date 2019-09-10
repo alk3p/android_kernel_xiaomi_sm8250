@@ -23,6 +23,7 @@
 
 #include "internal.h"
 #include "wcd938x-registers.h"
+#include "wcd938x.h"
 
 #define WCD938X_DRV_NAME "wcd938x_codec"
 #define NUM_SWRS_DT_PARAMS 5
@@ -38,11 +39,6 @@
 #define ADC_MODE_VAL_LP       0x05
 #define ADC_MODE_VAL_ULP1     0x09
 #define ADC_MODE_VAL_ULP2     0x0B
-
-enum {
-	WCD9380 = 0,
-	WCD9385 = 5,
-};
 
 enum {
 	CODEC_TX = 0,
@@ -2681,6 +2677,30 @@ static struct snd_info_entry_ops wcd938x_variant_ops = {
 };
 
 /*
+ * wcd938x_get_codec_variant
+ * @component: component instance
+ *
+ * Return: codec variant or -EINVAL in error.
+ */
+int wcd938x_get_codec_variant(struct snd_soc_component *component)
+{
+	struct wcd938x_priv *priv = NULL;
+
+	if (!component)
+		return -EINVAL;
+
+	priv = snd_soc_component_get_drvdata(component);
+	if (!priv) {
+		dev_err(component->dev,
+			"%s:wcd938x not probed\n", __func__);
+		return 0;
+	}
+
+	return priv->variant;
+}
+EXPORT_SYMBOL(wcd938x_get_codec_variant);
+
+/*
  * wcd938x_info_create_codec_entry - creates wcd938x module
  * @codec_root: The parent directory
  * @component: component instance
@@ -2758,6 +2778,40 @@ int wcd938x_info_create_codec_entry(struct snd_info_entry *codec_root,
 	return 0;
 }
 EXPORT_SYMBOL(wcd938x_info_create_codec_entry);
+
+static int wcd938x_set_micbias_data(struct wcd938x_priv *wcd938x,
+			      struct wcd938x_pdata *pdata)
+{
+	int vout_ctl_1 = 0, vout_ctl_2 = 0, vout_ctl_3 = 0, vout_ctl_4 = 0;
+	int rc = 0;
+
+	if (!pdata) {
+		dev_err(wcd938x->dev, "%s: NULL pdata\n", __func__);
+		return -ENODEV;
+	}
+
+	/* set micbias voltage */
+	vout_ctl_1 = wcd938x_get_micb_vout_ctl_val(pdata->micbias.micb1_mv);
+	vout_ctl_2 = wcd938x_get_micb_vout_ctl_val(pdata->micbias.micb2_mv);
+	vout_ctl_3 = wcd938x_get_micb_vout_ctl_val(pdata->micbias.micb3_mv);
+	vout_ctl_4 = wcd938x_get_micb_vout_ctl_val(pdata->micbias.micb4_mv);
+	if (vout_ctl_1 < 0 || vout_ctl_2 < 0 || vout_ctl_3 < 0 ||
+	    vout_ctl_4 < 0) {
+		rc = -EINVAL;
+		goto done;
+	}
+	regmap_update_bits(wcd938x->regmap, WCD938X_ANA_MICB1, 0x3F,
+			   vout_ctl_1);
+	regmap_update_bits(wcd938x->regmap, WCD938X_ANA_MICB2, 0x3F,
+			   vout_ctl_2);
+	regmap_update_bits(wcd938x->regmap, WCD938X_ANA_MICB3, 0x3F,
+			   vout_ctl_3);
+	regmap_update_bits(wcd938x->regmap, WCD938X_ANA_MICB4, 0x3F,
+			   vout_ctl_4);
+
+done:
+	return rc;
+}
 
 static int wcd938x_soc_codec_probe(struct snd_soc_component *component)
 {
@@ -3006,6 +3060,19 @@ static void wcd938x_dt_parse_micbias_info(struct device *dev,
 		dev_info(dev, "%s: Micbias3 DT property not found\n",
 			__func__);
 	}
+
+	/* MB4 */
+	if (of_find_property(dev->of_node, "qcom,cdc-micbias4-mv",
+				    NULL)) {
+		rc = wcd938x_read_of_property_u32(dev,
+						  "qcom,cdc-micbias4-mv",
+						  &prop_val);
+		if (!rc)
+			mb->micb4_mv = prop_val;
+	} else {
+		dev_info(dev, "%s: Micbias4 DT property not found\n",
+			__func__);
+	}
 }
 
 static int wcd938x_reset_low(struct device *dev)
@@ -3143,6 +3210,12 @@ static int wcd938x_bind(struct device *dev)
 		goto err;
 	}
 	wcd938x->tx_swr_dev->slave_irq = wcd938x->virq;
+
+	ret = wcd938x_set_micbias_data(wcd938x, pdata);
+	if (ret < 0) {
+		dev_err(dev, "%s: bad micbias pdata\n", __func__);
+		goto err_irq;
+	}
 
 	/* Request for watchdog interrupt */
 	wcd_request_irq(&wcd938x->irq_info, WCD938X_IRQ_HPHR_PDM_WD_INT,

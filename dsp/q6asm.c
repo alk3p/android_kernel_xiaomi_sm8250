@@ -1581,7 +1581,7 @@ int q6asm_audio_client_buf_alloc_contiguous(unsigned int dir,
 			__func__, ac->session,
 			bufsz, bufcnt);
 
-	if (ac->session <= 0 || ac->session > 8) {
+	if (ac->session <= 0 || ac->session > ASM_ACTIVE_STREAMS_ALLOWED) {
 		pr_err("%s: Session ID is invalid, session = %d\n", __func__,
 			ac->session);
 		goto fail;
@@ -3541,6 +3541,15 @@ static int __q6asm_open_write(struct audio_client *ac, uint32_t format,
 		break;
 	case FORMAT_WMA_V10PRO:
 		open.dec_fmt_id = ASM_MEDIA_FMT_WMA_V10PRO_V2;
+		break;
+	case FORMAT_AMRNB:
+		open.dec_fmt_id = ASM_MEDIA_FMT_AMRNB_FS;
+		break;
+	case FORMAT_AMRWB:
+		open.dec_fmt_id = ASM_MEDIA_FMT_AMRWB_FS;
+		break;
+	case FORMAT_AMR_WB_PLUS:
+		open.dec_fmt_id = ASM_MEDIA_FMT_AMR_WB_PLUS_V2;
 		break;
 	case FORMAT_MP3:
 		open.dec_fmt_id = ASM_MEDIA_FMT_MP3;
