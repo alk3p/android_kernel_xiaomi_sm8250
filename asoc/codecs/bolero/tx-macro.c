@@ -72,6 +72,7 @@ struct tx_macro_swr_ctrl_platform_data {
 	int (*write)(void *handle, int reg, int val);
 	int (*bulk_write)(void *handle, u32 *reg, u32 *val, size_t len);
 	int (*clk)(void *handle, bool enable);
+	int (*core_vote)(void *handle, bool enable);
 	int (*handle_irq)(void *handle,
 			  irqreturn_t (*swrm_irq_handler)(int irq,
 							  void *data),
@@ -117,6 +118,12 @@ enum {
 enum {
 	TX_MCLK,
 	VA_MCLK,
+};
+
+struct tx_macro_reg_mask_val {
+	u16 reg;
+	u8 mask;
+	u8 val;
 };
 
 struct tx_mute_work {
@@ -1714,6 +1721,47 @@ static const struct snd_kcontrol_new tx_macro_snd_controls[] = {
 		       tx_macro_get_bcs, tx_macro_set_bcs),
 };
 
+static int tx_macro_register_event_listener(struct snd_soc_component *component,
+					    bool enable)
+{
+	struct device *tx_dev = NULL;
+	struct tx_macro_priv *tx_priv = NULL;
+	int ret = 0;
+
+	if (!component)
+		return -EINVAL;
+
+	tx_dev = bolero_get_device_ptr(component->dev, TX_MACRO);
+	if (!tx_dev) {
+		dev_err(component->dev,
+			"%s: null device for macro!\n", __func__);
+		return -EINVAL;
+	}
+	tx_priv = dev_get_drvdata(tx_dev);
+	if (!tx_priv) {
+		dev_err(component->dev,
+			"%s: priv is null for macro!\n", __func__);
+		return -EINVAL;
+	}
+	if (tx_priv->swr_ctrl_data) {
+		if (enable) {
+			ret = swrm_wcd_notify(
+				tx_priv->swr_ctrl_data[0].tx_swr_pdev,
+				SWR_REGISTER_WAKEUP, NULL);
+			msm_cdc_pinctrl_set_wakeup_capable(
+					tx_priv->tx_swr_gpio_p, false);
+		} else {
+			msm_cdc_pinctrl_set_wakeup_capable(
+					tx_priv->tx_swr_gpio_p, true);
+			ret = swrm_wcd_notify(
+				tx_priv->swr_ctrl_data[0].tx_swr_pdev,
+				SWR_DEREGISTER_WAKEUP, NULL);
+		}
+	}
+
+	return ret;
+}
+
 static int tx_macro_tx_va_mclk_enable(struct tx_macro_priv *tx_priv,
 				      struct regmap *regmap, int clk_type,
 				      bool enable)
@@ -1726,9 +1774,16 @@ static int tx_macro_tx_va_mclk_enable(struct tx_macro_priv *tx_priv,
 		(enable ? "enable" : "disable"), tx_priv->tx_mclk_users);
 
 	if (enable) {
-		if (tx_priv->swr_clk_users == 0)
-			msm_cdc_pinctrl_select_active_state(
+		if (tx_priv->swr_clk_users == 0) {
+			ret = msm_cdc_pinctrl_select_active_state(
 						tx_priv->tx_swr_gpio_p);
+			if (ret < 0) {
+				dev_err_ratelimited(tx_priv->dev,
+					"%s: tx swr pinctrl enable failed\n",
+					__func__);
+				goto exit;
+			}
+		}
 
 		clk_tx_ret = bolero_clk_rsc_request_clock(tx_priv->dev,
 						   TX_CORE_CLK,
@@ -1841,9 +1896,16 @@ static int tx_macro_tx_va_mclk_enable(struct tx_macro_priv *tx_priv,
 						   TX_CORE_CLK,
 						   TX_CORE_CLK,
 						   false);
-		if (tx_priv->swr_clk_users == 0)
-			msm_cdc_pinctrl_select_sleep_state(
+		if (tx_priv->swr_clk_users == 0) {
+			ret = msm_cdc_pinctrl_select_sleep_state(
 						tx_priv->tx_swr_gpio_p);
+			if (ret < 0) {
+				dev_err_ratelimited(tx_priv->dev,
+					"%s: tx swr pinctrl disable failed\n",
+					__func__);
+				goto exit;
+			}
+		}
 	}
 	return 0;
 
@@ -1853,6 +1915,7 @@ done:
 				TX_CORE_CLK,
 				TX_CORE_CLK,
 				false);
+exit:
 	return ret;
 }
 
@@ -1886,6 +1949,24 @@ static int tx_macro_clk_switch(struct snd_soc_component *component)
 	return ret;
 }
 
+static int tx_macro_core_vote(void *handle, bool enable)
+{
+	struct tx_macro_priv *tx_priv = (struct tx_macro_priv *) handle;
+	int ret = 0;
+
+	if (tx_priv == NULL) {
+		pr_err("%s: tx priv data is NULL\n", __func__);
+		return -EINVAL;
+	}
+	if (enable) {
+		pm_runtime_get_sync(tx_priv->dev);
+		pm_runtime_put_autosuspend(tx_priv->dev);
+		pm_runtime_mark_last_busy(tx_priv->dev);
+	}
+
+	return ret;
+}
+
 static int tx_macro_swrm_clock(void *handle, bool enable)
 {
 	struct tx_macro_priv *tx_priv = (struct tx_macro_priv *) handle;
@@ -1908,14 +1989,20 @@ static int tx_macro_swrm_clock(void *handle, bool enable)
 		if (tx_priv->va_swr_clk_cnt && !tx_priv->tx_swr_clk_cnt) {
 			ret = tx_macro_tx_va_mclk_enable(tx_priv, regmap,
 							VA_MCLK, enable);
-			if (ret)
+			if (ret) {
+				pm_runtime_mark_last_busy(tx_priv->dev);
+				pm_runtime_put_autosuspend(tx_priv->dev);
 				goto done;
+			}
 			tx_priv->va_clk_status++;
 		} else {
 			ret = tx_macro_tx_va_mclk_enable(tx_priv, regmap,
 							TX_MCLK, enable);
-			if (ret)
+			if (ret) {
+				pm_runtime_mark_last_busy(tx_priv->dev);
+				pm_runtime_put_autosuspend(tx_priv->dev);
 				goto done;
+			}
 			tx_priv->tx_clk_status++;
 		}
 		pm_runtime_mark_last_busy(tx_priv->dev);
@@ -2013,6 +2100,10 @@ undefined_rate:
 	return dmic_sample_rate;
 }
 
+static const struct tx_macro_reg_mask_val tx_macro_reg_init[] = {
+	{BOLERO_CDC_TX0_TX_PATH_SEC7, 0x3F, 0x02},
+};
+
 static int tx_macro_init(struct snd_soc_component *component)
 {
 	struct snd_soc_dapm_context *dapm =
@@ -2092,8 +2183,12 @@ static int tx_macro_init(struct snd_soc_component *component)
 	}
 	tx_priv->component = component;
 
-	snd_soc_component_update_bits(component,
-		BOLERO_CDC_TX0_TX_PATH_SEC7, 0x3F, 0x0E);
+	for (i = 0; i < ARRAY_SIZE(tx_macro_reg_init); i++)
+		snd_soc_component_update_bits(component,
+				tx_macro_reg_init[i].reg,
+				tx_macro_reg_init[i].mask,
+				tx_macro_reg_init[i].val);
+
 	return 0;
 }
 
@@ -2253,6 +2348,7 @@ static void tx_macro_init_ops(struct macro_ops *ops,
 	ops->reg_wake_irq = tx_macro_reg_wake_irq;
 	ops->set_port_map = tx_macro_set_port_map;
 	ops->clk_switch = tx_macro_clk_switch;
+	ops->reg_evt_listener = tx_macro_register_event_listener;
 }
 
 static int tx_macro_probe(struct platform_device *pdev)
@@ -2332,6 +2428,7 @@ static int tx_macro_probe(struct platform_device *pdev)
 	tx_priv->swr_plat_data.write = NULL;
 	tx_priv->swr_plat_data.bulk_write = NULL;
 	tx_priv->swr_plat_data.clk = tx_macro_swrm_clock;
+	tx_priv->swr_plat_data.core_vote = tx_macro_core_vote;
 	tx_priv->swr_plat_data.handle_irq = NULL;
 
 	mutex_init(&tx_priv->mclk_lock);
