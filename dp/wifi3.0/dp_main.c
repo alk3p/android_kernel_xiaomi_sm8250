@@ -4784,7 +4784,7 @@ static void dp_vdev_flush_peers(struct cdp_vdev *vdev_handle, bool unmap_only)
 							 0);
 			}
 		} else {
-			peer = dp_peer_find_by_id(soc, peer_ids[i]);
+			peer = __dp_peer_find_by_id(soc, peer_ids[i]);
 
 			if (peer) {
 				dp_info("peer: %pM is getting flush",
@@ -9127,11 +9127,14 @@ void dp_flush_ring_hptp(struct dp_soc *soc, void *hal_ring)
 {
 	struct hal_srng *hal_srng = (struct hal_srng *)hal_ring;
 
-	if (hal_srng) {
+	if (hal_srng && hal_srng_get_clear_event(hal_srng,
+						 HAL_SRNG_FLUSH_EVENT)) {
 		/* Acquire the lock */
 		hal_srng_access_start(soc->hal_soc, hal_srng);
 
 		hal_srng_access_end(soc->hal_soc, hal_srng);
+
+		hal_srng_set_flush_last_ts(hal_srng);
 	}
 }
 

@@ -209,7 +209,9 @@
  * @QCA_NL80211_VENDOR_SUBCMD_SPECTRAL_SCAN_START: Start spectral scan. The scan
  *      parameters are specified by enum qca_wlan_vendor_attr_spectral_scan.
  *      This returns a cookie (%QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_COOKIE)
- *      identifying the operation in success case.
+ *      identifying the operation in success case. In failure cases an
+ *      error code (%QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_ERROR_CODE)
+ *      describing the reason for the failure is returned.
  * @QCA_NL80211_VENDOR_SUBCMD_SPECTRAL_SCAN_STOP: Stop spectral scan. This uses
  *      a cookie (%QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_COOKIE) from
  * @QCA_NL80211_VENDOR_SUBCMD_SPECTRAL_SCAN_START to identify the scan to
@@ -779,7 +781,8 @@ enum qca_wlan_auth_type {
  * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_MAX_PHY_RATE:
  *  Max phy rate of remote station
  * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_PACKETS:
- *  TX packets to remote station
+ *  Unsigned 32 bit value. Represent the number of all frames from host to
+ *  firmware.
  * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_BYTES:
  *  TX bytes to remote station
  * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_RX_PACKETS:
@@ -805,6 +808,39 @@ enum qca_wlan_auth_type {
  * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_SGI_ENABLE:
  *  Remote station short GI enable/disable
  * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_PAD: Attribute type for padding
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_RX_RETRY_COUNT:
+ *  Unsigned 32 bit value. Represents the number of retried frames received
+ *  from remote station.
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_RX_BC_MC_COUNT:
+ *  Unsigned 32 bit value. Represents the number of broadcast and multicast
+ *  frames received from remote station.
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_FAILURE:
+ *  Unsigned 32 bit value. Represents the number of frames which is failed to
+ *  be transmitted.
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_AVG_RSSI_PER_CHAIN:
+ *  An array of CHAINS x signed 32 bit value. Represents the average value of
+ *  RSSI per chain calculated for the remote station.
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_RETRY_SUCCEED:
+ *  Unsigned 32 bit value. Represents the number of frames retried but
+ *  successfully transmitted to remote station.
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_RX_LAST_PKT_RSSI:
+ *  Signed 32 bit value. Represents the RSSI calculated by last packet received
+ *  from remote station.
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_RETRY:
+ *  Unsigned 32 bit value. Represent the number of retried frames from host
+ *  to firmware.
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_RETRY_EXHAUST:
+ *  Unsigned 32 bit value. Represent the number of frames retried but finally
+ *  failed from host to firmware.
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_TOTAL_FW:
+ *  Unsigned 32 bit value. Represent the number of all frames from firmware
+ *  to remote station.
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_RETRY_FW:
+ *  Unsigned 32 bit value. Represent the number of retried frames from
+ *  firmware to remote station.
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_RETRY_EXHAUST_FW:
+ *  Unsigned 32 bit value. Represent the number of frames retried but finally
+ *  failed from firmware to remote station.
  * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_AFTER_LAST: After last
  */
 enum qca_wlan_vendor_attr_get_station_info {
@@ -835,6 +871,15 @@ enum qca_wlan_vendor_attr_get_station_info {
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_PAD,
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_RX_RETRY_COUNT,
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_RX_BC_MC_COUNT,
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_FAILURE,
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_AVG_RSSI_PER_CHAIN,
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_RETRY_SUCCEED,
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_RX_LAST_PKT_RSSI,
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_RETRY,
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_RETRY_EXHAUST,
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_TOTAL_FW,
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_RETRY_FW,
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_RETRY_EXHAUST_FW,
 
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_AFTER_LAST,
@@ -3986,6 +4031,11 @@ enum qca_wlan_vendor_attr_config {
 	 */
 	QCA_WLAN_VENDOR_ATTR_DISCONNECT_IES = 58,
 
+	/* 8-bit unsigned value for ELNA bypass.
+	 * 1-Enable, 0-Disable
+	 */
+	QCA_WLAN_VENDOR_ATTR_CONFIG_ELNA_BYPASS = 59,
+
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_CONFIG_AFTER_LAST,
 	QCA_WLAN_VENDOR_ATTR_CONFIG_MAX =
@@ -6109,6 +6159,35 @@ enum qca_wlan_vendor_attr_spectral_scan {
 	 * qca_wlan_vendor_attr_spectral_scan_request_type.
 	 */
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_REQUEST_TYPE = 23,
+	/* This specifies the frequency span over which spectral
+	 * scan would be carried out. Its value depends on the
+	 * value of QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_MODE and
+	 * the relation is as follows.
+	 * QCA_WLAN_VENDOR_SPECTRAL_SCAN_MODE_NORMAL
+	 *    Not applicable. Spectral scan would happen in the
+	 *    operating span.
+	 * QCA_WLAN_VENDOR_SPECTRAL_SCAN_MODE_AGILE
+	 *    Center frequency (in MHz) of the span of interest or
+	 *    for convenience, center frequency (in MHz) of any channel
+	 *    in the span of interest. If agile spectral scan is initiated
+	 *    without setting a valid frequency it returns the error code
+	 *    (QCA_WLAN_VENDOR_SPECTRAL_SCAN_ERR_PARAM_NOT_INITIALIZED).
+	 * u32 attribute.
+	 */
+	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_CONFIG_FREQUENCY = 24,
+	/* Spectral scan mode. u32 attribute.
+	 * It uses values defined in enum qca_wlan_vendor_spectral_scan_mode.
+	 * If this attribute is not present, it is assumed to be
+	 * normal mode (QCA_WLAN_VENDOR_SPECTRAL_SCAN_MODE_NORMAL).
+	 */
+	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_MODE = 25,
+	/* Spectral scan error code. u32 attribute.
+	 * It uses values defined in enum
+	 * qca_wlan_vendor_spectral_scan_error_code.
+	 * This attribute is included only in failure scenarios.
+	 */
+	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_ERROR_CODE = 26,
+
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_CONFIG_AFTER_LAST,
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_CONFIG_MAX =
 		QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_CONFIG_AFTER_LAST - 1,
@@ -6186,6 +6265,8 @@ enum qca_wlan_vendor_attr_spectral_cap {
 	 * u8 attribute.
 	 */
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_CAP_DEFAULT_AGC_MAX_GAIN = 10,
+	/* Flag attribute to indicate agile spectral scan capability */
+	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_CAP_AGILE_SPECTRAL = 11,
 
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_CAP_AFTER_LAST,
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_CAP_MAX =
@@ -6202,6 +6283,13 @@ enum qca_wlan_vendor_attr_spectral_scan_status {
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_STATUS_IS_ENABLED = 1,
 	/* Flag attribute to indicate whether spectral scan is in progress*/
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_STATUS_IS_ACTIVE = 2,
+	/* Spectral scan mode. u32 attribute.
+	 * It uses values defined in enum qca_wlan_vendor_spectral_scan_mode.
+	 * If this attribute is not present, normal mode
+	 * (QCA_WLAN_VENDOR_SPECTRAL_SCAN_MODE_NORMAL is assumed to be
+	 * requested.
+	 */
+	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_STATUS_MODE = 3,
 
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_STATUS_AFTER_LAST,
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_STATUS_MAX =
@@ -6260,6 +6348,43 @@ enum qca_wlan_vendor_attr_spectral_scan_request_type {
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_REQUEST_TYPE_SCAN_AND_CONFIG,
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_REQUEST_TYPE_SCAN,
 	QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_REQUEST_TYPE_CONFIG,
+};
+
+/**
+ * qca_wlan_vendor_spectral_scan_mode: Attribute values for
+ * QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_MODE in the vendor subcmd
+ * QCA_NL80211_VENDOR_SUBCMD_SPECTRAL_SCAN_START and
+ * QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_STATUS_MODE in the vendor subcmd
+ * QCA_NL80211_VENDOR_SUBCMD_SPECTRAL_SCAN_GET_STATUS. This represents the
+ * spectral scan modes.
+ * @QCA_WLAN_VENDOR_SPECTRAL_SCAN_MODE_NORMAL: Normal spectral scan:
+ * spectral scan in the current operating span.
+ * @QCA_WLAN_VENDOR_SPECTRAL_SCAN_MODE_AGILE: Agile spectral scan:
+ * spectral scan in the configured agile span.
+ */
+enum qca_wlan_vendor_spectral_scan_mode {
+	QCA_WLAN_VENDOR_SPECTRAL_SCAN_MODE_NORMAL = 0,
+	QCA_WLAN_VENDOR_SPECTRAL_SCAN_MODE_AGILE = 1,
+};
+
+/**
+ * qca_wlan_vendor_spectral_scan_error_code: Attribute values for
+ * QCA_WLAN_VENDOR_ATTR_SPECTRAL_SCAN_ERROR_CODE in the vendor subcmd
+ * QCA_NL80211_VENDOR_SUBCMD_SPECTRAL_SCAN_START.
+ * @QCA_WLAN_VENDOR_SPECTRAL_SCAN_ERR_PARAM_UNSUPPORTED: Changing the value
+ * of a parameter is not supported.
+ * @QCA_WLAN_VENDOR_SPECTRAL_SCAN_ERR_MODE_UNSUPPORTED: Requested spectral scan
+ * mode is not supported.
+ * @QCA_WLAN_VENDOR_SPECTRAL_SCAN_ERR_PARAM_INVALID_VALUE: A parameter
+ * has invalid value.
+ * @QCA_WLAN_VENDOR_SPECTRAL_SCAN_ERR_PARAM_NOT_INITIALIZED: A parameter
+ * is not initialized.
+ */
+enum qca_wlan_vendor_spectral_scan_error_code {
+	QCA_WLAN_VENDOR_SPECTRAL_SCAN_ERR_PARAM_UNSUPPORTED = 0,
+	QCA_WLAN_VENDOR_SPECTRAL_SCAN_ERR_MODE_UNSUPPORTED = 1,
+	QCA_WLAN_VENDOR_SPECTRAL_SCAN_ERR_PARAM_INVALID_VALUE = 2,
+	QCA_WLAN_VENDOR_SPECTRAL_SCAN_ERR_PARAM_NOT_INITIALIZED = 3,
 };
 
 /**
