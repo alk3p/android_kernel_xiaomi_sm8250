@@ -2610,6 +2610,11 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		policy_mgr_set_chan_switch_complete_evt(hdd_ctx->psoc);
 		wlan_hdd_enable_roaming(adapter,
 					RSO_SAP_CHANNEL_CHANGE);
+
+		/* Check any other sap need restart */
+		if (ap_ctx->sap_context->csa_reason ==
+		    CSA_REASON_UNSAFE_CHANNEL)
+			hdd_unsafe_channel_restart_sap(hdd_ctx);
 		return QDF_STATUS_SUCCESS;
 
 	default:
@@ -2875,6 +2880,7 @@ int hdd_softap_set_channel_change(struct net_device *dev, int target_channel,
 	uint8_t conc_rule1 = 0;
 	uint8_t scc_on_lte_coex = 0;
 	bool is_p2p_go_session = false;
+	struct wlan_objmgr_vdev *vdev;
 
 	hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	ret = wlan_hdd_validate_context(hdd_ctx);
@@ -2986,8 +2992,15 @@ int hdd_softap_set_channel_change(struct net_device *dev, int target_channel,
 	 * Post the Channel Change request to SAP.
 	 */
 
-	if (wlan_vdev_mlme_get_opmode(adapter->vdev) == QDF_P2P_GO_MODE)
+	vdev = hdd_objmgr_get_vdev(adapter);
+	if (!vdev) {
+		qdf_atomic_set(&adapter->ch_switch_in_progress, 0);
+		wlan_hdd_enable_roaming(adapter, RSO_SAP_CHANNEL_CHANGE);
+		return -EINVAL;
+	}
+	if (wlan_vdev_mlme_get_opmode(vdev) == QDF_P2P_GO_MODE)
 		is_p2p_go_session = true;
+	hdd_objmgr_put_vdev(vdev);
 
 	status = wlansap_set_channel_change_with_csa(
 		WLAN_HDD_GET_SAP_CTX_PTR(adapter),
@@ -6290,6 +6303,8 @@ static int __wlan_hdd_cfg80211_start_ap(struct wiphy *wiphy,
 		ucfg_nan_disable_concurrency(hdd_ctx->psoc);
 	}
 
+	/* NDI + SAP not supported */
+	ucfg_nan_check_and_disable_unsupported_ndi(hdd_ctx->psoc, true);
 	if (!policy_mgr_nan_sap_pre_enable_conc_check(hdd_ctx->psoc,
 						      PM_SAP_MODE, channel))
 		hdd_debug("NAN disabled due to concurrency constraints");

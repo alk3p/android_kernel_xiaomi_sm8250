@@ -15203,11 +15203,11 @@ static bool csr_enable_twt(struct mac_context *mac_ctx, tDot11fBeaconIEs *ie)
 
 	if ((IS_FEATURE_SUPPORTED_BY_FW(DOT11AX) ||
 	    mac_ctx->mlme_cfg->twt_cfg.is_twt_requestor_enabled) && ie &&
-	    (ie->QCN_IE.present || ie->he_cap.twt_responder)) {
+	    (ie->qcn_ie.present || ie->he_cap.twt_responder)) {
 		sme_debug("TWT is supported, hence disable UAPSD; twt req supp: %d,twt respon supp: %d, QCN_IE: %d",
 			  mac_ctx->mlme_cfg->twt_cfg.is_twt_requestor_enabled,
 			  ie->he_cap.twt_responder,
-			  ie->QCN_IE.present);
+			  ie->qcn_ie.present);
 		return true;
 	}
 	return false;
@@ -16713,7 +16713,8 @@ QDF_STATUS csr_send_mb_start_bss_req_msg(struct mac_context *mac, uint32_t
 	pMsg->add_ie_params = pParam->add_ie_params;
 	pMsg->obssEnabled = mac->roam.configParam.obssEnabled;
 	pMsg->sap_dot11mc = pParam->sap_dot11mc;
-	pMsg->vendor_vht_sap = mac->roam.configParam.vendor_vht_sap;
+	pMsg->vendor_vht_sap =
+		mac->mlme_cfg->vht_caps.vht_cap_info.vendor_24ghz_band;
 	pMsg->cac_duration_ms = pParam->cac_duration_ms;
 	pMsg->dfs_regdomain = pParam->dfs_regdomain;
 	pMsg->beacon_tx_rate = pParam->beacon_tx_rate;
@@ -19205,11 +19206,9 @@ static void csr_update_driver_assoc_ies(struct mac_context *mac_ctx,
 	uint8_t supp_chan_ie[DOT11F_IE_SUPPCHANNELS_MAX_LEN], supp_chan_ie_len;
 
 #ifdef FEATURE_WLAN_ESE
-	uint8_t ese_ie[DOT11F_IE_ESEVERSION_MAX_LEN]
-			= { 0x0, 0x40, 0x96, 0x3, ESE_VERSION_SUPPORTED};
+	uint8_t ese_ie[] = { 0x0, 0x40, 0x96, 0x3, ESE_VERSION_SUPPORTED};
 #endif
-	uint8_t qcn_ie[DOT11F_IE_QCN_IE_MAX_LEN]
-			= {0x8C, 0xFD, 0xF0, 0x1, QCN_IE_VERSION_SUBATTR_ID,
+	uint8_t qcn_ie[] = {0x8C, 0xFD, 0xF0, 0x1, QCN_IE_VERSION_SUBATTR_ID,
 				QCN_IE_VERSION_SUBATTR_DATA_LEN,
 				QCN_IE_VERSION_SUPPORTED,
 				QCN_IE_SUBVERSION_SUPPORTED};
@@ -19245,8 +19244,7 @@ static void csr_update_driver_assoc_ies(struct mac_context *mac_ctx,
 	/* Append ESE version IE if isEseIniFeatureEnabled INI is enabled */
 	if (mac_ctx->mlme_cfg->lfr.ese_enabled)
 		csr_append_assoc_ies(mac_ctx, req_buf, WLAN_ELEMID_VENDOR,
-					DOT11F_IE_ESEVERSION_MAX_LEN,
-					ese_ie);
+				     sizeof(ese_ie), ese_ie);
 #endif
 
 	if (mac_ctx->rrm.rrmPEContext.rrmEnable) {
@@ -19266,8 +19264,7 @@ static void csr_update_driver_assoc_ies(struct mac_context *mac_ctx,
 	/* Append QCN IE if g_support_qcn_ie INI is enabled */
 	if (mac_ctx->mlme_cfg->sta.qcn_ie_support)
 		csr_append_assoc_ies(mac_ctx, req_buf, WLAN_ELEMID_VENDOR,
-					DOT11F_IE_QCN_IE_MAX_LEN,
-					qcn_ie);
+				     sizeof(qcn_ie), qcn_ie);
 }
 
 /**
@@ -19549,6 +19546,9 @@ static void csr_update_score_params(struct mac_context *mac_ctx,
 		bss_score_params->band_weight_per_index;
 	req_score_params->nss_index_score =
 		bss_score_params->nss_weight_per_index;
+
+	req_score_params->vendor_roam_score_algorithm =
+			bss_score_params->vendor_roam_score_algorithm;
 
 	req_score_params->roam_score_delta = bss_score_params->roam_score_delta;
 	req_score_params->roam_trigger_bitmap =

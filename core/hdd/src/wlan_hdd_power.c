@@ -1264,6 +1264,7 @@ QDF_STATUS hdd_wlan_shutdown(void)
 	}
 
 	hdd_bus_bw_compute_timer_stop(hdd_ctx);
+	hdd_set_connection_in_progress(false);
 	policy_mgr_clear_concurrent_session_count(hdd_ctx->psoc);
 
 	hdd_debug("Invoking packetdump deregistration API");
@@ -1834,23 +1835,15 @@ static int __wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 	ucfg_p2p_cleanup_tx_by_psoc(hdd_ctx->psoc);
 	ucfg_p2p_cleanup_roc_by_psoc(hdd_ctx->psoc);
 
-	/* Stop ongoing scan on each interface */
-	hdd_for_each_adapter(hdd_ctx, adapter) {
-		if (sme_neighbor_middle_of_roaming(mac_handle,
-		    adapter->vdev_id) ||
-		    hdd_is_roaming_in_progress(hdd_ctx)) {
-			hdd_err("Roaming in progress, do not allow suspend");
-			wlan_hdd_inc_suspend_stats(hdd_ctx,
-						   SUSPEND_FAIL_ROAM);
-			return -EAGAIN;
-		}
-
-		wlan_abort_scan(hdd_ctx->pdev, INVAL_PDEV_ID,
-				adapter->vdev_id, INVALID_SCAN_ID, false);
+	if (hdd_is_connection_in_progress(NULL, NULL)) {
+		hdd_err_rl("Connection is in progress, rejecting suspend");
+		return -EINVAL;
 	}
 
-	/* flush any pending powersave timers */
+	/* abort ongoing scan and flush any pending powersave timers */
 	hdd_for_each_adapter(hdd_ctx, adapter) {
+		wlan_abort_scan(hdd_ctx->pdev, INVAL_PDEV_ID,
+				adapter->vdev_id, INVALID_SCAN_ID, false);
 		if (wlan_hdd_validate_vdev_id(adapter->vdev_id))
 			continue;
 
@@ -2105,13 +2098,21 @@ static int __wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 {
 	struct hdd_context *hdd_ctx = (struct hdd_context *) wiphy_priv(wiphy);
 	mac_handle_t mac_handle;
+	struct hdd_adapter *adapter;
 	struct qdf_mac_addr bssid = QDF_MAC_ADDR_BCAST_INIT;
-	struct qdf_mac_addr selfMac = QDF_MAC_ADDR_BCAST_INIT;
+	struct qdf_mac_addr selfmac;
 	QDF_STATUS status;
 	int errno;
 	int dbm;
 
 	hdd_enter();
+
+	if (!wdev) {
+		hdd_err("wdev is null, set tx power failed");
+		return -EIO;
+	}
+
+	adapter = WLAN_HDD_GET_PRIV_PTR(wdev->netdev);
 
 	if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam()) {
 		hdd_err("Command not allowed in FTM mode");
@@ -2125,6 +2126,23 @@ static int __wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 	errno = wlan_hdd_validate_context(hdd_ctx);
 	if (errno)
 		return errno;
+
+	if (wlan_hdd_validate_vdev_id(adapter->vdev_id))
+		return -EINVAL;
+
+	if (adapter->device_mode == QDF_SAP_MODE ||
+	    adapter->device_mode == QDF_P2P_GO_MODE) {
+		qdf_copy_macaddr(&bssid, &adapter->mac_addr);
+	} else {
+		struct hdd_station_ctx *sta_ctx =
+			WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+
+		if (eConnectionState_Associated ==
+		    sta_ctx->conn_info.conn_state)
+			qdf_copy_macaddr(&bssid, &sta_ctx->conn_info.bssid);
+	}
+
+	qdf_copy_macaddr(&selfmac, &adapter->mac_addr);
 
 	mac_handle = hdd_ctx->mac_handle;
 
@@ -2153,7 +2171,7 @@ static int __wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 	/* Fall through */
 	case NL80211_TX_POWER_LIMITED:
 	/* Limit TX power by the mBm parameter */
-		status = sme_set_max_tx_power(mac_handle, bssid, selfMac, dbm);
+		status = sme_set_max_tx_power(mac_handle, bssid, selfmac, dbm);
 		if (QDF_IS_STATUS_ERROR(status)) {
 			hdd_err("Setting maximum tx power failed, %d", status);
 			return -EIO;

@@ -794,6 +794,7 @@ struct wlan_mlme_powersave {
  * @tx_bf_cap: Transmit bf capability
  * @as_cap: Antenna sharing capability info
  * @disable_ldpc_with_txbf_ap: Disable ldpc capability
+ * @vht_mcs_10_11_supp: VHT MCS 10 & 11 support
  */
 struct mlme_vht_capabilities_info {
 	uint8_t supp_chan_width;
@@ -837,6 +838,7 @@ struct mlme_vht_capabilities_info {
 	uint8_t tx_bf_cap;
 	uint8_t as_cap;
 	bool disable_ldpc_with_txbf_ap;
+	bool vht_mcs_10_11_supp;
 };
 
 /**
@@ -1815,6 +1817,7 @@ struct wlan_mlme_per_slot_scoring {
  * @roam_trigger_bitmap: bitmap for various roam triggers
  * @roam_score_delta: percentage delta in roam score
  * @apsd_enabled: Enable automatic power save delivery
+ * @vendor_roam_score_algorithm: Preferred vendor roam score algorithm
  */
 struct wlan_mlme_scoring_cfg {
 	bool enable_scoring_for_roam;
@@ -1828,6 +1831,7 @@ struct wlan_mlme_scoring_cfg {
 	uint32_t roam_trigger_bitmap;
 	uint32_t roam_score_delta;
 	bool apsd_enabled;
+	uint32_t vendor_roam_score_algorithm;
 };
 
 /* struct wlan_mlme_threshold - Threshold related config items

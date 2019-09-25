@@ -197,20 +197,6 @@ QDF_STATUS mlme_get_peer_mic_len(struct wlan_objmgr_psoc *psoc, uint8_t pdev_id,
 	return QDF_STATUS_SUCCESS;
 }
 
-QDF_STATUS
-mlme_peer_object_created_notification(struct wlan_objmgr_peer *peer,
-				      void *arg)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-QDF_STATUS
-mlme_peer_object_destroyed_notification(struct wlan_objmgr_peer *peer,
-					void *arg)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
 #else
 
 QDF_STATUS mlme_get_peer_mic_len(struct wlan_objmgr_psoc *psoc, uint8_t pdev_id,
@@ -246,6 +232,7 @@ QDF_STATUS mlme_get_peer_mic_len(struct wlan_objmgr_psoc *psoc, uint8_t pdev_id,
 
 	return QDF_STATUS_SUCCESS;
 }
+#endif
 
 QDF_STATUS
 mlme_peer_object_created_notification(struct wlan_objmgr_peer *peer,
@@ -308,7 +295,6 @@ mlme_peer_object_destroyed_notification(struct wlan_objmgr_peer *peer,
 
 	return status;
 }
-#endif
 
 static void mlme_init_chainmask_cfg(struct wlan_objmgr_psoc *psoc,
 				    struct wlan_mlme_chainmask *chainmask_info)
@@ -1747,6 +1733,8 @@ static void mlme_init_scoring_cfg(struct wlan_objmgr_psoc *psoc,
 {
 	uint32_t total_weight;
 
+	scoring_cfg->vendor_roam_score_algorithm =
+		cfg_get(psoc, CFG_VENDOR_ROAM_SCORE_ALGORITHM);
 	scoring_cfg->enable_scoring_for_roam =
 		cfg_get(psoc, CFG_ENABLE_SCORING_FOR_ROAM);
 	scoring_cfg->weight_cfg.rssi_weightage =
@@ -1772,8 +1760,7 @@ static void mlme_init_scoring_cfg(struct wlan_objmgr_psoc *psoc,
 	scoring_cfg->weight_cfg.oce_wan_weightage =
 		cfg_get(psoc, CFG_SCORING_OCE_WAN_WEIGHTAGE);
 
-	total_weight = scoring_cfg->enable_scoring_for_roam +
-			scoring_cfg->weight_cfg.rssi_weightage +
+	total_weight =  scoring_cfg->weight_cfg.rssi_weightage +
 			scoring_cfg->weight_cfg.ht_caps_weightage +
 			scoring_cfg->weight_cfg.vht_caps_weightage +
 			scoring_cfg->weight_cfg.he_caps_weightage +
@@ -2753,3 +2740,31 @@ void mlme_set_roam_state(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_MAC_ID);
 }
 #endif
+
+void mlme_set_peer_pmf_status(struct wlan_objmgr_peer *peer,
+			      bool is_pmf_enabled)
+{
+	struct peer_mlme_priv_obj *peer_priv;
+
+	peer_priv = wlan_objmgr_peer_get_comp_private_obj(peer,
+							  WLAN_UMAC_COMP_MLME);
+	if (!peer_priv) {
+		mlme_legacy_err(" peer mlme component object is NULL");
+		return;
+	}
+	peer_priv->is_pmf_enabled = is_pmf_enabled;
+}
+
+bool mlme_get_peer_pmf_status(struct wlan_objmgr_peer *peer)
+{
+	struct peer_mlme_priv_obj *peer_priv;
+
+	peer_priv = wlan_objmgr_peer_get_comp_private_obj(peer,
+							  WLAN_UMAC_COMP_MLME);
+	if (!peer_priv) {
+		mlme_legacy_err("peer mlme component object is NULL");
+		return false;
+	}
+
+	return peer_priv->is_pmf_enabled;
+}

@@ -1766,7 +1766,7 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 			 * to ICS UI.
 			 */
 			if (eCSR_ROAM_LOSTLINK == roam_status) {
-				if (roam_info->reasonCode ==
+				if (roam_info && roam_info->reasonCode ==
 				    eSIR_MAC_PEER_STA_REQ_LEAVING_BSS_REASON)
 					pr_info("wlan: disconnected due to poor signal, rssi is %d dB\n",
 						roam_info->rxRssi);
@@ -1857,9 +1857,7 @@ static QDF_STATUS hdd_dis_connect_handler(struct hdd_adapter *adapter,
 		hdd_debug("roam_result: %d", roam_result);
 
 		/* clear scan cache for Link Lost */
-		if (eCSR_ROAM_RESULT_DEAUTH_IND == roam_result ||
-		    eCSR_ROAM_RESULT_DISASSOC_IND == roam_result ||
-		    eCSR_ROAM_LOSTLINK == roam_status) {
+		if (eCSR_ROAM_LOSTLINK == roam_status) {
 			wlan_hdd_cfg80211_unlink_bss(adapter,
 				sta_ctx->conn_info.bssid.bytes,
 				sta_ctx->conn_info.ssid.SSID.ssId,

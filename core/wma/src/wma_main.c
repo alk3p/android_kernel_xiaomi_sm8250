@@ -97,6 +97,9 @@
 #include "init_cmd_api.h"
 #include "nan_ucfg_api.h"
 #include "wma_coex.h"
+#ifdef DIRECT_BUF_RX_ENABLE
+#include <target_if_direct_buf_rx_api.h>
+#endif
 
 #define WMA_LOG_COMPLETION_TIMER 3000 /* 3 seconds */
 #define WMI_TLV_HEADROOM 128
@@ -5459,6 +5462,7 @@ static void wma_update_target_ext_vht_cap(struct target_psoc_info *tgt_hdl,
 	uint32_t vht_cap_info_2g, vht_cap_info_5g;
 	struct wma_tgt_vht_cap tmp_vht_cap = {0}, tmp_cap = {0};
 	struct wlan_psoc_host_mac_phy_caps *mac_phy_cap;
+	uint32_t vht_mcs_10_11_supp = 0;
 
 	total_mac_phy_cnt = target_psoc_get_total_mac_phy_cnt(tgt_hdl);
 	num_hw_modes = target_psoc_get_num_hw_modes(tgt_hdl);
@@ -5482,6 +5486,14 @@ static void wma_update_target_ext_vht_cap(struct target_psoc_info *tgt_hdl,
 		if (vht_cap_info_5g)
 			wma_derive_ext_vht_cap(&tmp_vht_cap,
 					vht_cap_info_5g);
+		if (WMI_GET_BITS(mac_phy_cap[i].vht_supp_mcs_5G, 16, 2) &&
+		    WMI_VHT_MCS_NOTIFY_EXT_SS_GET(mac_phy_cap[i].
+			    vht_supp_mcs_5G))
+			vht_mcs_10_11_supp = 1;
+		if (WMI_GET_BITS(mac_phy_cap[i].vht_supp_mcs_2G, 16, 2) &&
+		    WMI_VHT_MCS_NOTIFY_EXT_SS_GET(mac_phy_cap[i].
+			    vht_supp_mcs_2G))
+			vht_mcs_10_11_supp = 1;
 	}
 
 	if (qdf_mem_cmp(&tmp_cap, &tmp_vht_cap,
@@ -5489,15 +5501,17 @@ static void wma_update_target_ext_vht_cap(struct target_psoc_info *tgt_hdl,
 			qdf_mem_copy(vht_cap, &tmp_vht_cap,
 					sizeof(struct wma_tgt_vht_cap));
 	}
-
+	vht_cap->vht_mcs_10_11_supp = vht_mcs_10_11_supp;
 	WMA_LOGD("%s: [ext vhtcap] max_mpdu %d supp_chan_width %x rx_ldpc %x\n"
 		"short_gi_80 %x tx_stbc %x rx_stbc %x txop_ps %x\n"
-		"su_bformee %x mu_bformee %x max_ampdu_len_exp %d", __func__,
+		"su_bformee %x mu_bformee %x max_ampdu_len_exp %d\n"
+		"vht_mcs_10_11_supp %d", __func__,
 		vht_cap->vht_max_mpdu, vht_cap->supp_chan_width,
 		vht_cap->vht_rx_ldpc, vht_cap->vht_short_gi_80,
 		vht_cap->vht_tx_stbc, vht_cap->vht_rx_stbc,
 		vht_cap->vht_txop_ps, vht_cap->vht_su_bformee,
-		vht_cap->vht_mu_bformee, vht_cap->vht_max_ampdu_len_exp);
+		vht_cap->vht_mu_bformee, vht_cap->vht_max_ampdu_len_exp,
+		vht_cap->vht_mcs_10_11_supp);
 }
 
 static void
@@ -6534,14 +6548,14 @@ static void wma_print_mac_phy_capabilities(struct wlan_psoc_host_mac_phy_caps
 	WMA_LOGD("\t: ampdu_density[%d]", cap->ampdu_density);
 	WMA_LOGD("\t: max_bw_supported_2G[%d]", cap->max_bw_supported_2G);
 	WMA_LOGD("\t: ht_cap_info_2G[%d]", cap->ht_cap_info_2G);
-	WMA_LOGD("\t: vht_cap_info_2G[%d]", cap->vht_cap_info_2G);
-	WMA_LOGD("\t: vht_supp_mcs_2G[%d]", cap->vht_supp_mcs_2G);
+	WMA_LOGD("\t: vht_cap_info_2G[0x%0X]", cap->vht_cap_info_2G);
+	WMA_LOGD("\t: vht_supp_mcs_2G[0x%0X]", cap->vht_supp_mcs_2G);
 	WMA_LOGD("\t: tx_chain_mask_2G[%d]", cap->tx_chain_mask_2G);
 	WMA_LOGD("\t: rx_chain_mask_2G[%d]", cap->rx_chain_mask_2G);
 	WMA_LOGD("\t: max_bw_supported_5G[%d]", cap->max_bw_supported_5G);
 	WMA_LOGD("\t: ht_cap_info_5G[%d]", cap->ht_cap_info_5G);
-	WMA_LOGD("\t: vht_cap_info_5G[%d]", cap->vht_cap_info_5G);
-	WMA_LOGD("\t: vht_supp_mcs_5G[%d]", cap->vht_supp_mcs_5G);
+	WMA_LOGD("\t: vht_cap_info_5G[0x%0X]", cap->vht_cap_info_5G);
+	WMA_LOGD("\t: vht_supp_mcs_5G[0x%0X]", cap->vht_supp_mcs_5G);
 	WMA_LOGD("\t: tx_chain_mask_5G[%d]", cap->tx_chain_mask_5G);
 	WMA_LOGD("\t: rx_chain_mask_5G[%d]", cap->rx_chain_mask_5G);
 	WMA_LOGD("\t: he_cap_info_2G[0][%08x]", cap->he_cap_info_2G[0]);
@@ -6867,6 +6881,35 @@ static void wma_populate_soc_caps(t_wma_handle *wma_handle,
 }
 
 /**
+ * wma_init_dbr_params() - init dbr params
+ * @wma_handle: pointer to wma global structure
+ *
+ * This API initializes params of direct buffer rx component.
+ *
+ * Return: none
+ */
+#ifdef DIRECT_BUF_RX_ENABLE
+static void wma_init_dbr_params(t_wma_handle *wma_handle)
+{
+	struct hif_opaque_softc *hif_ctx = cds_get_context(QDF_MODULE_ID_HIF);
+	void *hal_soc;
+
+	if (!hif_ctx) {
+		WMA_LOGE("invalid hif context");
+		return;
+	}
+
+	hal_soc = hif_get_hal_handle(hif_ctx);
+	direct_buf_rx_target_attach(wma_handle->psoc, hal_soc,
+				    wma_handle->qdf_dev);
+}
+#else
+static inline void wma_init_dbr_params(t_wma_handle *wma_handle)
+{
+}
+#endif
+
+/**
  * wma_rx_service_ready_ext_event() - evt handler for sevice ready ext event.
  * @handle: wma handle
  * @event: params of the service ready extended event
@@ -6971,6 +7014,8 @@ int wma_rx_service_ready_ext_event(void *handle, uint8_t *event,
 		wlan_res_cfg->tstamp64_en = false;
 		cdp_cfg_set_tx_compl_tsf64(soc, false);
 	}
+
+	wma_init_dbr_params(wma_handle);
 
 	return 0;
 }
@@ -9688,3 +9733,32 @@ QDF_STATUS wma_config_bmiss_bcnt_params(uint32_t vdev_id, uint32_t first_cnt,
 	return status;
 }
 
+QDF_STATUS wma_get_rx_chainmask(uint8_t pdev_id, uint32_t *chainmask_2g,
+				uint32_t *chainmask_5g)
+{
+	struct wlan_psoc_host_mac_phy_caps *mac_phy_cap;
+	uint8_t total_mac_phy_cnt;
+	struct target_psoc_info *tgt_hdl;
+	tp_wma_handle wma_handle = cds_get_context(QDF_MODULE_ID_WMA);
+
+	tgt_hdl = wlan_psoc_get_tgt_if_handle(wma_handle->psoc);
+	if (!tgt_hdl) {
+		WMA_LOGE("%s: target psoc info is NULL", __func__);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	total_mac_phy_cnt = target_psoc_get_total_mac_phy_cnt(tgt_hdl);
+	if (total_mac_phy_cnt <= pdev_id) {
+		WMA_LOGE("%s: mac phy cnt %d, pdev id %d", __func__,
+			 total_mac_phy_cnt, pdev_id);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	mac_phy_cap = target_psoc_get_mac_phy_cap(tgt_hdl);
+	*chainmask_2g = mac_phy_cap[pdev_id].rx_chain_mask_2G;
+	*chainmask_5g = mac_phy_cap[pdev_id].rx_chain_mask_5G;
+	WMA_LOGD("%s, pdev id: %d, rx chainmask 2g:%d, rx chainmask 5g:%d",
+		 __func__, pdev_id, *chainmask_2g, *chainmask_5g);
+
+	return QDF_STATUS_SUCCESS;
+}

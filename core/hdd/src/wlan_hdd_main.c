@@ -335,6 +335,8 @@ static const struct category_info cinfo[MAX_SUPPORTED_CATEGORY] = {
 	[QDF_MODULE_ID_CP_STATS] = {QDF_TRACE_LEVEL_ALL},
 	[QDF_MODULE_ID_INTEROP_ISSUES_AP] = {QDF_TRACE_LEVEL_ALL},
 	[QDF_MODULE_ID_BLACKLIST_MGR] = {QDF_TRACE_LEVEL_ALL},
+	[QDF_MODULE_ID_DIRECT_BUF_RX] = {QDF_TRACE_LEVEL_ALL},
+	[QDF_MODULE_ID_SPECTRAL] = {QDF_TRACE_LEVEL_ALL},
 };
 
 struct notifier_block hdd_netdev_notifier;
@@ -2597,6 +2599,8 @@ uint32_t hdd_wlan_get_version(struct hdd_context *hdd_ctx,
 			      const size_t version_len, uint8_t *version)
 {
 	uint32_t size;
+	uint8_t reg_major = 0, reg_minor = 0, bdf_major = 0, bdf_minor = 0;
+	struct target_psoc_info *tgt_hdl;
 
 	if (!hdd_ctx) {
 		hdd_err("Invalid context, HDD context is null");
@@ -2607,9 +2611,13 @@ uint32_t hdd_wlan_get_version(struct hdd_context *hdd_ctx,
 		hdd_err("Invalid buffer pointr or buffer len\n");
 		return 0;
 	}
+	tgt_hdl = wlan_psoc_get_tgt_if_handle(hdd_ctx->psoc);
+	if (tgt_hdl)
+		target_psoc_get_version_info(tgt_hdl, &reg_major, &reg_minor,
+					     &bdf_major, &bdf_minor);
 
 	size = scnprintf(version, version_len,
-			 "Host SW:%s, FW:%d.%d.%d.%d.%d.%d, HW:%s, Board ver: %x Ref design id: %x, Customer id: %x, Project id: %x, Board Data Rev: %x",
+			 "Host SW:%s, FW:%d.%d.%d.%d.%d.%d, HW:%s, Board ver: %x Ref design id: %x, Customer id: %x, Project id: %x, Board Data Rev: %x, REG DB: %u:%u, BDF REG DB: %u:%u",
 			 QWLAN_VERSIONSTR,
 			 hdd_ctx->fw_version_info.major_spid,
 			 hdd_ctx->fw_version_info.minor_spid,
@@ -2622,7 +2630,8 @@ uint32_t hdd_wlan_get_version(struct hdd_context *hdd_ctx,
 			 hdd_ctx->hw_bd_info.ref_design_id,
 			 hdd_ctx->hw_bd_info.customer_id,
 			 hdd_ctx->hw_bd_info.project_id,
-			 hdd_ctx->hw_bd_info.board_data_rev);
+			 hdd_ctx->hw_bd_info.board_data_rev,
+			 reg_major, reg_minor, bdf_major, bdf_minor);
 
 	return size;
 }
@@ -2935,7 +2944,6 @@ int hdd_wlan_start_modules(struct hdd_context *hdd_ctx, bool reinit)
 	QDF_STATUS status;
 	bool unint = false;
 	void *hif_ctx;
-	struct target_psoc_info *tgt_hdl;
 
 	qdf_dev = cds_get_context(QDF_MODULE_ID_QDF_DEVICE);
 	if (!qdf_dev) {
@@ -3140,10 +3148,9 @@ deregister_cb:
 	hdd_deregister_cb(hdd_ctx);
 
 cds_txrx_free:
-	tgt_hdl = wlan_psoc_get_tgt_if_handle(hdd_ctx->psoc);
 
-	if (tgt_hdl && target_psoc_get_wmi_ready(tgt_hdl)) {
-		hdd_runtime_suspend_context_deinit(hdd_ctx);
+	hdd_runtime_suspend_context_deinit(hdd_ctx);
+	if (hdd_ctx->pdev) {
 		dispatcher_pdev_close(hdd_ctx->pdev);
 		hdd_objmgr_release_and_destroy_pdev(hdd_ctx);
 	}
@@ -5867,6 +5874,7 @@ QDF_STATUS hdd_stop_adapter(struct hdd_context *hdd_ctx,
 	if (adapter->scan_info.default_scan_ies) {
 		qdf_mem_free(adapter->scan_info.default_scan_ies);
 		adapter->scan_info.default_scan_ies = NULL;
+		adapter->scan_info.default_scan_ies_len = 0;
 	}
 
 	hdd_exit();
@@ -8186,6 +8194,30 @@ static void hdd_pld_request_bus_bandwidth(struct hdd_context *hdd_ctx,
 	hdd_display_periodic_stats(hdd_ctx, (total_pkts > 0) ? true : false);
 }
 
+#ifdef WDI3_STATS_UPDATE
+static inline
+void hdd_ipa_set_perf_level(struct hdd_context *hdd_ctx,
+			    uint64_t *tx_pkts, uint64_t *rx_pkts,
+			    uint32_t *ipa_tx_pkts, uint32_t *ipa_rx_pkts)
+{
+}
+#else
+static void hdd_ipa_set_perf_level(struct hdd_context *hdd_ctx,
+				   uint64_t *tx_pkts, uint64_t *rx_pkts,
+				   uint32_t *ipa_tx_pkts, uint32_t *ipa_rx_pkts)
+{
+	if (ucfg_ipa_is_fw_wdi_activated(hdd_ctx->pdev)) {
+		ucfg_ipa_uc_stat_query(hdd_ctx->pdev, ipa_tx_pkts,
+				       ipa_rx_pkts);
+		*tx_pkts += *ipa_tx_pkts;
+		*rx_pkts += *ipa_rx_pkts;
+
+		ucfg_ipa_set_perf_level(hdd_ctx->pdev, *tx_pkts, *rx_pkts);
+		ucfg_ipa_uc_stat_request(hdd_ctx->pdev, 2);
+	}
+}
+#endif
+
 #define HDD_BW_GET_DIFF(_x, _y) (unsigned long)((ULONG_MAX - (_y)) + (_x) + 1)
 static void __hdd_bus_bw_work_handler(struct hdd_context *hdd_ctx)
 {
@@ -8197,6 +8229,7 @@ static void __hdd_bus_bw_work_handler(struct hdd_context *hdd_ctx)
 	A_STATUS ret;
 	bool connected = false;
 	uint32_t ipa_tx_packets = 0, ipa_rx_packets = 0;
+	uint64_t sta_tx_bytes, sap_tx_bytes;
 
 	if (wlan_hdd_validate_context(hdd_ctx))
 		goto stop_work;
@@ -8251,8 +8284,13 @@ static void __hdd_bus_bw_work_handler(struct hdd_context *hdd_ctx)
 			}
 		}
 
-		if (adapter->device_mode == QDF_SAP_MODE)
+		if (adapter->device_mode == QDF_SAP_MODE) {
 			con_sap_adapter = adapter;
+			sap_tx_bytes = adapter->stats.tx_bytes;
+		}
+
+		if (adapter->device_mode == QDF_STA_MODE)
+			sta_tx_bytes = adapter->stats.tx_bytes;
 
 		total_rx += adapter->stats.rx_packets;
 		total_tx += adapter->stats.tx_packets;
@@ -8275,19 +8313,14 @@ static void __hdd_bus_bw_work_handler(struct hdd_context *hdd_ctx)
 	tx_packets += fwd_tx_packets_diff;
 	rx_packets += fwd_rx_packets_diff;
 
-	if (ucfg_ipa_is_fw_wdi_activated(hdd_ctx->pdev)) {
-		ucfg_ipa_uc_stat_query(hdd_ctx->pdev, &ipa_tx_packets,
-				       &ipa_rx_packets);
-		tx_packets += (uint64_t)ipa_tx_packets;
-		rx_packets += (uint64_t)ipa_rx_packets;
+	/* Send embedded Tx packet bytes on STA & SAP interface to IPA driver */
+	ucfg_ipa_update_tx_stats(hdd_ctx->pdev, sta_tx_bytes, sap_tx_bytes);
 
-		if (con_sap_adapter) {
-			con_sap_adapter->stats.tx_packets += ipa_tx_packets;
-			con_sap_adapter->stats.rx_packets += ipa_rx_packets;
-		}
-
-		ucfg_ipa_set_perf_level(hdd_ctx->pdev, tx_packets, rx_packets);
-		ucfg_ipa_uc_stat_request(hdd_ctx->pdev, 2);
+	hdd_ipa_set_perf_level(hdd_ctx, &tx_packets, &rx_packets,
+			       &ipa_tx_packets, &ipa_rx_packets);
+	if (con_sap_adapter) {
+		con_sap_adapter->stats.tx_packets += ipa_tx_packets;
+		con_sap_adapter->stats.rx_packets += ipa_rx_packets;
 	}
 
 	hdd_pld_request_bus_bandwidth(hdd_ctx, tx_packets, rx_packets);
@@ -8400,41 +8433,41 @@ void wlan_hdd_display_tx_rx_histogram(struct hdd_context *hdd_ctx)
 	int i;
 
 #ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
-	hdd_nofl_info("BW compute Interval: %d ms",
-		      hdd_ctx->config->bus_bw_compute_interval);
-	hdd_nofl_info("BW TH - Very High: %d High: %d Med: %d Low: %d",
-		      hdd_ctx->config->bus_bw_very_high_threshold,
-		      hdd_ctx->config->bus_bw_high_threshold,
-		      hdd_ctx->config->bus_bw_medium_threshold,
-		      hdd_ctx->config->bus_bw_low_threshold);
-	hdd_nofl_info("Enable TCP DEL ACK: %d",
-		      hdd_ctx->en_tcp_delack_no_lro);
-	hdd_nofl_info("TCP DEL High TH: %d TCP DEL Low TH: %d",
-		      hdd_ctx->config->tcp_delack_thres_high,
-		      hdd_ctx->config->tcp_delack_thres_low);
-	hdd_nofl_info("TCP TX HIGH TP TH: %d (Use to set tcp_output_bytes_limit)",
-		      hdd_ctx->config->tcp_tx_high_tput_thres);
+	hdd_nofl_debug("BW compute Interval: %d ms",
+		       hdd_ctx->config->bus_bw_compute_interval);
+	hdd_nofl_debug("BW TH - Very High: %d High: %d Med: %d Low: %d",
+		       hdd_ctx->config->bus_bw_very_high_threshold,
+		       hdd_ctx->config->bus_bw_high_threshold,
+		       hdd_ctx->config->bus_bw_medium_threshold,
+		       hdd_ctx->config->bus_bw_low_threshold);
+	hdd_nofl_debug("Enable TCP DEL ACK: %d",
+		       hdd_ctx->en_tcp_delack_no_lro);
+	hdd_nofl_debug("TCP DEL High TH: %d TCP DEL Low TH: %d",
+		       hdd_ctx->config->tcp_delack_thres_high,
+		       hdd_ctx->config->tcp_delack_thres_low);
+	hdd_nofl_debug("TCP TX HIGH TP TH: %d (Use to set tcp_output_bytes_limit)",
+		       hdd_ctx->config->tcp_tx_high_tput_thres);
 #endif /*WLAN_FEATURE_DP_BUS_BANDWIDTH*/
 
-	hdd_nofl_info("Total entries: %d Current index: %d",
-		      NUM_TX_RX_HISTOGRAM, hdd_ctx->hdd_txrx_hist_idx);
+	hdd_nofl_debug("Total entries: %d Current index: %d",
+		       NUM_TX_RX_HISTOGRAM, hdd_ctx->hdd_txrx_hist_idx);
 
-	hdd_nofl_info("[index][timestamp]: interval_rx, interval_tx, bus_bw_level, RX TP Level, TX TP Level, Rx:Tx pm_qos");
+	hdd_nofl_debug("[index][timestamp]: interval_rx, interval_tx, bus_bw_level, RX TP Level, TX TP Level, Rx:Tx pm_qos");
 
 	for (i = 0; i < NUM_TX_RX_HISTOGRAM; i++) {
 		/* using hdd_log to avoid printing function name */
 		if (hdd_ctx->hdd_txrx_hist[i].qtime > 0)
-			hdd_nofl_info("[%3d][%15llu]: %6llu, %6llu, %s, %s, %s, %s:%s",
-				      i, hdd_ctx->hdd_txrx_hist[i].qtime,
-				      hdd_ctx->hdd_txrx_hist[i].interval_rx,
-				      hdd_ctx->hdd_txrx_hist[i].interval_tx,
-				      convert_level_to_string(
+			hdd_nofl_debug("[%3d][%15llu]: %6llu, %6llu, %s, %s, %s, %s:%s",
+				       i, hdd_ctx->hdd_txrx_hist[i].qtime,
+				       hdd_ctx->hdd_txrx_hist[i].interval_rx,
+				       hdd_ctx->hdd_txrx_hist[i].interval_tx,
+				       convert_level_to_string(
 					hdd_ctx->hdd_txrx_hist[i].
 						next_vote_level),
-				      convert_level_to_string(
+				       convert_level_to_string(
 					hdd_ctx->hdd_txrx_hist[i].
 						next_rx_level),
-				      convert_level_to_string(
+				       convert_level_to_string(
 					hdd_ctx->hdd_txrx_hist[i].
 						next_tx_level),
 				hdd_ctx->hdd_txrx_hist[i].rx_pm_qos_high ?
@@ -8569,10 +8602,10 @@ wlan_hdd_display_netif_queue_history(struct hdd_context *hdd_ctx,
 	hdd_for_each_adapter(hdd_ctx, adapter) {
 		if (adapter->vdev_id == CDP_INVALID_VDEV_ID)
 			continue;
-		hdd_nofl_info("Netif queue operation statistics:");
-		hdd_nofl_info("vdev_id %d device mode %d",
-			      adapter->vdev_id, adapter->device_mode);
-		hdd_nofl_info("Current pause_map value %x", adapter->pause_map);
+		hdd_nofl_debug("Netif queue operation statistics:");
+		hdd_nofl_debug("vdev_id %d device mode %d",
+			       adapter->vdev_id, adapter->device_mode);
+		hdd_nofl_debug("Current pause_map %x", adapter->pause_map);
 		curr_time = qdf_system_ticks();
 		total = curr_time - adapter->start_time;
 		delta = curr_time - adapter->last_time;
@@ -8583,11 +8616,11 @@ wlan_hdd_display_netif_queue_history(struct hdd_context *hdd_ctx,
 			unpause = adapter->total_unpause_time + delta;
 			pause = adapter->total_pause_time;
 		}
-		hdd_nofl_info("Total: %ums Pause: %ums Unpause: %ums",
-			      qdf_system_ticks_to_msecs(total),
-			      qdf_system_ticks_to_msecs(pause),
-			      qdf_system_ticks_to_msecs(unpause));
-		hdd_nofl_info("reason_type: pause_cnt: unpause_cnt: pause_time");
+		hdd_nofl_debug("Total: %ums Pause: %ums Unpause: %ums",
+			       qdf_system_ticks_to_msecs(total),
+			       qdf_system_ticks_to_msecs(pause),
+			       qdf_system_ticks_to_msecs(unpause));
+		hdd_nofl_debug("reason_type: pause_cnt: unpause_cnt: pause_time");
 
 		for (i = WLAN_CONTROL_PATH; i < WLAN_REASON_TYPE_MAX; i++) {
 			qdf_time_t pause_delta = 0;
@@ -8596,24 +8629,24 @@ wlan_hdd_display_netif_queue_history(struct hdd_context *hdd_ctx,
 				pause_delta = delta;
 
 			/* using hdd_log to avoid printing function name */
-			hdd_nofl_info("%s: %d: %d: %ums",
-				      hdd_reason_type_to_string(i),
-				      adapter->queue_oper_stats[i].pause_count,
-				      adapter->queue_oper_stats[i].
+			hdd_nofl_debug("%s: %d: %d: %ums",
+				       hdd_reason_type_to_string(i),
+				       adapter->queue_oper_stats[i].pause_count,
+				       adapter->queue_oper_stats[i].
 					unpause_count,
-				      qdf_system_ticks_to_msecs(
-				      adapter->queue_oper_stats[i].
+				       qdf_system_ticks_to_msecs(
+				       adapter->queue_oper_stats[i].
 					total_pause_time + pause_delta));
 		}
 
-		hdd_nofl_info("Netif queue operation history: Total entries: %d current index %d(-1) time %u",
-			      WLAN_HDD_MAX_HISTORY_ENTRY,
-			      adapter->history_index,
-			      qdf_system_ticks_to_msecs(qdf_system_ticks()));
+		hdd_nofl_debug("Netif queue operation history: Total entries: %d current index %d(-1) time %u",
+			       WLAN_HDD_MAX_HISTORY_ENTRY,
+			       adapter->history_index,
+			       qdf_system_ticks_to_msecs(qdf_system_ticks()));
 
-		hdd_nofl_info("%2s%20s%50s%30s%10s  %s",
-			      "#", "time(ms)", "action_type", "reason_type",
-			      "pause_map", "netdev-queue-status");
+		hdd_nofl_debug("%2s%20s%50s%30s%10s  %s",
+			       "#", "time(ms)", "action_type", "reason_type",
+			       "pause_map", "netdev-queue-status");
 
 		for (i = 0; i < WLAN_HDD_MAX_HISTORY_ENTRY; i++) {
 			/* using hdd_log to avoid printing function name */
@@ -8623,17 +8656,17 @@ wlan_hdd_display_netif_queue_history(struct hdd_context *hdd_ctx,
 			wlan_hdd_dump_queue_history_state(q_hist_ptr,
 							  q_status_buf,
 							  sizeof(q_status_buf));
-			hdd_nofl_info("%2d%20u%50s%30s%10x  %s",
-				      i, qdf_system_ticks_to_msecs(
+			hdd_nofl_debug("%2d%20u%50s%30s%10x  %s",
+				       i, qdf_system_ticks_to_msecs(
 					adapter->queue_oper_history[i].time),
-				      hdd_action_type_to_string(
+				       hdd_action_type_to_string(
 					adapter->queue_oper_history[i].
 						netif_action),
-				      hdd_reason_type_to_string(
+				       hdd_reason_type_to_string(
 					adapter->queue_oper_history[i].
 						netif_reason),
-				      adapter->queue_oper_history[i].pause_map,
-				      q_status_buf);
+				       adapter->queue_oper_history[i].pause_map,
+				       q_status_buf);
 		}
 	}
 }
@@ -9020,9 +9053,7 @@ void hdd_unsafe_channel_restart_sap(struct hdd_context *hdd_ctxt)
 						CSA_REASON_UNSAFE_CHANNEL);
 				hdd_switch_sap_channel(adapter, restart_chan,
 						       true);
-				hdd_store_sap_restart_channel(
-							restart_chan,
-							restart_chan_store);
+				return;
 			}
 			else {
 				hdd_debug("sending coex indication");
@@ -9557,8 +9588,6 @@ int hdd_psoc_idle_shutdown(struct device *dev)
 	else
 		ret =  __hdd_psoc_idle_shutdown(hdd_ctx);
 
-	cds_set_recovery_in_progress(false);
-
 	return ret;
 }
 
@@ -9566,7 +9595,9 @@ static int __hdd_psoc_idle_restart(struct hdd_context *hdd_ctx)
 {
 	int ret;
 
-	hdd_soc_idle_restart_lock(hdd_ctx->parent_dev);
+	ret = hdd_soc_idle_restart_lock(hdd_ctx->parent_dev);
+	if (ret)
+		return ret;
 
 	ret = hdd_wlan_start_modules(hdd_ctx, false);
 
@@ -9599,7 +9630,9 @@ int hdd_trigger_psoc_idle_restart(struct hdd_context *hdd_ctx)
 		return 0;
 	}
 
-	hdd_soc_idle_restart_lock(hdd_ctx->parent_dev);
+	ret = hdd_soc_idle_restart_lock(hdd_ctx->parent_dev);
+	if (ret)
+		return ret;
 	ret = pld_idle_restart(hdd_ctx->parent_dev, hdd_psoc_idle_restart);
 	hdd_soc_idle_restart_unlock();
 
@@ -9627,6 +9660,10 @@ static void hdd_psoc_idle_timeout_callback(void *priv)
 		hdd_debug("System suspend in progress. Restart idle shutdown timer");
 		hdd_psoc_idle_timer_start(hdd_ctx);
 	}
+
+	/* Clear the recovery flag for PCIe discrete soc after idle shutdown*/
+	if (PLD_BUS_TYPE_PCIE == pld_get_bus_type(hdd_ctx->parent_dev))
+		cds_set_recovery_in_progress(false);
 }
 
 #ifdef WLAN_LOGGING_SOCK_SVC_ENABLE
@@ -13400,22 +13437,22 @@ static QDF_STATUS hdd_component_init(void)
 	QDF_STATUS status;
 
 	/* initialize converged components */
-	status = target_if_init(wma_get_psoc_from_scn_handle);
-	if (QDF_IS_STATUS_ERROR(status))
-		return status;
-
 	status = ucfg_mlme_global_init();
 	if (QDF_IS_STATUS_ERROR(status))
-		goto target_if_deinit;
+		return status;
 
 	status = dispatcher_init();
 	if (QDF_IS_STATUS_ERROR(status))
 		goto mlme_global_deinit;
 
+	status = target_if_init(wma_get_psoc_from_scn_handle);
+	if (QDF_IS_STATUS_ERROR(status))
+		goto dispatcher_deinit;
+
 	/* initialize non-converged components */
 	status = ucfg_mlme_init();
 	if (QDF_IS_STATUS_ERROR(status))
-		goto dispatcher_deinit;
+		goto target_if_deinit;
 
 	status = ucfg_fwol_init();
 	if (QDF_IS_STATUS_ERROR(status))
@@ -13492,12 +13529,12 @@ fwol_deinit:
 	ucfg_fwol_deinit();
 mlme_deinit:
 	ucfg_mlme_deinit();
+target_if_deinit:
+	target_if_deinit();
 dispatcher_deinit:
 	dispatcher_deinit();
 mlme_global_deinit:
 	ucfg_mlme_global_deinit();
-target_if_deinit:
-	target_if_deinit();
 
 	return status;
 }
@@ -13525,9 +13562,9 @@ static void hdd_component_deinit(void)
 	ucfg_mlme_deinit();
 
 	/* deinitialize converged components */
+	target_if_deinit();
 	dispatcher_deinit();
 	ucfg_mlme_global_deinit();
-	target_if_deinit();
 }
 
 QDF_STATUS hdd_component_psoc_open(struct wlan_objmgr_psoc *psoc)
@@ -13889,7 +13926,9 @@ static int hdd_mode_change_psoc_idle_restart(struct device *dev)
 
 	if (!hdd_ctx)
 		return -EINVAL;
-	hdd_soc_idle_restart_lock(dev);
+	ret = hdd_soc_idle_restart_lock(dev);
+	if (ret)
+		return ret;
 	ret = hdd_wlan_start_modules(hdd_ctx, false);
 	hdd_soc_idle_restart_unlock();
 
@@ -15101,6 +15140,8 @@ bool hdd_is_connection_in_progress(uint8_t *out_vdev_id,
 			}
 			if (hdd_ctx->connection_in_progress) {
 				hdd_debug("AP/GO: connection is in progress");
+				*out_reason = SAP_CONNECTION_IN_PROGRESS;
+				*out_vdev_id = adapter->vdev_id;
 				return true;
 			}
 		}
