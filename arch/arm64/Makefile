@@ -55,13 +55,6 @@ KBUILD_AFLAGS   += -mcpu=cortex-a55
 KBUILD_LDFLAGS  += -mllvm -mcpu=cortex-a55
 endif
 
-ifeq ($(CONFIG_CC_IS_CLANG), y)
-COMPATCC ?= $(CC) --target=$(notdir $(CROSS_COMPILE_COMPAT:%-=%))
-else
-COMPATCC ?= $(CROSS_COMPILE_COMPAT)gcc
-endif
-export COMPATCC
-
 ifeq ($(CONFIG_GENERIC_COMPAT_VDSO), y)
   export CONFIG_COMPAT_VDSO := y
   compat_vdso := -DCONFIG_COMPAT_VDSO=1
