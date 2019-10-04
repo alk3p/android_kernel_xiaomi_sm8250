@@ -1648,7 +1648,6 @@ int wcd938x_micbias_control(struct snd_soc_component *component,
 	int pre_off_event = 0, post_off_event = 0;
 	int post_on_event = 0, post_dapm_off = 0;
 	int post_dapm_on = 0;
-	int ret = 0;
 
 	if ((micb_index < 0) || (micb_index > WCD938X_MAX_MICBIAS - 1)) {
 		dev_err(component->dev,
@@ -1690,12 +1689,6 @@ int wcd938x_micbias_control(struct snd_soc_component *component,
 
 	switch (req) {
 	case MICB_PULLUP_ENABLE:
-		if (!wcd938x->dev_up) {
-			dev_dbg(component->dev, "%s: enable req %d wcd device down\n",
-				__func__, req);
-			ret = -ENODEV;
-			goto done;
-		}
 		wcd938x->pullup_ref[micb_index]++;
 		if ((wcd938x->pullup_ref[micb_index] == 1) &&
 		    (wcd938x->micb_ref[micb_index] == 0))
@@ -1705,24 +1698,12 @@ int wcd938x_micbias_control(struct snd_soc_component *component,
 	case MICB_PULLUP_DISABLE:
 		if (wcd938x->pullup_ref[micb_index] > 0)
 			wcd938x->pullup_ref[micb_index]--;
-		if (!wcd938x->dev_up) {
-			dev_dbg(component->dev, "%s: enable req %d wcd device down\n",
-				__func__, req);
-			ret = -ENODEV;
-			goto done;
-		}
 		if ((wcd938x->pullup_ref[micb_index] == 0) &&
 		    (wcd938x->micb_ref[micb_index] == 0))
 			snd_soc_component_update_bits(component, micb_reg,
 							0xC0, 0x00);
 		break;
 	case MICB_ENABLE:
-		if (!wcd938x->dev_up) {
-			dev_dbg(component->dev, "%s: enable req %d wcd device down\n",
-				__func__, req);
-			ret = -ENODEV;
-			goto done;
-		}
 		wcd938x->micb_ref[micb_index]++;
 		if (wcd938x->micb_ref[micb_index] == 1) {
 			snd_soc_component_update_bits(component,
@@ -1755,12 +1736,6 @@ int wcd938x_micbias_control(struct snd_soc_component *component,
 	case MICB_DISABLE:
 		if (wcd938x->micb_ref[micb_index] > 0)
 			wcd938x->micb_ref[micb_index]--;
-		if (!wcd938x->dev_up) {
-			dev_dbg(component->dev, "%s: enable req %d wcd device down\n",
-				__func__, req);
-			ret = -ENODEV;
-			goto done;
-		}
 		if ((wcd938x->micb_ref[micb_index] == 0) &&
 		    (wcd938x->pullup_ref[micb_index] > 0))
 			snd_soc_component_update_bits(component, micb_reg,
@@ -1791,10 +1766,9 @@ int wcd938x_micbias_control(struct snd_soc_component *component,
 		"%s: micb_num:%d, micb_ref: %d, pullup_ref: %d\n",
 		__func__, micb_num, wcd938x->micb_ref[micb_index],
 		wcd938x->pullup_ref[micb_index]);
-
-done:
 	mutex_unlock(&wcd938x->micb_lock);
-	return ret;
+
+	return 0;
 }
 EXPORT_SYMBOL(wcd938x_micbias_control);
 
@@ -1857,7 +1831,6 @@ static int wcd938x_event_notify(struct notifier_block *block,
 					0x80, 0x00);
 		break;
 	case BOLERO_WCD_EVT_SSR_DOWN:
-		wcd938x->dev_up = false;
 		mbhc = &wcd938x->mbhc->wcd_mbhc;
 		wcd938x_mbhc_ssr_down(wcd938x->mbhc, component);
 		wcd938x_reset_low(wcd938x->dev);
@@ -1878,7 +1851,6 @@ static int wcd938x_event_notify(struct notifier_block *block,
 		} else {
 			wcd938x_mbhc_hs_detect(component, mbhc->mbhc_cfg);
 		}
-		wcd938x->dev_up = true;
 		break;
 	case BOLERO_WCD_EVT_CLK_NOTIFY:
 		snd_soc_component_update_bits(component,
@@ -3034,7 +3006,6 @@ static int wcd938x_soc_codec_probe(struct snd_soc_component *component)
 			return ret;
 		}
 	}
-	wcd938x->dev_up = true;
 	return ret;
 
 err_hwdep:
