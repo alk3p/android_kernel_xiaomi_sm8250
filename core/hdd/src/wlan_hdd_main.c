@@ -5942,7 +5942,6 @@ static void hdd_reset_scan_operation(struct hdd_context *hdd_ctx,
 		break;
 	case QDF_SAP_MODE:
 		qdf_atomic_set(&adapter->session.ap.acs_in_progress, 0);
-		wlan_hdd_undo_acs(adapter);
 		break;
 	default:
 		break;
@@ -10695,8 +10694,11 @@ static int hdd_initialize_mac_address(struct hdd_context *hdd_ctx)
 	bool update_mac_addr_to_fw = true;
 
 	ret = hdd_platform_wlan_mac(hdd_ctx);
-	if (hdd_ctx->config->mac_provision || !ret) {
+	if (!ret) {
 		hdd_info("using MAC address from platform driver");
+		return ret;
+	} else if (hdd_ctx->config->mac_provision) {
+		hdd_err("getting MAC address from platform driver failed");
 		return ret;
 	}
 
@@ -15140,8 +15142,11 @@ bool hdd_is_connection_in_progress(uint8_t *out_vdev_id,
 			}
 			if (hdd_ctx->connection_in_progress) {
 				hdd_debug("AP/GO: connection is in progress");
-				*out_reason = SAP_CONNECTION_IN_PROGRESS;
-				*out_vdev_id = adapter->vdev_id;
+				if (out_vdev_id && out_reason) {
+					*out_reason =
+						SAP_CONNECTION_IN_PROGRESS;
+					*out_vdev_id = adapter->vdev_id;
+				}
 				return true;
 			}
 		}

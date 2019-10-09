@@ -18626,7 +18626,7 @@ csr_create_roam_scan_offload_request(struct mac_context *mac_ctx,
 		roam_info->cfgParams.nOpportunisticThresholdDiff;
 	req_buf->RoamRescanRssiDiff =
 		roam_info->cfgParams.nRoamRescanRssiDiff;
-	req_buf->RoamRssiDiff = mac_ctx->mlme_cfg->lfr.roam_rssi_diff;
+	req_buf->RoamRssiDiff = roam_info->cfgParams.roam_rssi_diff;
 	req_buf->rssi_abs_thresh =
 		mac_ctx->mlme_cfg->lfr.roam_rssi_abs_threshold;
 	req_buf->reason = reason;
@@ -18643,11 +18643,11 @@ csr_create_roam_scan_offload_request(struct mac_context *mac_ctx,
 	req_buf->full_roam_scan_period =
 		roam_info->cfgParams.full_roam_scan_period;
 	req_buf->roam_scan_inactivity_time =
-		mac_ctx->mlme_cfg->lfr.roam_scan_inactivity_time;
+		roam_info->cfgParams.roam_scan_inactivity_time;
 	req_buf->roam_inactive_data_packet_count =
-		mac_ctx->mlme_cfg->lfr.roam_inactive_data_packet_count;
+		roam_info->cfgParams.roam_inactive_data_packet_count;
 	req_buf->roam_scan_period_after_inactivity =
-		mac_ctx->mlme_cfg->lfr.roam_scan_period_after_inactivity;
+		roam_info->cfgParams.roam_scan_period_after_inactivity;
 
 	req_buf->RoamBmissFirstBcnt =
 		roam_info->cfgParams.nRoamBmissFirstBcnt;
@@ -18761,8 +18761,8 @@ csr_create_roam_scan_offload_request(struct mac_context *mac_ctx,
 	req_buf->mdid =
 		mac_ctx->roam.roamSession[session_id].connectedProfile.mdid;
 	req_buf->sessionId = session_id;
-	req_buf->nProbes = mac_ctx->mlme_cfg->lfr.roam_scan_n_probes;
-	req_buf->HomeAwayTime = mac_ctx->mlme_cfg->lfr.roam_scan_home_away_time;
+	req_buf->nProbes = roam_info->cfgParams.roam_scan_n_probes;
+	req_buf->HomeAwayTime = roam_info->cfgParams.roam_scan_home_away_time;
 
 	/*
 	 * Home Away Time should be at least equal to (MaxDwell time + (2*RFS)),
@@ -19891,7 +19891,7 @@ csr_handle_roam_state_change(struct mac_context *mac, uint8_t vdev_id,
 			     enum roam_offload_state requested_state,
 			     uint8_t reason)
 {
-	QDF_STATUS status = QDF_STATUS_E_INVAL;
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
 
 	if (requested_state != ROAM_DEINIT &&
 	    !csr_is_conn_state_connected_infra(mac, vdev_id)) {
