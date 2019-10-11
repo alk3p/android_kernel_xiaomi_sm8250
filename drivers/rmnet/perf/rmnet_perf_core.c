@@ -121,8 +121,7 @@ module_param(rmnet_perf_ingress_deag, bool, 0444);
 MODULE_PARM_DESC(rmnet_perf_ingress_deag,
 		 "If true, rmnet_perf will handle QMAP deaggregation");
 
-#define SHS_FLUSH				0
-#define RECYCLE_BUFF_SIZE_THRESH		51200
+#define SHS_FLUSH 0
 
 /* Lock around flow nodes for syncornization with rmnet_perf_opt_mode changes */
 static DEFINE_SPINLOCK(rmnet_perf_core_lock);
@@ -247,10 +246,9 @@ struct sk_buff *rmnet_perf_core_elligible_for_cache_skb(u32 len)
 	struct sk_buff *skbn;
 	int user_count;
 
-	buff_pool = perf->core_meta->buff_pool;
-	if (len < RECYCLE_BUFF_SIZE_THRESH || !buff_pool->available[0])
+	if (len < 51200)
 		return NULL;
-
+	buff_pool = perf->core_meta->buff_pool;
 	circ_index = buff_pool->index;
 	iterations = 0;
 	while (iterations < RMNET_PERF_NUM_64K_BUFFS) {
@@ -1007,7 +1005,6 @@ void rmnet_perf_core_deaggregate(struct sk_buff *skb,
 				 struct rmnet_port *port)
 {
 	struct rmnet_perf *perf;
-	struct rmnet_perf_core_burst_marker_state *bm_state;
 	int co = 0;
 	int chain_count = 0;
 
@@ -1024,14 +1021,13 @@ void rmnet_perf_core_deaggregate(struct sk_buff *skb,
 		skb = skb_frag;
 	}
 
-	bm_state = perf->core_meta->bm_state;
-	bm_state->expect_packets -= co;
+	perf->core_meta->bm_state->expect_packets -= co;
 	/* if we ran out of data and should have gotten an end marker,
 	 * then we can flush everything
 	 */
 	if (port->data_format == RMNET_INGRESS_FORMAT_DL_MARKER_V2 ||
-	    !bm_state->callbacks_valid || !rmnet_perf_core_bm_flush_on ||
-	    (int) bm_state->expect_packets <= 0) {
+	    !rmnet_perf_core_bm_flush_on ||
+	    (int) perf->core_meta->bm_state->expect_packets <= 0) {
 		rmnet_perf_opt_flush_all_flow_nodes();
 		rmnet_perf_core_free_held_skbs();
 		rmnet_perf_core_flush_reason_cnt[
