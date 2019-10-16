@@ -2944,6 +2944,7 @@ int hdd_wlan_start_modules(struct hdd_context *hdd_ctx, bool reinit)
 	QDF_STATUS status;
 	bool unint = false;
 	void *hif_ctx;
+	struct target_psoc_info *tgt_hdl;
 
 	qdf_dev = cds_get_context(QDF_MODULE_ID_QDF_DEVICE);
 	if (!qdf_dev) {
@@ -3149,7 +3150,11 @@ deregister_cb:
 
 cds_txrx_free:
 
-	hdd_runtime_suspend_context_deinit(hdd_ctx);
+	tgt_hdl = wlan_psoc_get_tgt_if_handle(hdd_ctx->psoc);
+
+	if (tgt_hdl && target_psoc_get_wmi_ready(tgt_hdl))
+		hdd_runtime_suspend_context_deinit(hdd_ctx);
+
 	if (hdd_ctx->pdev) {
 		dispatcher_pdev_close(hdd_ctx->pdev);
 		hdd_objmgr_release_and_destroy_pdev(hdd_ctx);
@@ -3805,6 +3810,11 @@ static void __hdd_set_multicast_list(struct net_device *dev)
 	struct wlan_objmgr_psoc *psoc = hdd_ctx->psoc;
 	int mc_count = 0;
 
+	if (hdd_ctx->hdd_wlan_suspended) {
+		hdd_err_rl("Device is system suspended");
+		return;
+	}
+
 	hdd_enter_dev(dev);
 	if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam())
 		goto out;
@@ -4367,7 +4377,8 @@ int hdd_vdev_create(struct hdd_adapter *adapter,
 	status = qdf_event_reset(&adapter->qdf_session_open_event);
 	if (QDF_STATUS_SUCCESS != status) {
 		hdd_err("failed to reinit session open event");
-		return -EINVAL;
+		errno = qdf_status_to_os_return(status);
+		goto objmgr_vdev_destroy_procedure;
 	}
 	errno = hdd_set_sme_session_param(adapter, &sme_session_params,
 					  callback, ctx);
@@ -4386,17 +4397,14 @@ int hdd_vdev_create(struct hdd_adapter *adapter,
 	status = qdf_wait_for_event_completion(&adapter->qdf_session_open_event,
 			SME_CMD_VDEV_CREATE_DELETE_TIMEOUT);
 	if (QDF_STATUS_SUCCESS != status) {
-		if (adapter->qdf_session_open_event.force_set) {
+		if (adapter->qdf_session_open_event.force_set)
 			/*
 			 * SSR/PDR has caused shutdown, which has forcefully
-			 * set the event. Return without the closing session.
+			 * set the event.
 			 */
-			adapter->vdev_id = WLAN_UMAC_VDEV_ID_MAX;
 			hdd_err("Session open event forcefully set");
-			return -EINVAL;
-		}
 
-		if (QDF_STATUS_E_TIMEOUT == status)
+		else if (QDF_STATUS_E_TIMEOUT == status)
 			hdd_err("Session failed to open within timeout period");
 		else
 			hdd_err("Failed to wait for session open event(status-%d)",
@@ -5581,6 +5589,25 @@ void wlan_hdd_reset_prob_rspies(struct hdd_adapter *adapter)
 	}
 }
 
+/**
+ * hdd_ipa_ap_disconnect_evt() - Indicate wlan ipa ap disconnect event
+ * @hdd_ctx: hdd context
+ * @adapter: hdd adapter
+ *
+ * Return: None
+ */
+static inline
+void hdd_ipa_ap_disconnect_evt(struct hdd_context *hdd_ctx,
+			       struct hdd_adapter *adapter)
+{
+	if (ucfg_ipa_is_enabled()) {
+		ucfg_ipa_uc_disconnect_ap(hdd_ctx->pdev,
+					  adapter->dev);
+		ucfg_ipa_cleanup_dev_iface(hdd_ctx->pdev,
+					   adapter->dev);
+	}
+}
+
 QDF_STATUS hdd_stop_adapter(struct hdd_context *hdd_ctx,
 			    struct hdd_adapter *adapter)
 {
@@ -5795,9 +5822,12 @@ QDF_STATUS hdd_stop_adapter(struct hdd_context *hdd_ctx,
 				status = qdf_wait_for_event_completion(
 					&hostapd_state->qdf_stop_bss_event,
 					SME_CMD_STOP_BSS_TIMEOUT);
-				if (QDF_IS_STATUS_ERROR(status))
+				if (QDF_IS_STATUS_ERROR(status)) {
 					hdd_err("failure waiting for wlansap_stop_bss %d",
 						status);
+					hdd_ipa_ap_disconnect_evt(hdd_ctx,
+								  adapter);
+				}
 			} else {
 				hdd_err("failure in wlansap_stop_bss");
 			}
@@ -5982,7 +6012,9 @@ QDF_STATUS hdd_reset_all_adapters(struct hdd_context *hdd_ctx)
 
 	hdd_enter();
 
-	cds_flush_work(&hdd_ctx->sap_pre_cac_work);
+	/* do not flush work if it is not created */
+	if (hdd_ctx->sap_pre_cac_work.fn)
+		cds_flush_work(&hdd_ctx->sap_pre_cac_work);
 
 	hdd_for_each_adapter(hdd_ctx, adapter) {
 		hdd_info("[SSR] reset adapter with device mode %s(%d)",
