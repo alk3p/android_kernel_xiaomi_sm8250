@@ -917,11 +917,9 @@ lim_reject_association(struct mac_context *mac_ctx, tSirMacAddr peer_addr,
 	}
 
 	if (delete_sta == false) {
-		lim_send_assoc_rsp_mgmt_frame(
-				mac_ctx,
+		lim_send_assoc_rsp_mgmt_frame(mac_ctx,
 				eSIR_MAC_MAX_ASSOC_STA_REACHED_STATUS,
-				1, peer_addr, sub_type, 0, session_entry,
-				false);
+				1, peer_addr, sub_type, 0, session_entry);
 		pe_warn("received Re/Assoc req when max associated STAs reached from");
 		lim_print_mac_addr(mac_ctx, peer_addr, LOGW);
 		lim_send_sme_max_assoc_exceeded_ntf(mac_ctx, peer_addr,
@@ -951,7 +949,7 @@ lim_reject_association(struct mac_context *mac_ctx, tSirMacAddr peer_addr,
 	 * status code to requesting STA.
 	 */
 	lim_send_assoc_rsp_mgmt_frame(mac_ctx, result_code, 0, peer_addr,
-				      sub_type, 0, session_entry, false);
+					 sub_type, 0, session_entry);
 
 	if (session_entry->parsedAssocReq[sta_ds->assocId]) {
 		uint8_t *assoc_req_frame;
