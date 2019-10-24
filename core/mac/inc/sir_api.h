@@ -153,6 +153,7 @@ struct scheduler_msg;
  * @SIR_ROAMING_ABORT: Firmware aborted roaming operation, still connected.
  * @SIR_ROAM_SYNCH_COMPLETE: Roam sync propagation is complete.
  * @SIR_ROAMING_INVOKE_FAIL: Firmware roaming failed.
+ * @SIR_ROAMING_DEAUTH: Firmware indicates deauth.
  */
 enum sir_roam_op_code {
 	SIR_ROAM_SYNCH_PROPAGATION = 1,
@@ -162,6 +163,7 @@ enum sir_roam_op_code {
 	SIR_ROAM_SYNCH_COMPLETE,
 	SIR_ROAM_SYNCH_NAPI_OFF,
 	SIR_ROAMING_INVOKE_FAIL,
+	SIR_ROAMING_DEAUTH,
 };
 /**
  * Module ID definitions.
@@ -1127,6 +1129,7 @@ struct assoc_ind {
 	const uint8_t *owe_ie;
 	uint32_t owe_ie_len;
 	uint16_t owe_status;
+	bool need_assoc_rsp_tx_cb;
 };
 
 /**
@@ -1151,6 +1154,7 @@ struct assoc_cnf {
 	enum mac_status_code mac_status_code;
 	uint8_t *owe_ie;
 	uint32_t owe_ie_len;
+	bool need_assoc_rsp_tx_cb;
 };
 
 /* / Enum definition for  Wireless medium status change codes */
@@ -2118,12 +2122,12 @@ typedef struct {
 	uint32_t authentication;
 	uint8_t encryption;
 	uint8_t mcencryption;
+	tAniEdType gp_mgmt_cipher_suite;
 	uint8_t ChannelCount;
 	uint8_t ChannelCache[SIR_ROAM_MAX_CHANNELS];
 #ifdef WLAN_FEATURE_11W
 	bool mfp_enabled;
 #endif
-
 } tSirRoamNetworkType;
 
 typedef enum {

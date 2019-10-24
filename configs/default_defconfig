@@ -819,6 +819,7 @@ ifeq ($(CONFIG_LITHIUM), y)
 	CONFIG_WLAN_DP_PER_RING_TYPE_CONFIG := y
 	#Enable WMI TX/RX over QMI
 	CONFIG_WMI_SEND_RECV_QMI := y
+	CONFIG_WLAN_DP_PENDING_MEM_FLUSH := y
 endif
 
 #Flag to enable hdd memory dump feature
@@ -844,6 +845,9 @@ ifeq ($(CONFIG_ARCH_SDXPRAIRIE), y)
 	ifneq ($(CONFIG_SLUB_DEBUG), y)
 		CONFIG_DP_TRACE := n
 	endif
+
+	CONFIG_DIRECT_BUF_RX_ENABLE := n
+	CONFIG_WMI_DBR_SUPPORT := n
 endif
 
 ifneq ($(CONFIG_HIF_USB), y)

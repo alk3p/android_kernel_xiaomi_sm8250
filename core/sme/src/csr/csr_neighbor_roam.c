@@ -954,8 +954,6 @@ static void csr_neighbor_roam_info_ctx_init(struct mac_context *mac,
 		&mac->roam.neighborRoamInfo[session_id];
 	struct csr_roam_session *session = &mac->roam.roamSession[session_id];
 	int init_ft_flag = false;
-	bool supplicant_disabled_roaming;
-	uint8_t reason;
 
 	csr_init_occupied_channels_list(mac, session_id);
 	csr_neighbor_roam_state_transition(mac,
@@ -1044,26 +1042,10 @@ static void csr_neighbor_roam_info_ctx_init(struct mac_context *mac,
 		} else
 #endif
 		{
-			/*
-			 * If supplicant disabled roaming, driver does not send
-			 * RSO cmd to fw. This causes roam invoke to fail in FW
-			 * since RSO start never happened at least once to
-			 * configure roaming engine in FW.
-			 */
 			csr_post_roam_state_change(mac, session_id,
 						   ROAM_RSO_STARTED,
 						   REASON_CTX_INIT);
 
-			supplicant_disabled_roaming =
-				mlme_get_supplicant_disabled_roaming(
-						mac->psoc, session_id);
-			if (supplicant_disabled_roaming) {
-				reason = REASON_SUPPLICANT_DISABLED_ROAMING;
-				sme_debug("ROAM: Supplicant has disabled roaming");
-				csr_post_roam_state_change(mac, session_id,
-							   ROAM_RSO_STOPPED,
-							   reason);
-			}
 		}
 	}
 }
@@ -1259,6 +1241,10 @@ QDF_STATUS csr_neighbor_roam_init(struct mac_context *mac, uint8_t sessionId)
 		mac->mlme_cfg->lfr.roam_full_scan_period;
 	pNeighborRoamInfo->cfgParams.enable_scoring_for_roam =
 		mac->mlme_cfg->scoring.enable_scoring_for_roam;
+	pNeighborRoamInfo->cfgParams.roam_scan_n_probes =
+		mac->mlme_cfg->lfr.roam_scan_n_probes;
+	pNeighborRoamInfo->cfgParams.roam_scan_home_away_time =
+		mac->mlme_cfg->lfr.roam_scan_home_away_time;
 	pNeighborRoamInfo->cfgParams.roam_scan_inactivity_time =
 		mac->mlme_cfg->lfr.roam_scan_inactivity_time;
 	pNeighborRoamInfo->cfgParams.roam_inactive_data_packet_count =

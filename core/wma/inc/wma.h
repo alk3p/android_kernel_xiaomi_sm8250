@@ -89,6 +89,7 @@
 #define wma_warn(params...) QDF_TRACE_WARN(QDF_MODULE_ID_WMA, params)
 #define wma_info(params...) QDF_TRACE_INFO(QDF_MODULE_ID_WMA, params)
 #define wma_debug(params...) QDF_TRACE_DEBUG(QDF_MODULE_ID_WMA, params)
+#define wma_debug_rl(params...) QDF_TRACE_DEBUG_RL(QDF_MODULE_ID_WMA, params)
 #define wma_err_rl(params...) QDF_TRACE_ERROR_RL(QDF_MODULE_ID_WMA, params)
 
 #define wma_nofl_alert(params...) \
@@ -236,6 +237,8 @@
 #define WMA_DEAUTH_RECV_WAKE_LOCK_DURATION      WAKELOCK_DURATION_RECOMMENDED
 #define WMA_DISASSOC_RECV_WAKE_LOCK_DURATION    WAKELOCK_DURATION_RECOMMENDED
 #define WMA_ROAM_HO_WAKE_LOCK_DURATION          (500)          /* in msec */
+#define WMA_ROAM_PREAUTH_WAKE_LOCK_DURATION     (2 * 1000)
+
 #ifdef FEATURE_WLAN_AUTO_SHUTDOWN
 #define WMA_AUTO_SHUTDOWN_WAKE_LOCK_DURATION    WAKELOCK_DURATION_RECOMMENDED
 #endif
@@ -691,6 +694,16 @@ struct roam_synch_frame_ind {
 	uint8_t *reassoc_rsp;
 };
 
+/* Max number of invalid peer entries */
+#define INVALID_PEER_MAX_NUM 5
+
+/**
+ * struct wma_invalid_peer_params - stores invalid peer entries
+ * @rx_macaddr: store mac addr of invalid peer
+ */
+struct wma_invalid_peer_params {
+	uint8_t rx_macaddr[QDF_MAC_ADDR_SIZE];
+};
 
 /**
  * struct wma_txrx_node - txrx node
@@ -759,7 +772,8 @@ struct roam_synch_frame_ind {
  * @vdev_set_key_runtime_wakelock: runtime pm wakelock for set key
  * @channel: channel
  * @roam_scan_stats_req: cached roam scan stats request
- *
+ * @wma_invalid_peer_params: structure storing invalid peer params
+ * @invalid_peer_idx: invalid peer index
  * It stores parameters per vdev in wma.
  */
 struct wma_txrx_node {
@@ -837,6 +851,8 @@ struct wma_txrx_node {
 	bool is_waiting_for_key;
 	uint8_t channel;
 	struct sir_roam_scan_stats *roam_scan_stats_req;
+	struct wma_invalid_peer_params invalid_peers[INVALID_PEER_MAX_NUM];
+	uint8_t invalid_peer_idx;
 };
 
 /**
@@ -1108,6 +1124,7 @@ typedef struct {
 	qdf_wake_lock_t wow_ap_assoc_lost_wl;
 	qdf_wake_lock_t wow_auto_shutdown_wl;
 	qdf_wake_lock_t roam_ho_wl;
+	qdf_wake_lock_t roam_preauth_wl;
 	int wow_nack;
 	qdf_atomic_t is_wow_bus_suspended;
 	bool suitable_ap_hb_failure;
@@ -2503,7 +2520,16 @@ void wma_check_and_set_wake_timer(uint32_t time);
 #endif
 
 /**
- * wma_rx_invalid_peer_ind(): the callback for DP to notify WMA layer
+ * wma_delete_invalid_peer_entries() - Delete invalid peer entries stored
+ * @vdev_id: virtual interface id
+ * @peer_mac_addr: Peer MAC address
+ *
+ * Removes the invalid peer mac entry from wma node
+ */
+void wma_delete_invalid_peer_entries(uint8_t vdev_id, uint8_t *peer_mac_addr);
+
+/**
+ * wma_rx_invalid_peer_ind() - the callback for DP to notify WMA layer
  * invalid peer data is received, this function will send message to
  * lim module.
  * @vdev_id: virtual device ID
@@ -2592,6 +2618,18 @@ int wma_motion_det_host_event_handler(void *handle, u_int8_t *event,
 int wma_motion_det_base_line_host_event_handler(void *handle, u_int8_t *event,
 						u_int32_t len);
 #endif /* WLAN_FEATURE_MOTION_DETECTION */
+
+/**
+ * wma_release_pending_vdev_refs() - release vdev ref taken by interface txrx
+ * node and delete all the peers attached to this vdev.
+ *
+ * This API loop and release vdev ref taken by all iface and all the peers
+ * attached to the vdev, this need to be called on recovery to flush vdev
+ * and peer.
+ *
+ * Return: void.
+ */
+void wma_release_pending_vdev_refs(void);
 
 /**
  * wma_get_rx_chainmask() - API to get rx chainmask from mac phy capability
