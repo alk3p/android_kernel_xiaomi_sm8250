@@ -236,27 +236,15 @@ static void dp_rx_defrag_waitlist_add(struct dp_peer *peer, unsigned tid)
 	struct dp_soc *psoc = peer->vdev->pdev->soc;
 	struct dp_rx_tid *rx_reorder = &peer->rx_tid[tid];
 
-	QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO_HIGH,
-		  FL("Adding TID %u to waitlist for peer %pK"),
-		  tid, peer);
+	dp_info("Adding TID %u to waitlist for peer %pK at MAC address %pM",
+		tid, peer, peer->mac_addr.raw);
 
 	/* TODO: use LIST macros instead of TAIL macros */
 	qdf_spin_lock_bh(&psoc->rx.defrag.defrag_lock);
-	if (TAILQ_EMPTY(&psoc->rx.defrag.waitlist)) {
+	if (TAILQ_EMPTY(&psoc->rx.defrag.waitlist))
 		psoc->rx.defrag.next_flush_ms = rx_reorder->defrag_timeout_ms;
-		/*
-		 * All insertions and deletions to tail queue must specify head
-		 * of the list. TAILQ_INSERT_HEAD updates head of queue
-		 * in the case of addition to empty waitlist.
-		 *
-		 */
-		TAILQ_INSERT_HEAD(&psoc->rx.defrag.waitlist, rx_reorder,
-				  defrag_waitlist_elem);
-	} else {
-		TAILQ_INSERT_TAIL(&psoc->rx.defrag.waitlist, rx_reorder,
-				  defrag_waitlist_elem);
-	}
-
+	TAILQ_INSERT_TAIL(&psoc->rx.defrag.waitlist, rx_reorder,
+				defrag_waitlist_elem);
 	DP_STATS_INC(psoc, rx.rx_frag_wait, 1);
 	qdf_spin_unlock_bh(&psoc->rx.defrag.defrag_lock);
 }
@@ -277,11 +265,12 @@ void dp_rx_defrag_waitlist_remove(struct dp_peer *peer, unsigned tid)
 	struct dp_rx_tid *rx_reorder;
 	struct dp_rx_tid *tmp;
 
-	if (tid > DP_MAX_TIDS) {
-		QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_INFO_HIGH,
-			  "TID out of bounds: %d", tid);
-		qdf_assert(0);
-		return;
+	dp_info("Removing TID %u to waitlist for peer %pK at MAC address %pM",
+		tid, peer, peer->mac_addr.raw);
+
+	if (tid >= DP_MAX_TIDS) {
+		dp_info("TID out of bounds: %d", tid);
+		qdf_assert_always(0);
 	}
 
 	qdf_spin_lock_bh(&soc->rx.defrag.defrag_lock);
@@ -1332,7 +1321,8 @@ void dp_rx_defrag_cleanup(struct dp_peer *peer, unsigned tid)
 		 * array pointer usually points to base variable
 		 * of TID queue structure: "struct dp_rx_tid"
 		 */
-		QDF_ASSERT(0);
+		dp_info("Cleanup self peer %pK and TID %u at MAC address %pM",
+			peer, tid, peer->mac_addr.raw);
 		return;
 	}
 	/* Free up nbufs */
@@ -1424,6 +1414,11 @@ static QDF_STATUS dp_rx_defrag_store_fragment(struct dp_soc *soc,
 			"Unknown peer, dropping the fragment");
 
 		goto discard_frag;
+	}
+
+	if (tid >= DP_MAX_TIDS) {
+		dp_info("TID out of bounds: %d", tid);
+		qdf_assert_always(0);
 	}
 
 	pdev = peer->vdev->pdev;
