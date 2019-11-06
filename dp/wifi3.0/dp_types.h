@@ -1101,8 +1101,7 @@ struct dp_soc {
 		qdf_dma_addr_t ipa_rx_refill_buf_hp_paddr;
 	} ipa_uc_rx_rsc;
 
-	bool reo_remapped; /* Indicate if REO2IPA rings are remapped */
-	qdf_spinlock_t remap_lock;
+	qdf_atomic_t ipa_pipes_enabled;
 #endif
 
 	/* Smart monitor capability for HKv2 */
@@ -1667,6 +1666,8 @@ struct dp_vdev {
 	ol_txrx_rx_fp osif_rx;
 	/* callback to deliver rx frames to the OS */
 	ol_txrx_rx_fp osif_rx_stack;
+	/* call back function to flush out queued rx packets*/
+	ol_txrx_rx_flush_fp osif_rx_flush;
 	ol_txrx_rsim_rx_decap_fp osif_rsim_rx_decap;
 	ol_txrx_get_key_fp osif_get_key;
 	ol_txrx_tx_free_ext_fp osif_tx_free_ext;

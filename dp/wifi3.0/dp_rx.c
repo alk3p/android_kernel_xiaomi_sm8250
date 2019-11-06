@@ -217,6 +217,7 @@ QDF_STATUS dp_rx_buffers_replenish(struct dp_soc *dp_soc, uint32_t mac_id,
 
 		paddr = qdf_nbuf_get_frag_paddr(rx_netbuf, 0);
 
+		dp_ipa_handle_rx_buf_smmu_mapping(dp_soc, rx_netbuf, true);
 		/*
 		 * check if the physical address of nbuf->data is
 		 * less then 0x50000000 then free the nbuf and try
@@ -255,7 +256,6 @@ QDF_STATUS dp_rx_buffers_replenish(struct dp_soc *dp_soc, uint32_t mac_id,
 
 		*desc_list = next;
 
-		dp_ipa_handle_rx_buf_smmu_mapping(dp_soc, rx_netbuf, true);
 	}
 
 	hal_srng_access_end(dp_soc->hal_soc, rxdma_srng);
@@ -2199,8 +2199,6 @@ done:
 
 		dp_rx_fill_gro_info(soc, rx_tlv_hdr, nbuf, &rx_ol_pkt_cnt);
 
-		qdf_nbuf_cb_update_peer_local_id(nbuf, peer->local_id);
-
 		DP_RX_LIST_APPEND(deliver_list_head,
 				  deliver_list_tail,
 				  nbuf);
@@ -2248,8 +2246,24 @@ done:
 	return rx_bufs_used; /* Assume no scale factor for now */
 }
 
+QDF_STATUS dp_rx_vdev_detach(struct dp_vdev *vdev)
+{
+	QDF_STATUS ret;
+
+	if (vdev->osif_rx_flush) {
+		ret = vdev->osif_rx_flush(vdev->osif_vdev, vdev->vdev_id);
+		if (!ret) {
+			dp_err("Failed to flush rx pkts for vdev %d\n",
+			       vdev->vdev_id);
+			return ret;
+		}
+	}
+
+	return QDF_STATUS_SUCCESS;
+}
+
 /**
- * dp_rx_detach() - detach dp rx
+ * dp_rx_pdev_detach() - detach dp rx
  * @pdev: core txrx pdev context
  *
  * This function will detach DP RX into main device context

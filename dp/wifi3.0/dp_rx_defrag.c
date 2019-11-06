@@ -84,6 +84,7 @@ static void dp_rx_clear_saved_desc_info(struct dp_peer *peer, unsigned tid)
 		qdf_mem_free(peer->rx_tid[tid].dst_ring_desc);
 
 	peer->rx_tid[tid].dst_ring_desc = NULL;
+	peer->rx_tid[tid].head_frag_desc = NULL;
 }
 
 static void dp_rx_return_head_frag_desc(struct dp_peer *peer,
@@ -987,8 +988,8 @@ dp_rx_defrag_nwifi_to_8023(qdf_nbuf_t nbuf, uint16_t hdrsize)
  *
  * Returns: QDF_STATUS
  */
- static QDF_STATUS dp_rx_defrag_reo_reinject(struct dp_peer *peer,
-					unsigned tid, qdf_nbuf_t head)
+static QDF_STATUS dp_rx_defrag_reo_reinject(struct dp_peer *peer,
+					    unsigned int tid, qdf_nbuf_t head)
 {
 	struct dp_pdev *pdev = peer->vdev->pdev;
 	struct dp_soc *soc = pdev->soc;
@@ -1006,6 +1007,12 @@ dp_rx_defrag_nwifi_to_8023(qdf_nbuf_t nbuf, uint16_t hdrsize)
 		peer->rx_tid[tid].dst_ring_desc;
 	void *hal_srng = soc->reo_reinject_ring.hal_srng;
 	struct dp_rx_desc *rx_desc = peer->rx_tid[tid].head_frag_desc;
+
+	head = dp_ipa_handle_rx_reo_reinject(soc, head);
+	if (qdf_unlikely(!head)) {
+		dp_err_rl("IPA RX REO reinject failed");
+		return QDF_STATUS_E_FAILURE;
+	}
 
 	ent_ring_desc = hal_srng_src_get_next(soc->hal_soc, hal_srng);
 	if (!ent_ring_desc) {
@@ -1314,29 +1321,22 @@ void dp_rx_defrag_cleanup(struct dp_peer *peer, unsigned tid)
 	struct dp_rx_reorder_array_elem *rx_reorder_array_elem =
 				peer->rx_tid[tid].array;
 
-	if (!rx_reorder_array_elem) {
-		/*
-		 * if this condition is hit then somebody
-		 * must have reset this pointer to NULL.
-		 * array pointer usually points to base variable
-		 * of TID queue structure: "struct dp_rx_tid"
-		 */
+	if (rx_reorder_array_elem) {
+		/* Free up nbufs */
+		dp_rx_defrag_frames_free(rx_reorder_array_elem->head);
+		rx_reorder_array_elem->head = NULL;
+		rx_reorder_array_elem->tail = NULL;
+	} else {
 		dp_info("Cleanup self peer %pK and TID %u at MAC address %pM",
 			peer, tid, peer->mac_addr.raw);
-		return;
 	}
-	/* Free up nbufs */
-	dp_rx_defrag_frames_free(rx_reorder_array_elem->head);
 
 	/* Free up saved ring descriptors */
 	dp_rx_clear_saved_desc_info(peer, tid);
 
-	rx_reorder_array_elem->head = NULL;
-	rx_reorder_array_elem->tail = NULL;
 	peer->rx_tid[tid].defrag_timeout_ms = 0;
 	peer->rx_tid[tid].curr_frag_num = 0;
 	peer->rx_tid[tid].curr_seq_num = 0;
-	peer->rx_tid[tid].head_frag_desc = NULL;
 }
 
 /*
