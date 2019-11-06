@@ -143,6 +143,7 @@ QDF_STATUS wma_update_channel_list(WMA_HANDLE handle,
 	WMA_LOGD("no of channels = %d", chan_list->numChan);
 	chan_p = &scan_ch_param->ch_param[0];
 	scan_ch_param->nallchans = chan_list->numChan;
+	scan_ch_param->max_bw_support_present = true;
 	wma_handle->saved_chan.num_channels = chan_list->numChan;
 	WMA_LOGD("ht %d, vht %d, vht_24 %d", chan_list->ht_en,
 			chan_list->vht_en, chan_list->vht_24_en);
@@ -872,13 +873,6 @@ A_UINT32 e_csr_encryption_type_to_rsn_cipherset(eCsrEncryptionType encr)
 	}
 }
 
-/* ToDo: Replace this with WMI inteface enum nce the
- * interface changes are ready
- */
-#define CIPHER_BIP_CMAC_128 0xc
-#define CIPHER_BIP_GMAC_128 0xd
-#define CIPHER_BIP_GMAC_256 0xe
-
 /**
  * wma_convert_gp_mgmt_cipher_to_target_cipher_type() - map csr ani group mgmt
  * enc type to RSN cipher
@@ -894,16 +888,15 @@ wma_convert_gp_mgmt_cipher_to_target_cipher_type(tAniEdType cipher_type)
 	switch (cipher_type) {
 	/* BIP-CMAC-128 (00:0f:ac: 0x06) */
 	case eSIR_ED_AES_128_CMAC:
-		return CIPHER_BIP_CMAC_128;
+		return WMI_CIPHER_AES_CMAC;
 
 	/* BIP-GMAC-128 (00:0f:ac: 0x0b) */
 	case eSIR_ED_AES_GMAC_128:
-		return CIPHER_BIP_GMAC_128;
+		return WMI_CIPHER_AES_GMAC;
 
 	/* BIP-GMAC-256(00:0f:ac: 0x0c)*/
 	case eSIR_ED_AES_GMAC_256:
-		return CIPHER_BIP_GMAC_256;
-
+		return WMI_CIPHER_BIP_GMAC_256;
 	case eSIR_ED_NONE:
 	default:
 		return WMI_CIPHER_NONE;
