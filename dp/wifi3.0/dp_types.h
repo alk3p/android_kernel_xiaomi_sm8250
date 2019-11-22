@@ -94,6 +94,8 @@
 #define PCP_TID_MAP_MAX 8
 #define MAX_MU_USERS 37
 
+#define REO_CMD_EVENT_HIST_MAX 64
+
 #ifndef REMOVE_PKT_LOG
 enum rx_pktlog_mode {
 	DP_RX_PKTLOG_DISABLED = 0,
@@ -636,7 +638,32 @@ struct reo_desc_list_node {
 	qdf_list_node_t node;
 	unsigned long free_ts;
 	struct dp_rx_tid rx_tid;
+	bool resend_update_reo_cmd;
 };
+
+#ifdef WLAN_FEATURE_DP_EVENT_HISTORY
+/**
+ * struct reo_cmd_event_record: Elements to record for each reo command
+ * @cmd_type: reo command type
+ * @cmd_return_status: reo command post status
+ * @timestamp: record timestamp for the reo command
+ */
+struct reo_cmd_event_record {
+	enum hal_reo_cmd_type cmd_type;
+	uint8_t cmd_return_status;
+	uint32_t timestamp;
+};
+
+/**
+ * struct reo_cmd_event_history: Account for reo cmd events
+ * @index: record number
+ * @cmd_record: list of records
+ */
+struct reo_cmd_event_history {
+	qdf_atomic_t index;
+	struct reo_cmd_event_record cmd_record[REO_CMD_EVENT_HIST_MAX];
+};
+#endif /* WLAN_FEATURE_DP_EVENT_HISTORY */
 
 /* SoC level data path statistics */
 struct dp_soc_stats {
@@ -658,6 +685,8 @@ struct dp_soc_stats {
 		uint32_t dropped_fw_removed;
 		/* tx completion release_src != TQM or FW */
 		uint32_t invalid_release_source;
+		/* tx completion wbm_internal_error */
+		uint32_t wbm_internal_error;
 		/* TX Comp loop packet limit hit */
 		uint32_t tx_comp_loop_pkt_limit_hit;
 		/* Head pointer Out of sync at the end of dp_tx_comp_handler */
@@ -723,11 +752,17 @@ struct dp_soc_stats {
 			uint32_t hal_wbm_rel_dup;
 			/* HAL RXDMA error Duplicate count */
 			uint32_t hal_rxdma_err_dup;
+			/* REO cmd send fail/requeue count */
+			uint32_t reo_cmd_send_fail;
 		} err;
 
 		/* packet count per core - per ring */
 		uint64_t ring_packets[NR_CPUS][MAX_REO_DEST_RINGS];
 	} rx;
+
+#ifdef WLAN_FEATURE_DP_EVENT_HISTORY
+	struct reo_cmd_event_history cmd_event_history;
+#endif /* WLAN_FEATURE_DP_EVENT_HISTORY */
 };
 
 union dp_align_mac_addr {
