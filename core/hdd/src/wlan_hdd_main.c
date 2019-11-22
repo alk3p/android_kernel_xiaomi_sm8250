@@ -5089,8 +5089,7 @@ int hdd_set_fw_params(struct hdd_adapter *adapter)
 			goto error;
 		}
 
-		if (hdd_configure_chain_mask(adapter))
-			goto error;
+		hdd_configure_chain_mask(adapter);
 	} else {
 #define HDD_DTIM_1CHAIN_RX_ID 0x5
 #define HDD_SMPS_PARAM_VALUE_S 29
@@ -5115,8 +5114,7 @@ int hdd_set_fw_params(struct hdd_adapter *adapter)
 #undef HDD_DTIM_1CHAIN_RX_ID
 #undef HDD_SMPS_PARAM_VALUE_S
 
-		if (hdd_configure_chain_mask(adapter))
-			goto error;
+		hdd_configure_chain_mask(adapter);
 	}
 
 	ret = sme_set_enable_mem_deep_sleep(hdd_ctx->mac_handle,
