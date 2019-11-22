@@ -9916,7 +9916,6 @@ QDF_STATUS sme_abort_roam_scan(mac_handle_t mac_handle, uint8_t sessionId)
 	return status;
 }
 
-#ifdef FEATURE_WLAN_EXTSCAN
 /**
  * sme_get_valid_channels_by_band() - to fetch valid channels filtered by band
  * @mac_handle: Opaque handle to the global MAC context
@@ -10034,6 +10033,7 @@ QDF_STATUS sme_get_valid_channels_by_band(mac_handle_t mac_handle,
 	return status;
 }
 
+#ifdef FEATURE_WLAN_EXTSCAN
 QDF_STATUS
 sme_ext_scan_get_capabilities(mac_handle_t mac_handle,
 			      struct extscan_capabilities_params *params)
@@ -12766,6 +12766,7 @@ void sme_update_tgt_services(mac_handle_t mac_handle,
 	mac_ctx->obss_scan_offload = cfg->obss_scan_offload;
 	sme_debug("obss_scan_offload: %d", mac_ctx->obss_scan_offload);
 	mac_ctx->lteCoexAntShare = cfg->lte_coex_ant_share;
+	mac_ctx->mlme_cfg->gen.as_enabled = cfg->lte_coex_ant_share;
 	mac_ctx->beacon_offload = cfg->beacon_offload;
 	mac_ctx->pmf_offload = cfg->pmf_offload;
 	QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_DEBUG,

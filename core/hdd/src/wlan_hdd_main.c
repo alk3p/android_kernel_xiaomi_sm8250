@@ -171,6 +171,7 @@
 #include <wlan_hdd_debugfs_coex.h>
 #include "wlan_blm_ucfg_api.h"
 #include "nan_ucfg_api.h"
+#include "wlan_osif_priv.h"
 
 #ifdef MODULE
 #define WLAN_MODULE_NAME  module_name(THIS_MODULE)
@@ -4791,65 +4792,11 @@ static void hdd_set_fw_log_params(struct hdd_context *hdd_ctx,
 static int hdd_configure_chain_mask(struct hdd_adapter *adapter)
 {
 	QDF_STATUS status;
-	struct wma_caps_per_phy non_dbs_phy_cap;
 	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
-	bool enable2x2 = false, enable_bt_chain_sep = false;
-	uint8_t dual_mac_feature = DISABLE_DBS_CXN_AND_SCAN;
-
-	status = ucfg_policy_mgr_get_dual_mac_feature(hdd_ctx->psoc,
-						      &dual_mac_feature);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		hdd_err("unable to get dual mac feature");
-
-	status = ucfg_mlme_get_vht_enable2x2(hdd_ctx->psoc, &enable2x2);
-	if (QDF_IS_STATUS_ERROR(status))
-		hdd_err("unable to get vht_enable2x2");
-
-	status = ucfg_mlme_get_bt_chain_separation_flag(hdd_ctx->psoc,
-							&enable_bt_chain_sep);
-	if (QDF_IS_STATUS_ERROR(status))
-		hdd_debug("unable to get BT chain separation. using default");
-
-	hdd_debug("enable2x2: %d, lte_coex: %d, disable_DBS: %d",
-		  enable2x2, hdd_ctx->lte_coex_ant_share,
-		  dual_mac_feature);
-	hdd_debug("enable_bt_chain_separation %d", enable_bt_chain_sep);
-
-	status = wma_get_caps_for_phyidx_hwmode(&non_dbs_phy_cap,
-						HW_MODE_DBS_NONE,
-						CDS_BAND_ALL);
-	if (QDF_IS_STATUS_ERROR(status)) {
-		hdd_err("couldn't get phy caps. skip chain mask programming");
-		return qdf_status_to_os_return(status);
-	}
-
-	if (non_dbs_phy_cap.tx_chain_mask_2G < 3 ||
-	    non_dbs_phy_cap.rx_chain_mask_2G < 3 ||
-	    non_dbs_phy_cap.tx_chain_mask_5G < 3 ||
-	    non_dbs_phy_cap.rx_chain_mask_5G < 3) {
-		hdd_debug("firmware not capable. skip chain mask programming");
-		return 0;
-	}
-
-	if (enable2x2 && !enable_bt_chain_sep) {
-		hdd_debug("2x2 enabled. skip chain mask programming");
-		return 0;
-	}
-
-	if (dual_mac_feature != DISABLE_DBS_CXN_AND_SCAN) {
-		hdd_debug("DBS enabled(%d). skip chain mask programming",
-			  dual_mac_feature);
-		return 0;
-	}
-
-	if (hdd_ctx->lte_coex_ant_share) {
-		hdd_debug("lte ant sharing enabled. skip chainmask programming");
-		return 0;
-	}
 
 	status = ucfg_mlme_configure_chain_mask(hdd_ctx->psoc,
 						adapter->vdev_id);
-	if (status != QDF_STATUS_SUCCESS)
+	if (QDF_IS_STATUS_ERROR(status))
 		goto error;
 
 	return 0;
@@ -6976,6 +6923,48 @@ QDF_STATUS hdd_get_next_adapter(struct hdd_context *hdd_ctx,
 	return status;
 }
 
+QDF_STATUS hdd_get_front_adapter_no_lock(struct hdd_context *hdd_ctx,
+					 struct hdd_adapter **out_adapter)
+{
+	QDF_STATUS status;
+	qdf_list_node_t *node;
+
+	*out_adapter = NULL;
+
+	status = qdf_list_peek_front(&hdd_ctx->hdd_adapters, &node);
+
+	if (QDF_IS_STATUS_ERROR(status))
+		return status;
+
+	*out_adapter = qdf_container_of(node, struct hdd_adapter, node);
+
+	return QDF_STATUS_SUCCESS;
+}
+
+QDF_STATUS hdd_get_next_adapter_no_lock(struct hdd_context *hdd_ctx,
+					struct hdd_adapter *current_adapter,
+					struct hdd_adapter **out_adapter)
+{
+	QDF_STATUS status;
+	qdf_list_node_t *node;
+
+	if (!current_adapter)
+		return QDF_STATUS_E_INVAL;
+
+	*out_adapter = NULL;
+
+	status = qdf_list_peek_next(&hdd_ctx->hdd_adapters,
+				    &current_adapter->node,
+				    &node);
+
+	if (QDF_IS_STATUS_ERROR(status))
+		return status;
+
+	*out_adapter = qdf_container_of(node, struct hdd_adapter, node);
+
+	return status;
+}
+
 QDF_STATUS hdd_remove_adapter(struct hdd_context *hdd_ctx,
 			      struct hdd_adapter *adapter)
 {
@@ -7074,6 +7063,26 @@ struct hdd_adapter *hdd_get_adapter_by_vdev(struct hdd_context *hdd_ctx,
 	}
 
 	return NULL;
+}
+
+struct hdd_adapter *hdd_adapter_get_by_reference(struct hdd_context *hdd_ctx,
+						 struct hdd_adapter *reference)
+{
+	struct hdd_adapter *adapter;
+
+	hdd_for_each_adapter(hdd_ctx, adapter) {
+		if (adapter == reference) {
+			dev_hold(adapter->dev);
+			break;
+		}
+	}
+
+	return adapter;
+}
+
+void hdd_adapter_put(struct hdd_adapter *adapter)
+{
+	dev_put(adapter->dev);
 }
 
 struct hdd_adapter *hdd_get_adapter_by_iface_name(struct hdd_context *hdd_ctx,
@@ -9251,6 +9260,25 @@ static inline void hdd_lte_coex_restart_sap(struct hdd_adapter *adapter,
 }
 #endif /* defined(FEATURE_WLAN_CH_AVOID) */
 
+QDF_STATUS
+wlan_hdd_get_adapter_by_vdev_id_from_objmgr(struct hdd_context *hdd_ctx,
+					    struct hdd_adapter **adapter,
+					    struct wlan_objmgr_vdev *vdev)
+{
+	*adapter = NULL;
+	if (!hdd_ctx)
+		return QDF_STATUS_E_INVAL;
+
+	if (!vdev || !vdev->vdev_nif.osdev) {
+		hdd_err("null vdev object");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	*adapter = vdev->vdev_nif.osdev->legacy_osif_priv;
+
+	return QDF_STATUS_SUCCESS;
+}
+
 /**
  * hdd_indicate_mgmt_frame() - Wrapper to indicate management frame to
  * user space
@@ -9266,9 +9294,12 @@ void hdd_indicate_mgmt_frame(tSirSmeMgmtFrameInd *frame_ind)
 {
 	struct hdd_context *hdd_ctx = NULL;
 	struct hdd_adapter *adapter = NULL;
-	int i;
+	int i, num_adapters;
+	uint8_t vdev_id[WLAN_MAX_VDEVS];
 	struct ieee80211_mgmt *mgmt =
 		(struct ieee80211_mgmt *)frame_ind->frameBuf;
+	QDF_STATUS status;
+	struct wlan_objmgr_vdev *vdev;
 
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 	if (wlan_hdd_validate_context(hdd_ctx))
@@ -9287,18 +9318,44 @@ void hdd_indicate_mgmt_frame(tSirSmeMgmtFrameInd *frame_ind)
 				break;
 		}
 	} else if (SME_SESSION_ID_BROADCAST == frame_ind->sessionId) {
-		hdd_for_each_adapter(hdd_ctx, adapter) {
-			if ((adapter) &&
-			    (WLAN_HDD_ADAPTER_MAGIC == adapter->magic)) {
-				hdd_indicate_mgmt_frame_to_user(adapter,
-						frame_ind->frame_len,
-						frame_ind->frameBuf,
-						frame_ind->frameType,
-						frame_ind->rxChan,
-						frame_ind->rxRssi,
-						frame_ind->rx_flags);
-			}
+		num_adapters = 0;
+		hdd_for_each_adapter_dev_held(hdd_ctx, adapter) {
+			vdev_id[num_adapters] = adapter->vdev_id;
+			num_adapters++;
+			/* dev_put has to be done here */
+			dev_put(adapter->dev);
 		}
+
+		adapter = NULL;
+
+		for (i = 0; i < num_adapters; i++) {
+			vdev = wlan_objmgr_get_vdev_by_id_from_psoc(
+							hdd_ctx->psoc,
+							vdev_id[i],
+							WLAN_OSIF_ID);
+
+			if (!vdev)
+				continue;
+
+			status = wlan_hdd_get_adapter_by_vdev_id_from_objmgr(
+						hdd_ctx, &adapter, vdev);
+
+			if (QDF_IS_STATUS_ERROR(status) || !adapter) {
+				wlan_objmgr_vdev_release_ref(vdev,
+							     WLAN_OSIF_ID);
+				continue;
+			}
+
+			hdd_indicate_mgmt_frame_to_user(adapter,
+							frame_ind->frame_len,
+							frame_ind->frameBuf,
+							frame_ind->frameType,
+							frame_ind->rxChan,
+							frame_ind->rxRssi,
+							frame_ind->rx_flags);
+			wlan_objmgr_vdev_release_ref(vdev, WLAN_OSIF_ID);
+		}
+
 		adapter = NULL;
 	} else {
 		adapter = hdd_get_adapter_by_vdev(hdd_ctx,
@@ -10892,7 +10949,6 @@ static int hdd_pre_enable_configure(struct hdd_context *hdd_ctx)
 	int ret;
 	uint8_t val = 0;
 	QDF_STATUS status;
-	uint32_t arp_ac_category;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 
 	cdp_register_pause_cb(soc, wlan_hdd_txrx_pause_cb);
@@ -10943,20 +10999,6 @@ static int hdd_pre_enable_configure(struct hdd_context *hdd_ctx)
 	ret = hdd_set_ani_enabled(hdd_ctx);
 	if (ret)
 		goto out;
-
-	status = ucfg_get_arp_ac_category(hdd_ctx->psoc, &arp_ac_category);
-
-	if (QDF_IS_STATUS_ERROR(status))
-		return -EINVAL;
-
-	ret = sme_cli_set_command(0, WMI_PDEV_PARAM_ARP_AC_OVERRIDE,
-				  arp_ac_category,
-				  PDEV_CMD);
-	if (0 != ret) {
-		hdd_err("WMI_PDEV_PARAM_ARP_AC_OVERRIDE ac: %d ret: %d",
-			arp_ac_category, ret);
-		goto out;
-	}
 
 	status = hdd_set_sme_chan_list(hdd_ctx);
 	if (status != QDF_STATUS_SUCCESS) {
@@ -12622,6 +12664,9 @@ int hdd_register_cb(struct hdd_context *hdd_ctx)
 
 	status = sme_set_lost_link_info_cb(mac_handle,
 					   hdd_lost_link_info_cb);
+
+	wlan_hdd_register_cp_stats_cb(hdd_ctx);
+
 	/* print error and not block the startup process */
 	if (!QDF_IS_STATUS_SUCCESS(status))
 		hdd_err("set lost link info callback failed");

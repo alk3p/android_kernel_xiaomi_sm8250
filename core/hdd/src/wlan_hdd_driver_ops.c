@@ -379,7 +379,7 @@ static int check_for_probe_defer(int ret)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0))
 static void hdd_abort_system_suspend(struct device *dev)
 {
-	pm_wakeup_hard_event(dev);
+	qdf_pm_system_wakeup();
 }
 #else
 static void hdd_abort_system_suspend(struct device *dev)
@@ -1018,6 +1018,12 @@ static int __wlan_hdd_bus_suspend(struct wow_enable_params wow_params)
 	if (err) {
 		hdd_err("Failed cdp bus suspend: %d", err);
 		return err;
+	}
+
+	if (ucfg_ipa_is_tx_pending(hdd_ctx->pdev)) {
+		hdd_err("failed due to pending IPA TX comps");
+		err = -EBUSY;
+		goto resume_cdp;
 	}
 
 	err = hif_bus_early_suspend(hif_ctx);
