@@ -5205,7 +5205,7 @@ static void csr_roam_assign_default_param(struct mac_context *mac,
  * @roam_bss_entry:      The next BSS to join
  * @csr_result_info:     Result of join
  * @csr_scan_result:     Global scan result
- * @session_id:          SME Session ID
+ * @vdev_id:             SME Session ID
  * @roam_id:             Roaming ID
  * @roam_state:          Current roaming state
  * @bss_list:            BSS List
@@ -5215,11 +5215,12 @@ static void csr_roam_assign_default_param(struct mac_context *mac,
 static bool csr_roam_select_bss(struct mac_context *mac_ctx,
 		tListElem **roam_bss_entry, tCsrScanResultInfo **csr_result_info,
 		struct tag_csrscan_result **csr_scan_result,
-		uint32_t session_id, uint32_t roam_id,
+		uint32_t vdev_id, uint32_t roam_id,
 		enum csr_join_state *roam_state,
 		struct scan_result_list *bss_list)
 {
 	uint8_t conc_channel = 0;
+	uint32_t temp_vdev_id;
 	bool status = false;
 	struct tag_csrscan_result *scan_result = NULL;
 	tCsrScanResultInfo *result = NULL;
@@ -5227,9 +5228,10 @@ static bool csr_roam_select_bss(struct mac_context *mac_ctx,
 	struct wlan_objmgr_vdev *vdev;
 	enum policy_mgr_con_mode mode;
 	uint8_t chan_id;
+	QDF_STATUS qdf_status;
 
 	vdev = wlan_objmgr_get_vdev_by_id_from_pdev(mac_ctx->pdev,
-						    session_id,
+						    vdev_id,
 						    WLAN_LEGACY_SME_ID);
 	if (!vdev) {
 		sme_err("Vdev ref error");
@@ -5249,6 +5251,24 @@ static bool csr_roam_select_bss(struct mac_context *mac_ctx,
 		 * sessions exempted
 		 */
 		result = &scan_result->Result;
+		/*
+		 * Ignore the BSS if any other vdev is already connected
+		 * to it.
+		 */
+		qdf_status = csr_roam_get_session_id_from_bssid(mac_ctx,
+				(struct qdf_mac_addr *)
+				&result->BssDescriptor.bssId, &temp_vdev_id);
+		if (QDF_IS_STATUS_SUCCESS(qdf_status)) {
+			sme_info("vdev_id %d already connected to %pM. select next bss for vdev_id %d",
+				 temp_vdev_id, result->BssDescriptor.bssId,
+				 vdev_id);
+			*roam_state = eCsrStopRoamingDueToConcurrency;
+			status = true;
+			*roam_bss_entry = csr_ll_next(&bss_list->List,
+						      *roam_bss_entry,
+						      LL_ACCESS_LOCK);
+			continue;
+		}
 
 		chan_id = result->BssDescriptor.channelId;
 		mode = policy_mgr_convert_device_mode_to_qdf_type(op_mode);
@@ -5285,7 +5305,7 @@ static bool csr_roam_select_bss(struct mac_context *mac_ctx,
 		}
 		if (policy_mgr_concurrent_open_sessions_running(mac_ctx->psoc)
 			&& !csr_is_valid_mc_concurrent_session(mac_ctx,
-					session_id, &result->BssDescriptor)) {
+					vdev_id, &result->BssDescriptor)) {
 			conc_channel = csr_get_concurrent_operation_channel(
 					mac_ctx);
 			sme_debug("csr Conc Channel: %d", conc_channel);
@@ -5312,7 +5332,7 @@ static bool csr_roam_select_bss(struct mac_context *mac_ctx,
 		/* Ok to roam this */
 		if (!conc_channel &&
 			QDF_IS_STATUS_SUCCESS(csr_roam_should_roam(mac_ctx,
-				session_id, &result->BssDescriptor, roam_id))) {
+				vdev_id, &result->BssDescriptor, roam_id))) {
 			status = false;
 			break;
 		}
@@ -10000,14 +10020,16 @@ csr_roam_send_disconnect_done_indication(struct mac_context *mac_ctx,
 	struct csr_roam_info *roam_info;
 	struct csr_roam_session *session;
 	struct wlan_objmgr_vdev *vdev;
+	uint8_t vdev_id;
 
+	vdev_id = discon_ind->session_id;
 	roam_info = qdf_mem_malloc(sizeof(*roam_info));
 	if (!roam_info)
 		return;
 
 	sme_debug("DISCONNECT_DONE_IND RC:%d", discon_ind->reason_code);
 
-	if (CSR_IS_SESSION_VALID(mac_ctx, discon_ind->session_id)) {
+	if (CSR_IS_SESSION_VALID(mac_ctx, vdev_id)) {
 		roam_info->reasonCode = discon_ind->reason_code;
 		roam_info->status_code = eSIR_SME_STA_NOT_ASSOCIATED;
 		qdf_mem_copy(roam_info->peerMac.bytes, discon_ind->peer_mac,
@@ -10019,34 +10041,42 @@ csr_roam_send_disconnect_done_indication(struct mac_context *mac_ctx,
 		roam_info->disassoc_reason = discon_ind->reason_code;
 		roam_info->rx_mc_bc_cnt = mac_ctx->rx_mc_bc_cnt;
 		vdev = wlan_objmgr_get_vdev_by_id_from_psoc(mac_ctx->psoc,
-							discon_ind->session_id,
-							WLAN_LEGACY_SME_ID);
+							    vdev_id,
+							    WLAN_LEGACY_SME_ID);
 		if (vdev)
 			roam_info->disconnect_ies =
 				mlme_get_peer_disconnect_ies(vdev);
 
-		csr_roam_call_callback(mac_ctx, discon_ind->session_id,
+		csr_roam_call_callback(mac_ctx, vdev_id,
 				       roam_info, 0, eCSR_ROAM_LOSTLINK,
 				       eCSR_ROAM_RESULT_DISASSOC_IND);
 		if (vdev) {
 			mlme_free_peer_disconnect_ies(vdev);
 			wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
 		}
-		session = CSR_GET_SESSION(mac_ctx, discon_ind->session_id);
-		if (session &&
-		   !CSR_IS_INFRA_AP(&session->connectedProfile))
+		session = CSR_GET_SESSION(mac_ctx, vdev_id);
+		if (!CSR_IS_INFRA_AP(&session->connectedProfile))
 			csr_roam_state_change(mac_ctx, eCSR_ROAMING_STATE_IDLE,
-				discon_ind->session_id);
+					      vdev_id);
+
+		if (CSR_IS_INFRASTRUCTURE(&session->connectedProfile)) {
+			csr_free_roam_profile(mac_ctx, vdev_id);
+			csr_free_connect_bss_desc(mac_ctx, vdev_id);
+			csr_roam_free_connect_profile(
+						&session->connectedProfile);
+			csr_roam_free_connected_info(mac_ctx,
+						     &session->connectedInfo);
+		}
 
 	} else {
-		sme_err("Inactive session %d", discon_ind->session_id);
+		sme_err("Inactive vdev_id %d", vdev_id);
 	}
 
 	/*
 	 * Release WM status change command as eWNI_SME_DISCONNECT_DONE_IND
 	 * has been sent to HDD and there is nothing else left to do.
 	 */
-	csr_roam_wm_status_change_complete(mac_ctx, discon_ind->session_id);
+	csr_roam_wm_status_change_complete(mac_ctx, vdev_id);
 	qdf_mem_free(roam_info);
 }
 
@@ -18871,13 +18901,16 @@ csr_create_roam_scan_offload_request(struct mac_context *mac_ctx,
 			status = csr_fetch_ch_lst_from_ini(mac_ctx,
 							   roam_info,
 							   req_buf);
-		if (!QDF_IS_STATUS_SUCCESS(status)) {
-			QDF_TRACE(QDF_MODULE_ID_SME,
-				  QDF_TRACE_LEVEL_DEBUG,
-				  "Fetch channel list from ini failed");
-			qdf_mem_free(req_buf);
-			return NULL;
-		}
+			if (!QDF_IS_STATUS_SUCCESS(status)) {
+				QDF_TRACE(QDF_MODULE_ID_SME,
+					  QDF_TRACE_LEVEL_DEBUG,
+					  "Fetch channel list from ini failed");
+				qdf_mem_free(req_buf);
+				return NULL;
+			}
+		} else if (reason == REASON_FLUSH_CHANNEL_LIST) {
+			req_buf->ChannelCacheType = CHANNEL_LIST_STATIC;
+			req_buf->ConnectedNetwork.ChannelCount = 0;
 		} else {
 			csr_fetch_ch_lst_from_occupied_lst(mac_ctx, session_id,
 							   reason, req_buf,
@@ -18903,7 +18936,8 @@ csr_create_roam_scan_offload_request(struct mac_context *mac_ctx,
 						    curr_ch_lst_info, req_buf);
 	}
 #endif
-	if (req_buf->ConnectedNetwork.ChannelCount == 0) {
+	if (req_buf->ConnectedNetwork.ChannelCount == 0 &&
+	    reason != REASON_FLUSH_CHANNEL_LIST) {
 		/* Maintain the Valid Channels List */
 		status = csr_fetch_valid_ch_lst(mac_ctx, req_buf, session_id);
 		if (!QDF_IS_STATUS_SUCCESS(status)) {
@@ -21764,22 +21798,6 @@ void csr_process_set_hw_mode(struct mac_context *mac, tSmeCmd *command)
 		}
 	}
 
-	if ((POLICY_MGR_UPDATE_REASON_OPPORTUNISTIC ==
-		command->u.set_hw_mode_cmd.reason) &&
-		(true == mac->sme.get_connection_info_cb(NULL, NULL))) {
-		sme_err("Set HW mode refused: conn in progress");
-		policy_mgr_restart_opportunistic_timer(mac->psoc, false);
-		goto fail;
-	}
-
-	if ((POLICY_MGR_UPDATE_REASON_OPPORTUNISTIC ==
-		command->u.set_hw_mode_cmd.reason) &&
-		(!command->u.set_hw_mode_cmd.hw_mode_index &&
-		!policy_mgr_need_opportunistic_upgrade(mac->psoc, NULL))) {
-		sme_err("Set HW mode to SMM not needed anymore");
-		goto fail;
-	}
-
 	hw_mode = policy_mgr_get_hw_mode_change_from_hw_mode_index(
 			mac->psoc, command->u.set_hw_mode_cmd.hw_mode_index);
 
@@ -21789,6 +21807,22 @@ void csr_process_set_hw_mode(struct mac_context *mac, tSmeCmd *command)
 	}
 
 	policy_mgr_set_hw_mode_change_in_progress(mac->psoc, hw_mode);
+
+	if ((POLICY_MGR_UPDATE_REASON_OPPORTUNISTIC ==
+	     command->u.set_hw_mode_cmd.reason) &&
+	    (true == mac->sme.get_connection_info_cb(NULL, NULL))) {
+		sme_err("Set HW mode refused: conn in progress");
+		policy_mgr_restart_opportunistic_timer(mac->psoc, false);
+		goto reset_state;
+	}
+
+	if ((POLICY_MGR_UPDATE_REASON_OPPORTUNISTIC ==
+	     command->u.set_hw_mode_cmd.reason) &&
+	    (!command->u.set_hw_mode_cmd.hw_mode_index &&
+	     !policy_mgr_need_opportunistic_upgrade(mac->psoc, NULL))) {
+		sme_err("Set HW mode to SMM not needed anymore");
+		goto reset_state;
+	}
 
 	cmd->messageType = eWNI_SME_SET_HW_MODE_REQ;
 	cmd->length = len;
@@ -21807,13 +21841,15 @@ void csr_process_set_hw_mode(struct mac_context *mac, tSmeCmd *command)
 
 	status = umac_send_mb_message_to_mac(cmd);
 	if (QDF_STATUS_SUCCESS != status) {
-		policy_mgr_set_hw_mode_change_in_progress(mac->psoc,
-			POLICY_MGR_HW_MODE_NOT_IN_PROGRESS);
 		sme_err("Posting to PE failed");
 		cmd = NULL;
-		goto fail;
+		goto reset_state;
 	}
 	return;
+
+reset_state:
+	policy_mgr_set_hw_mode_change_in_progress(mac->psoc,
+			POLICY_MGR_HW_MODE_NOT_IN_PROGRESS);
 fail:
 	if (cmd)
 		qdf_mem_free(cmd);
