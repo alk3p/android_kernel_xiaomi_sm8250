@@ -3243,6 +3243,11 @@ QDF_STATUS sme_get_config_param(mac_handle_t mac_handle,
 	return status;
 }
 
+uint32_t sme_get_vht_ch_width(void)
+{
+	return wma_get_vht_ch_width();
+}
+
 /*
  * sme_get_modify_profile_fields() -
  * HDD or SME - QOS calls this function to get the current values of
@@ -9870,24 +9875,15 @@ QDF_STATUS sme_update_dsc_pto_up_mapping(mac_handle_t mac_handle,
 		sme_release_global_lock(&mac->sme);
 		return QDF_STATUS_E_FAILURE;
 	}
+
 	for (i = 0; i < SME_QOS_WMM_UP_MAX; i++) {
 		for (j = pSession->QosMapSet.dscp_range[i][0];
-			j <= pSession->QosMapSet.dscp_range[i][1];
-			j++) {
-			if ((pSession->QosMapSet.dscp_range[i][0] == 255)
-				&& (pSession->QosMapSet.dscp_range[i][1] ==
-							255)) {
-				QDF_TRACE(QDF_MODULE_ID_SME,
-					QDF_TRACE_LEVEL_DEBUG,
-					FL("User Priority %d isn't used"), i);
-				break;
-			} else {
+			j <= pSession->QosMapSet.dscp_range[i][1] &&
+			j <= WLAN_MAX_DSCP; j++)
 				dscpmapping[j] = i;
-			}
-		}
 	}
 	for (i = 0; i < pSession->QosMapSet.num_dscp_exceptions; i++)
-		if (pSession->QosMapSet.dscp_exceptions[i][0] != 255)
+		if (pSession->QosMapSet.dscp_exceptions[i][0] <= WLAN_MAX_DSCP)
 			dscpmapping[pSession->QosMapSet.dscp_exceptions[i][0]] =
 				pSession->QosMapSet.dscp_exceptions[i][1];
 
@@ -16128,24 +16124,26 @@ static void sme_scan_event_handler(struct wlan_objmgr_vdev *vdev,
 				   void *arg)
 {
 	struct mac_context *mac = arg;
-	struct csr_roam_session *session;
+	uint8_t vdev_id;
 
 	if (!mac) {
 		sme_err("Invalid mac context");
 		return;
 	}
 
-	if (!CSR_IS_SESSION_VALID(mac, vdev->vdev_objmgr.vdev_id)) {
-		sme_err("Invalid vdev_id: %d", vdev->vdev_objmgr.vdev_id);
+	if (!mac->sme.beacon_pause_cb)
 		return;
-	}
 
-	session = CSR_GET_SESSION(mac, vdev->vdev_objmgr.vdev_id);
+	if (event->type != SCAN_EVENT_TYPE_STARTED)
+		return;
 
-	if (event->type == SCAN_EVENT_TYPE_STARTED) {
-		if (mac->sme.beacon_pause_cb)
-			mac->sme.beacon_pause_cb(mac->hdd_handle,
-				vdev->vdev_objmgr.vdev_id, event->type, false);
+	for (vdev_id = 0 ; vdev_id < WLAN_MAX_VDEVS ; vdev_id++) {
+		if (CSR_IS_SESSION_VALID(mac, vdev_id) &&
+		    sme_is_beacon_report_started(MAC_HANDLE(mac), vdev_id)) {
+			sme_debug("Send pause ind for vdev_id : %d", vdev_id);
+			mac->sme.beacon_pause_cb(mac->hdd_handle, vdev_id,
+						 event->type, false);
+		}
 	}
 }
 

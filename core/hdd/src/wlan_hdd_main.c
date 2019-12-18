@@ -4529,6 +4529,7 @@ QDF_STATUS hdd_init_station_mode(struct hdd_adapter *adapter)
 	int ret_val;
 	mac_handle_t mac_handle;
 	bool bval = false;
+	uint32_t fine_time_meas_cap = 0;
 
 	hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	mac_handle = hdd_ctx->mac_handle;
@@ -4604,9 +4605,23 @@ QDF_STATUS hdd_init_station_mode(struct hdd_adapter *adapter)
 	/* rcpi info initialization */
 	qdf_mem_zero(&adapter->rcpi, sizeof(adapter->rcpi));
 
-	if (adapter->device_mode == QDF_STA_MODE)
+	if (adapter->device_mode == QDF_STA_MODE) {
 		mlme_set_roam_trigger_bitmap(hdd_ctx->psoc, adapter->vdev_id,
 					     DEFAULT_ROAM_TRIGGER_BITMAP);
+
+		ucfg_mlme_get_fine_time_meas_cap(hdd_ctx->psoc,
+						 &fine_time_meas_cap);
+		sme_cli_set_command(
+			adapter->vdev_id,
+			WMI_VDEV_PARAM_ENABLE_DISABLE_RTT_RESPONDER_ROLE,
+			(bool)(fine_time_meas_cap & WMI_FW_STA_RTT_RESPR),
+			VDEV_CMD);
+		sme_cli_set_command(
+			adapter->vdev_id,
+			WMI_VDEV_PARAM_ENABLE_DISABLE_RTT_INITIATOR_ROLE,
+			(bool)(fine_time_meas_cap & WMI_FW_STA_RTT_INITR),
+			VDEV_CMD);
+	}
 
 	return QDF_STATUS_SUCCESS;
 
@@ -5427,6 +5442,8 @@ struct hdd_adapter *hdd_open_adapter(struct hdd_context *hdd_ctx, uint8_t sessio
 
 	hdd_init_completion(adapter);
 	INIT_WORK(&adapter->scan_block_work, wlan_hdd_cfg80211_scan_block_cb);
+	INIT_WORK(&adapter->sap_stop_bss_work,
+		  hdd_stop_sap_due_to_invalid_channel);
 	qdf_list_create(&adapter->blocked_scan_request_q, WLAN_MAX_SCAN_COUNT);
 	qdf_mutex_create(&adapter->blocked_scan_request_q_lock);
 	qdf_event_create(&adapter->acs_complete_event);
@@ -10009,7 +10026,6 @@ static void hdd_cfg_params_init(struct hdd_context *hdd_ctx)
 		      cfg_get(psoc,
 			      CFG_ACTION_OUI_DISABLE_AGGRESSIVE_EDCA),
 			      ACTION_OUI_MAX_STR_LEN);
-	config->enable_rtt_support = cfg_get(psoc, CFG_ENABLE_RTT_SUPPORT);
 	config->is_unit_test_framework_enabled =
 			cfg_get(psoc, CFG_ENABLE_UNIT_TEST_FRAMEWORK);
 	config->disable_channel = cfg_get(psoc, CFG_ENABLE_DISABLE_CHANNEL);
@@ -10230,9 +10246,15 @@ int hdd_start_ap_adapter(struct hdd_adapter *adapter)
 	if (adapter->device_mode == QDF_SAP_MODE) {
 		ucfg_mlme_get_fine_time_meas_cap(hdd_ctx->psoc,
 						 &fine_time_meas_cap);
-		sme_cli_set_command(adapter->vdev_id,
+		sme_cli_set_command(
+			adapter->vdev_id,
 			WMI_VDEV_PARAM_ENABLE_DISABLE_RTT_RESPONDER_ROLE,
 			(bool)(fine_time_meas_cap & WMI_FW_AP_RTT_RESPR),
+			VDEV_CMD);
+		sme_cli_set_command(
+			adapter->vdev_id,
+			WMI_VDEV_PARAM_ENABLE_DISABLE_RTT_INITIATOR_ROLE,
+			(bool)(fine_time_meas_cap & WMI_FW_AP_RTT_INITR),
 			VDEV_CMD);
 	}
 
@@ -10965,6 +10987,7 @@ static int hdd_pre_enable_configure(struct hdd_context *hdd_ctx)
 {
 	int ret;
 	uint8_t val = 0;
+	uint8_t max_retry = 0;
 	QDF_STATUS status;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 
@@ -11002,6 +11025,14 @@ static int hdd_pre_enable_configure(struct hdd_context *hdd_ctx)
 				  PDEV_CMD);
 	if (0 != ret) {
 		hdd_err("WMI_PDEV_PARAM_TX_CHAIN_MASK_1SS failed %d", ret);
+		goto out;
+	}
+
+	wlan_mlme_get_mgmt_max_retry(hdd_ctx->psoc, &max_retry);
+	ret = sme_cli_set_command(0, WMI_PDEV_PARAM_MGMT_RETRY_LIMIT, max_retry,
+				  PDEV_CMD);
+	if (0 != ret) {
+		hdd_err("WMI_PDEV_PARAM_MGMT_RETRY_LIMIT failed %d", ret);
 		goto out;
 	}
 

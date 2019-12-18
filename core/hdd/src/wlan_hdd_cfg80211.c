@@ -149,6 +149,16 @@
 #define g_mode_rates_size (12)
 #define a_mode_rates_size (8)
 
+/**
+ * rtt_is_initiator - Macro to check if the bitmap has any RTT roles set
+ * @bitmap: The bitmap to be checked
+ */
+#define rtt_is_enabled(bitmap) \
+	((bitmap) & (WMI_FW_STA_RTT_INITR | \
+		     WMI_FW_STA_RTT_RESPR | \
+		     WMI_FW_AP_RTT_INITR | \
+		     WMI_FW_AP_RTT_RESPR))
+
 /*
  * Android CTS verifier needs atleast this much wait time (in msec)
  */
@@ -1004,6 +1014,8 @@ int wlan_hdd_send_hang_reason_event(struct hdd_context *hdd_ctx,
 {
 	struct sk_buff *vendor_event;
 	enum qca_wlan_vendor_hang_reason hang_reason;
+	struct hdd_adapter *sta_adapter;
+	struct wireless_dev *wdev = NULL;
 
 	hdd_enter();
 
@@ -1012,8 +1024,12 @@ int wlan_hdd_send_hang_reason_event(struct hdd_context *hdd_ctx,
 		return -EINVAL;
 	}
 
+	sta_adapter = hdd_get_adapter(hdd_ctx, QDF_STA_MODE);
+	if (sta_adapter)
+		wdev = &(sta_adapter->wdev);
+
 	vendor_event = cfg80211_vendor_event_alloc(hdd_ctx->wiphy,
-						   NULL,
+						   wdev,
 						   sizeof(uint32_t),
 						   HANG_REASON_INDEX,
 						   GFP_KERNEL);
@@ -3033,6 +3049,9 @@ void wlan_hdd_cfg80211_acs_ch_select_evt(struct hdd_adapter *adapter)
 	int ret_val;
 	uint16_t ch_width;
 
+	qdf_atomic_set(&adapter->session.ap.acs_in_progress, 0);
+	qdf_event_set(&adapter->acs_complete_event);
+
 	vendor_event = cfg80211_vendor_event_alloc(hdd_ctx->wiphy,
 			&(adapter->wdev),
 			4 * sizeof(u8) + 1 * sizeof(u16) + 4 + NLMSG_HDRLEN,
@@ -3156,6 +3175,7 @@ __wlan_hdd_cfg80211_get_supported_features(struct wiphy *wiphy,
 #ifdef FEATURE_WLAN_TDLS
 	bool bvalue;
 #endif
+	uint32_t fine_time_meas_cap;
 
 	/* ENTER_DEV() intentionally not used in a frequently invoked API */
 
@@ -3197,9 +3217,13 @@ __wlan_hdd_cfg80211_get_supported_features(struct wiphy *wiphy,
 		hdd_debug("NAN is supported by firmware");
 		fset |= WIFI_FEATURE_NAN;
 	}
+
+	ucfg_mlme_get_fine_time_meas_cap(hdd_ctx->psoc, &fine_time_meas_cap);
+
 	if (sme_is_feature_supported_by_fw(RTT) &&
-		hdd_ctx->config->enable_rtt_support) {
-		hdd_debug("RTT is supported by firmware and framework");
+	    rtt_is_enabled(fine_time_meas_cap)) {
+		hdd_debug("RTT is supported by firmware and driver: %x",
+			  fine_time_meas_cap);
 		fset |= WIFI_FEATURE_D2D_RTT;
 		fset |= WIFI_FEATURE_D2AP_RTT;
 	}
@@ -6809,10 +6833,12 @@ static int hdd_config_mgmt_retry(struct hdd_adapter *adapter,
 {
 	uint8_t retry;
 	int param_id;
+	uint8_t max_mgmt_retry;
 
 	retry = nla_get_u8(attr);
-	retry = retry > CFG_MGMT_RETRY_MAX ?
-		CFG_MGMT_RETRY_MAX : retry;
+	max_mgmt_retry = (cfg_max(CFG_MGMT_RETRY_MAX));
+	retry = retry > max_mgmt_retry ?
+		max_mgmt_retry : retry;
 	param_id = WMI_PDEV_PARAM_MGMT_RETRY_LIMIT;
 
 	return wma_cli_set_command(adapter->vdev_id, param_id,
@@ -22479,6 +22505,8 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 	uint8_t sec_ch = 0;
 	int ret;
 	uint16_t chan_num = cds_freq_to_chan(chandef->chan->center_freq);
+	uint8_t max_fw_bw;
+	enum phy_ch_width ch_width;
 
 	hdd_enter();
 
@@ -22507,6 +22535,20 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 		     QDF_MAC_ADDR_SIZE);
 
 	ch_params.ch_width = hdd_map_nl_chan_width(chandef->width);
+	/* Verify the BW before accepting this request */
+	ch_width = hdd_map_nl_chan_width(chandef->width);
+
+	max_fw_bw = sme_get_vht_ch_width();
+
+	if ((ch_width == CH_WIDTH_160MHZ &&
+	    max_fw_bw <= WNI_CFG_VHT_CHANNEL_WIDTH_80MHZ) ||
+	    (ch_width == CH_WIDTH_80P80MHZ &&
+	    max_fw_bw <= WNI_CFG_VHT_CHANNEL_WIDTH_160MHZ)) {
+		hdd_err("FW does not support this BW %d max BW supported %d",
+			ch_width, max_fw_bw);
+		return -EINVAL;
+	}
+
 	/*
 	 * CDS api expects secondary channel for calculating
 	 * the channel params
