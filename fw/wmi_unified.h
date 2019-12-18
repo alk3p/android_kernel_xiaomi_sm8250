@@ -10627,16 +10627,22 @@ typedef struct {
 
 /** Upto 8 bits are available for Roaming module to be sent along with
 WMI_VDEV_PARAM_ROAM_FW_OFFLOAD WMI_VDEV_PARAM **/
-/* Enable Roaming FW offload LFR1.5/LFR2.0 implementation */
+/* Bit 0: Enable Roaming FW offload LFR1.5/LFR2.0 implementation */
 #define WMI_ROAM_FW_OFFLOAD_ENABLE_FLAG                          0x1
-/* Enable Roaming module in FW to do scan based on Final BMISS */
+/* Bit 1: Enable Roaming module in FW to do scan based on Final BMISS */
 #define WMI_ROAM_BMISS_FINAL_SCAN_ENABLE_FLAG                    0x2
-/**
+/* Bit 2:
  * To enable/disable EAPOL_4WAY_HANDSHAKE process while roaming.
  * param value = 0 --> Enable EAPOL 4way handshake
  * param value = 1 --> Skip EAPOL 4way handshake
  */
 #define WMI_VDEV_PARAM_SKIP_ROAM_EAPOL_4WAY_HANDSHAKE            0x4
+/* Bit 3:
+ * Scan type when WMI_ROAM_BMISS_FINAL_SCAN_ENABLE_FLAG is set:
+ * value = 0 --> Chanmap scan followed by one full scan if no candidate found.
+ * value = 1 --> Chanmap scan only
+ */
+#define WMI_ROAM_BMISS_FINAL_SCAN_TYPE_FLAG                      0x8
 
 /** slot time long */
 #define WMI_VDEV_SLOT_TIME_LONG                                  0x1
@@ -11487,9 +11493,16 @@ typedef struct {
     A_UINT32 tlv_header; /* TLV tag and len; tag equals WMITLV_TAG_STRUC_wmi_tbtt_offset_event_fixed_param  */
     /** bimtap of VDEVs that has tbtt offset updated */
     A_UINT32 vdev_map;
-/* The TLVs for tbttoffset_list will follow this TLV.
- *     tbtt offset list in the order of the LSB to MSB in the vdev_map bitmap
+/* The TLVs for tbttoffset_list, tbtt_qtime_low_us_list, and
+ * tbtt_qtime_high_us_list will follow this TLV.
+ *   - tbtt offset list in the order of the LSb to MSb in the vdev_map bitmap
  *     A_UINT32 tbttoffset_list[WMI_MAX_AP_VDEV];
+ *   - tbtt qtime_low_us list(Lower 32 bit of qtime us) in the order of the
+ *     LSb to MSb in the vdev_map bitmap
+ *     A_UINT32 tbtt_qtime_low_us_list[WMI_MAX_AP_VDEV];
+ *   - tbtt qtime_high_us list(Higher 32 bit of qtime us) in the order of the
+ *     LSb to MSb in the vdev_map bitmap
+ *     A_UINT32 tbtt_qtime_high_us_list[WMI_MAX_AP_VDEV];
  */
 } wmi_tbtt_offset_event_fixed_param;
 
@@ -11499,6 +11512,9 @@ typedef struct {
     A_UINT32 vdev_id;
     /** tbttoffset in TUs */
     A_UINT32 tbttoffset;
+    /** absolute tbtt time in qtime us */
+    A_UINT32 tbtt_qtime_low_us;  /* bits 31:0 of qtime */
+    A_UINT32 tbtt_qtime_high_us; /* bits 63:32 of qtime */
 } wmi_tbtt_offset_info;
 
 /** Use this event if number of vdevs > 32 */
@@ -14216,6 +14232,7 @@ typedef enum wake_reason_e {
     WOW_REASON_PAGE_FAULT, /* Host wake up due to page fault */
     WOW_REASON_ROAM_PREAUTH_START,
     WOW_REASON_ROAM_PMKID_REQUEST,
+    WOW_REASON_RFKILL,
 
     /* add new WOW_REASON_ defs before this line */
     WOW_REASON_MAX,
