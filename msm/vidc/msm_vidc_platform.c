@@ -398,6 +398,27 @@ static struct msm_vidc_codec_capability bengal_capabilities[] = {
 	{CAP_HEVC_IMAGE_FRAME_HEIGHT, ENC, HEVC, 128, 512, 1, 512},
 	{CAP_HEIC_IMAGE_FRAME_WIDTH, ENC, HEVC, 512, 8192, 1, 8192},
 	{CAP_HEIC_IMAGE_FRAME_HEIGHT, ENC, HEVC, 512, 8192, 1, 8192},
+
+	/* Level for AVC and HEVC encoder specific.
+	 * Default for levels is UNKNOWN value. But if we use unknown
+	 * value here to set as default, max value needs to be set to
+	 * unknown as well, which creates a problem of allowing client
+	 * to set higher level than supported
+	 */
+	{CAP_H264_LEVEL, ENC, H264, V4L2_MPEG_VIDEO_H264_LEVEL_1_0,
+				V4L2_MPEG_VIDEO_H264_LEVEL_5_0, 1,
+				V4L2_MPEG_VIDEO_H264_LEVEL_4_1},
+	{CAP_HEVC_LEVEL, ENC, HEVC, V4L2_MPEG_VIDEO_HEVC_LEVEL_1,
+				V4L2_MPEG_VIDEO_HEVC_LEVEL_5, 1,
+				V4L2_MPEG_VIDEO_HEVC_LEVEL_4_1},
+
+	/* Level for AVC and HEVC decoder specific */
+	{CAP_H264_LEVEL, DEC, H264, V4L2_MPEG_VIDEO_H264_LEVEL_1_0,
+				V4L2_MPEG_VIDEO_H264_LEVEL_5_0, 1,
+				V4L2_MPEG_VIDEO_H264_LEVEL_4_1},
+	{CAP_HEVC_LEVEL, DEC, HEVC, V4L2_MPEG_VIDEO_HEVC_LEVEL_1,
+				V4L2_MPEG_VIDEO_HEVC_LEVEL_5, 1,
+				V4L2_MPEG_VIDEO_HEVC_LEVEL_4_1},
 };
 
 static struct msm_vidc_codec_capability kona_capabilities[] = {
@@ -511,12 +532,12 @@ static struct msm_vidc_codec_capability kona_capabilities[] = {
  * 3x3 transformation matrix coefficients in s4.9 fixed point format
  */
 static u32 vpe_csc_custom_matrix_coeff[HAL_MAX_MATRIX_COEFFS] = {
-	470, 8170, 8148, 0, 490, 50, 0, 34, 483
+	440, 8140, 8098, 0, 460, 52, 0, 34, 463
 };
 
 /* offset coefficients in s9 fixed point format */
 static u32 vpe_csc_custom_bias_coeff[HAL_MAX_BIAS_COEFFS] = {
-	34, 0, 4
+	53, 0, 4
 };
 
 /* clamping value for Y/U/V([min,max] for Y/U/V) */
