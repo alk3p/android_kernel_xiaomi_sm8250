@@ -9391,7 +9391,7 @@ static uint32_t wlan_hdd_populate_weigh_pcl(
 			w_pcl[i].flag = set | PCL_CHANNEL_SUPPORT_CLI;
 	}
 	chan_idx = pcl_len;
-	if (chan_weights->weight_list[pcl_len - 1] >
+	if (pcl_len && chan_weights->weight_list[pcl_len - 1] >
 	    PCL_GROUPS_WEIGHT_DIFFERENCE)
 	/* Set non-pcl channels weight 20 point less than the last PCL entry */
 		valid_weight = chan_weights->weight_list[pcl_len - 1] -
@@ -19381,8 +19381,10 @@ int wlan_hdd_try_disconnect(struct hdd_adapter *adapter)
 				&adapter->roaming_comp_var,
 				msecs_to_jiffies(WLAN_WAIT_TIME_STOP_ROAM));
 			if (!rc) {
-				hdd_err("roaming comp var timed out vdev id: %d",
+				hdd_err("roaming_comp_var time out vdev id: %d",
 					adapter->vdev_id);
+				/* Clear roaming in progress flag */
+				hdd_set_roaming_in_progress(false);
 			}
 			if (adapter->roam_ho_fail) {
 				INIT_COMPLETION(adapter->disconnect_comp_var);
@@ -19842,8 +19844,10 @@ int wlan_hdd_disconnect(struct hdd_adapter *adapter, u16 reason)
 				&adapter->roaming_comp_var,
 				msecs_to_jiffies(WLAN_WAIT_TIME_STOP_ROAM));
 			if (!rc) {
-				hdd_err("roaming comp var timed out vdev id: %d",
+				hdd_err("roaming_comp_var time out vdev id: %d",
 					adapter->vdev_id);
+				/* Clear roaming in progress flag */
+				hdd_set_roaming_in_progress(false);
 			}
 			if (adapter->roam_ho_fail) {
 				INIT_COMPLETION(adapter->disconnect_comp_var);
@@ -22716,6 +22720,11 @@ hdd_update_connect_params_fils_info(struct hdd_adapter *adapter,
 		fils_info->sequence_number = req->fils_erp_next_seq_num + 1;
 		fils_info->r_rk_length = req->fils_erp_rrk_len;
 
+		if (fils_info->r_rk_length > FILS_MAX_RRK_LENGTH) {
+			hdd_err("r_rk_length is invalid");
+			return -EINVAL;
+		}
+
 		if (req->fils_erp_rrk_len && req->fils_erp_rrk)
 			qdf_mem_copy(fils_info->r_rk, req->fils_erp_rrk,
 						fils_info->r_rk_length);
@@ -23084,7 +23093,7 @@ void wlan_hdd_init_chan_info(struct hdd_context *hdd_ctx)
 	mac_handle_t mac_handle;
 
 	hdd_ctx->chan_info = NULL;
-	if (!hdd_ctx->config->enable_snr_monitoring) {
+	if (!ucfg_scan_is_snr_monitor_enabled(hdd_ctx->psoc)) {
 		hdd_debug("SNR monitoring is disabled");
 		return;
 	}
