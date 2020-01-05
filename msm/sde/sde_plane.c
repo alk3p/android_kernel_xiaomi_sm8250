@@ -3499,7 +3499,10 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 		if (catalog->mixer_count &&
 				catalog->mixer[0].sblk->maxblendstages) {
 			zpos_max = catalog->mixer[0].sblk->maxblendstages - 1;
-			if (zpos_max > SDE_STAGE_MAX - SDE_STAGE_0 - 1)
+			if (catalog->has_base_layer &&
+					(zpos_max > SDE_STAGE_MAX - 1))
+				zpos_max = SDE_STAGE_MAX - 1;
+			else if (zpos_max > SDE_STAGE_MAX - SDE_STAGE_0 - 1)
 				zpos_max = SDE_STAGE_MAX - SDE_STAGE_0 - 1;
 		}
 	} else if (plane->type != DRM_PLANE_TYPE_PRIMARY) {
@@ -4060,6 +4063,28 @@ static void sde_plane_destroy(struct drm_plane *plane)
 
 		kfree(psde);
 	}
+}
+
+void sde_plane_destroy_fb(struct drm_plane_state *state)
+{
+	struct sde_plane_state *pstate;
+
+	if (!state) {
+		SDE_ERROR("invalid arg state %d\n", !state);
+		return;
+	}
+
+	pstate = to_sde_plane_state(state);
+
+	if (sde_plane_get_property(pstate, PLANE_PROP_FB_TRANSLATION_MODE) ==
+			SDE_DRM_FB_SEC) {
+		/* remove ref count for frame buffers */
+		if (state->fb) {
+			drm_framebuffer_put(state->fb);
+			state->fb = NULL;
+		}
+	}
+
 }
 
 static void sde_plane_destroy_state(struct drm_plane *plane,
