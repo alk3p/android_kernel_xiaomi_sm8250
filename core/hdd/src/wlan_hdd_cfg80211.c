@@ -1536,6 +1536,10 @@ static const struct nl80211_vendor_cmd_info wlan_hdd_cfg80211_vendor_events[] = 
 		.vendor_id = QCA_NL80211_VENDOR_ID,
 		.subcmd = QCA_NL80211_VENDOR_SUBCMD_ROAM,
 	},
+	[QCA_NL80211_VENDOR_SUBCMD_OEM_DATA_INDEX] = {
+		.vendor_id = QCA_NL80211_VENDOR_ID,
+		.subcmd = QCA_NL80211_VENDOR_SUBCMD_OEM_DATA,
+	},
 };
 
 /**
@@ -5712,6 +5716,7 @@ __wlan_hdd_cfg80211_get_logger_supp_feature(struct wiphy *wiphy,
 	int status;
 	uint32_t features;
 	struct sk_buff *reply_skb = NULL;
+	bool enable_ring_buffer;
 
 	hdd_enter_dev(wdev->netdev);
 
@@ -5725,13 +5730,17 @@ __wlan_hdd_cfg80211_get_logger_supp_feature(struct wiphy *wiphy,
 		return status;
 
 	features = 0;
-
-	features |= WIFI_LOGGER_PER_PACKET_TX_RX_STATUS_SUPPORTED;
-	features |= WIFI_LOGGER_CONNECT_EVENT_SUPPORTED;
-	features |= WIFI_LOGGER_WAKE_LOCK_SUPPORTED;
-	features |= WIFI_LOGGER_DRIVER_DUMP_SUPPORTED;
-	features |= WIFI_LOGGER_PACKET_FATE_SUPPORTED;
-
+	wlan_mlme_get_status_ring_buffer(hdd_ctx->psoc, &enable_ring_buffer);
+	if (enable_ring_buffer) {
+		features |= WIFI_LOGGER_PER_PACKET_TX_RX_STATUS_SUPPORTED;
+		features |= WIFI_LOGGER_CONNECT_EVENT_SUPPORTED;
+		features |= WIFI_LOGGER_WAKE_LOCK_SUPPORTED;
+		features |= WIFI_LOGGER_DRIVER_DUMP_SUPPORTED;
+		features |= WIFI_LOGGER_PACKET_FATE_SUPPORTED;
+		hdd_debug("Supported logger features: 0x%0x", features);
+	} else {
+		hdd_debug("Ring buffer disabled");
+	}
 	reply_skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
 			sizeof(uint32_t) + NLA_HDRLEN + NLMSG_HDRLEN);
 	if (!reply_skb) {
@@ -5739,7 +5748,6 @@ __wlan_hdd_cfg80211_get_logger_supp_feature(struct wiphy *wiphy,
 		return -ENOMEM;
 	}
 
-	hdd_debug("Supported logger features: 0x%0x", features);
 	if (nla_put_u32(reply_skb, QCA_WLAN_VENDOR_ATTR_LOGGER_SUPPORTED,
 				   features)) {
 		hdd_err("nla put fail");
@@ -11489,6 +11497,7 @@ hdd_convert_sarv1_to_sarv2(struct hdd_context *hdd_ctx,
 	uint32_t bdf_index, set;
 	struct sar_limit_cmd_row *row;
 
+	hdd_enter();
 	if (hdd_ctx->sar_version != SAR_VERSION_2) {
 		hdd_debug("SAR version: %d", hdd_ctx->sar_version);
 		return false;
@@ -11534,6 +11543,7 @@ hdd_convert_sarv1_to_sarv2(struct hdd_context *hdd_ctx,
 	row[0].validity_bitmap = WMI_SAR_CHAIN_ID_VALID_MASK;
 	row[1].validity_bitmap = WMI_SAR_CHAIN_ID_VALID_MASK;
 
+	hdd_exit();
 	return true;
 }
 
@@ -11733,6 +11743,7 @@ static int __wlan_hdd_set_sar_power_limits(struct wiphy *wiphy,
 	QDF_STATUS status;
 	uint32_t num_limit_rows = 0;
 	struct sar_limit_cmd_row *row;
+	uint32_t sar_enable;
 
 	hdd_enter();
 
@@ -11750,12 +11761,31 @@ static int __wlan_hdd_set_sar_power_limits(struct wiphy *wiphy,
 		return -EINVAL;
 	}
 
+	if (tb[SAR_LIMITS_SAR_ENABLE]) {
+		sar_enable = nla_get_u32(tb[SAR_LIMITS_SAR_ENABLE]);
+
+		if ((sar_enable >=
+			QCA_WLAN_VENDOR_ATTR_SAR_LIMITS_SELECT_BDF0 &&
+		     sar_enable <=
+			QCA_WLAN_VENDOR_ATTR_SAR_LIMITS_SELECT_BDF4) &&
+		     hdd_ctx->sar_version == SAR_VERSION_2 &&
+		     !hdd_ctx->config->enable_sar_conversion) {
+			hdd_err("SARV1 to SARV2 is disabled from ini");
+			return -EINVAL;
+		} else if (sar_enable ==
+				QCA_WLAN_VENDOR_ATTR_SAR_LIMITS_SELECT_V2_0 &&
+			   hdd_ctx->sar_version == SAR_VERSION_1) {
+			hdd_err("FW expects SARV1 given command is SARV2");
+			return -EINVAL;
+		}
+	}
+
 	sar_limit_cmd = qdf_mem_malloc(sizeof(struct sar_limit_cmd_params));
 	if (!sar_limit_cmd)
 		return -ENOMEM;
 
 	/* is special SAR V1 => SAR V2 logic enabled and applicable? */
-	if (hdd_ctx->config->sar_version == 2 &&
+	if (hdd_ctx->config->enable_sar_conversion &&
 	    (hdd_convert_sarv1_to_sarv2(hdd_ctx, tb, sar_limit_cmd)))
 		goto send_sar_limits;
 
@@ -11763,9 +11793,9 @@ static int __wlan_hdd_set_sar_power_limits(struct wiphy *wiphy,
 	sar_limit_cmd->commit_limits = 1;
 	sar_limit_cmd->sar_enable = WMI_SAR_FEATURE_NO_CHANGE;
 	if (tb[SAR_LIMITS_SAR_ENABLE]) {
-		uint32_t sar_enable = nla_get_u32(tb[SAR_LIMITS_SAR_ENABLE]);
 		uint32_t *sar_ptr = &sar_limit_cmd->sar_enable;
 
+		sar_enable = nla_get_u32(tb[SAR_LIMITS_SAR_ENABLE]);
 		ret = wlan_hdd_cfg80211_sar_convert_limit_set(sar_enable,
 							      sar_ptr);
 		if (ret) {

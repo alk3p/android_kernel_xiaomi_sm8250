@@ -34,11 +34,6 @@
 struct target_psoc_info;
 
 typedef const enum policy_mgr_pcl_type
-	pm_dbs_pcl_second_connection_table_type
-	[PM_MAX_ONE_CONNECTION_MODE][PM_MAX_NUM_OF_MODE]
-	[PM_MAX_CONC_PRIORITY_MODE];
-
-typedef const enum policy_mgr_pcl_type
 	pm_dbs_pcl_third_connection_table_type
 	[PM_MAX_TWO_CONNECTION_MODE][PM_MAX_NUM_OF_MODE]
 	[PM_MAX_CONC_PRIORITY_MODE];
@@ -75,6 +70,7 @@ typedef const enum policy_mgr_conc_next_action
  * @CSA_REASON_UNSAFE_CHANNEL: Unsafe channel.
  * @CSA_REASON_LTE_COEX: LTE coex.
  * @CSA_REASON_CONCURRENT_NAN_EVENT: NAN concurrency.
+ * @CSA_REASON_BAND_RESTRICTED: band disabled or re-enabled
  *
  */
 enum sap_csa_reason_code {
@@ -86,7 +82,8 @@ enum sap_csa_reason_code {
 	CSA_REASON_CONCURRENT_STA_CHANGED_CHANNEL,
 	CSA_REASON_UNSAFE_CHANNEL,
 	CSA_REASON_LTE_COEX,
-	CSA_REASON_CONCURRENT_NAN_EVENT
+	CSA_REASON_CONCURRENT_NAN_EVENT,
+	CSA_REASON_BAND_RESTRICTED
 };
 
 /*
@@ -3149,4 +3146,17 @@ uint32_t policy_mgr_get_mode_specific_conn_info(struct wlan_objmgr_psoc *psoc,
 						uint8_t *channel,
 						uint8_t *vdev_id,
 						enum policy_mgr_con_mode mode);
+
+/**
+ * policy_mgr_get_5g_scc_prefer() - Prefer 5G SCC
+ * @psoc: psoc object
+ * @mode: Connection Mode
+ *
+ * This function checks if 5G SCC is preferred.
+ *
+ * Return: True if 5G SCC is preferred
+ */
+bool policy_mgr_get_5g_scc_prefer(
+	struct wlan_objmgr_psoc *psoc, enum policy_mgr_con_mode mode);
+
 #endif /* __WLAN_POLICY_MGR_API_H */
