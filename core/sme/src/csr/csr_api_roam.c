@@ -19586,40 +19586,26 @@ csr_create_per_roam_request(struct mac_context *mac_ctx,
 static QDF_STATUS
 csr_roam_offload_per_scan(struct mac_context *mac_ctx, uint8_t session_id)
 {
-	tpCsrNeighborRoamControlInfo roam_info =
-		&mac_ctx->roam.neighborRoamInfo[session_id];
 	struct wmi_per_roam_config_req *req_buf;
 	struct scheduler_msg msg = {0};
-
-	/*
-	 * No need to update in case of stop command, FW takes care of stopping
-	 * this internally
-	 */
-	if (roam_info->last_sent_cmd == ROAM_SCAN_OFFLOAD_STOP)
-		return QDF_STATUS_SUCCESS;
+	QDF_STATUS status;
 
 	if (!mac_ctx->mlme_cfg->lfr.per_roam_enable) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_DEBUG,
-			 "PER based roaming is disabled in configuration");
+		sme_debug("PER based roaming ini is disabled");
 		return QDF_STATUS_SUCCESS;
 	}
 
 	req_buf = csr_create_per_roam_request(mac_ctx, session_id);
-	if (!req_buf) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			 "Failed to create req packet");
+	if (!req_buf)
 		return QDF_STATUS_E_FAILURE;
-	}
-	msg.type = WMA_SET_PER_ROAM_CONFIG_CMD;
+
+	msg.type = eWNI_SME_ROAM_SEND_PER_REQ;
 	msg.reserved = 0;
 	msg.bodyptr = req_buf;
-	if (!QDF_IS_STATUS_SUCCESS(scheduler_post_message(QDF_MODULE_ID_SME,
-							  QDF_MODULE_ID_WMA,
-							  QDF_MODULE_ID_WMA,
-							  &msg))) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_DEBUG,
-			"%s: Unable to post WMA_SET_PER_ROAM_CONFIG_CMD to WMA",
-			__func__);
+	status = scheduler_post_message(QDF_MODULE_ID_SME, QDF_MODULE_ID_PE,
+					QDF_MODULE_ID_PE, &msg);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		sme_debug("Unable to post WMA_SET_PER_ROAM_CONFIG_CMD to WMA");
 		qdf_mem_free(req_buf);
 	}
 	return QDF_STATUS_SUCCESS;
@@ -20483,6 +20469,12 @@ csr_roam_offload_scan(struct mac_context *mac_ctx, uint8_t session_id,
 	prev_roaming_state = mlme_get_roam_state(mac_ctx->psoc, session_id);
 	policy_mgr_set_pcl_for_existing_combo(mac_ctx->psoc, PM_STA_MODE);
 
+	/* Update PER config to FW. No need to update in case of stop command,
+	 * FW takes care of stopping this internally
+	 */
+	if (command != ROAM_SCAN_OFFLOAD_STOP)
+		csr_roam_offload_per_scan(mac_ctx, session_id);
+
 	if (!QDF_IS_STATUS_SUCCESS(
 		csr_roam_send_rso_cmd(mac_ctx, session_id, req_buf))) {
 		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
@@ -20497,8 +20489,6 @@ csr_roam_offload_scan(struct mac_context *mac_ctx, uint8_t session_id,
 	/* update the last sent cmd */
 	roam_info->last_sent_cmd = command;
 
-	/* Update PER config to FW after sending the command */
-	csr_roam_offload_per_scan(mac_ctx, session_id);
 	return status;
 }
 
@@ -21812,6 +21802,9 @@ void csr_process_set_hw_mode(struct mac_context *mac, tSmeCmd *command)
 	struct scheduler_msg msg = {0};
 	struct sir_set_hw_mode_resp *param;
 	enum policy_mgr_hw_mode_change hw_mode;
+	enum policy_mgr_conc_next_action action;
+	enum set_hw_mode_status hw_mode_change_status =
+						SET_HW_MODE_STATUS_ECANCELED;
 
 	/* Setting HW mode is for the entire system.
 	 * So, no need to check session
@@ -21830,6 +21823,7 @@ void csr_process_set_hw_mode(struct mac_context *mac, tSmeCmd *command)
 		 */
 		goto fail;
 
+	action = command->u.set_hw_mode_cmd.action;
 	/* For hidden SSID case, if there is any scan command pending
 	 * it needs to be cleared before issuing set HW mode
 	 */
@@ -21842,6 +21836,15 @@ void csr_process_set_hw_mode(struct mac_context *mac, tSmeCmd *command)
 			sme_err("Failed to clear scan cmd");
 			goto fail;
 		}
+	}
+
+	status = policy_mgr_validate_dbs_switch(mac->psoc, action);
+
+	if (QDF_IS_STATUS_ERROR(status)) {
+		sme_err("Hw mode change not sent to FW status = %d", status);
+		if (status == QDF_STATUS_E_ALREADY)
+			hw_mode_change_status = SET_HW_MODE_STATUS_ALREADY;
+		goto fail;
 	}
 
 	hw_mode = policy_mgr_get_hw_mode_change_from_hw_mode_index(
@@ -21904,7 +21907,7 @@ fail:
 		return;
 
 	sme_err("Sending set HW fail response to SME");
-	param->status = SET_HW_MODE_STATUS_ECANCELED;
+	param->status = hw_mode_change_status;
 	param->cfgd_hw_mode_index = 0;
 	param->num_vdev_mac_entries = 0;
 	msg.type = eWNI_SME_SET_HW_MODE_RESP;
@@ -22812,8 +22815,7 @@ csr_send_roam_offload_init_msg(struct mac_context *mac, uint32_t vdev_id,
 QDF_STATUS
 csr_roam_update_cfg(struct mac_context *mac, uint8_t vdev_id, uint8_t reason)
 {
-	if (!MLME_IS_ROAM_INITIALIZED(mac->psoc, vdev_id) &&
-	    reason != REASON_ROAM_SET_BLACKLIST_BSSID) {
+	if (!MLME_IS_ROAM_INITIALIZED(mac->psoc, vdev_id)) {
 		sme_err("Update cfg received in roam uninitialized state");
 		return QDF_STATUS_E_INVAL;
 	}

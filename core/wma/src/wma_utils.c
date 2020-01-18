@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -63,6 +63,7 @@
 #include <wlan_mlme_main.h>
 #include "host_diag_core_log.h"
 #include <wlan_mlme_api.h>
+#include "cdp_txrx_misc.h"
 
 /* MCS Based rate table */
 /* HT MCS parameters with Nss = 1 */
@@ -659,6 +660,7 @@ int wma_smps_mode_to_force_mode_param(uint8_t smps_mode)
 }
 
 #ifdef WLAN_FEATURE_STATS_EXT
+#ifdef FEATURE_STATS_EXT_V2
 /**
  * wma_stats_ext_event_handler() - extended stats event handler
  * @handle:     wma handle
@@ -677,17 +679,91 @@ int wma_stats_ext_event_handler(void *handle, uint8_t *event_buf,
 	struct scheduler_msg cds_msg = {0};
 	uint8_t *buf_ptr;
 	uint32_t alloc_len;
+	struct cdp_txrx_ext_stats ext_stats = {0};
+	struct cdp_soc_t *soc_hdl = cds_get_context(QDF_MODULE_ID_SOC);
+	void *pdev = cds_get_context(QDF_MODULE_ID_TXRX);
 
 	WMA_LOGD("%s: Posting stats ext event to SME", __func__);
 
-	param_buf = (WMI_STATS_EXT_EVENTID_param_tlvs *) event_buf;
+	param_buf = (WMI_STATS_EXT_EVENTID_param_tlvs *)event_buf;
 	if (!param_buf) {
 		WMA_LOGE("%s: Invalid stats ext event buf", __func__);
 		return -EINVAL;
 	}
 
 	stats_ext_info = param_buf->fixed_param;
-	buf_ptr = (uint8_t *) stats_ext_info;
+	buf_ptr = (uint8_t *)stats_ext_info;
+
+	alloc_len = sizeof(tSirStatsExtEvent);
+	alloc_len += stats_ext_info->data_len;
+	alloc_len += sizeof(struct cdp_txrx_ext_stats);
+
+	if (stats_ext_info->data_len > (WMI_SVC_MSG_MAX_SIZE -
+	    WMI_TLV_HDR_SIZE - sizeof(*stats_ext_info)) ||
+	    stats_ext_info->data_len > param_buf->num_data) {
+		WMA_LOGE("Excess data_len:%d, num_data:%d",
+			 stats_ext_info->data_len, param_buf->num_data);
+		return -EINVAL;
+	}
+	stats_ext_event = qdf_mem_malloc(alloc_len);
+	if (!stats_ext_event)
+		return -ENOMEM;
+
+	buf_ptr += sizeof(wmi_stats_ext_event_fixed_param) + WMI_TLV_HDR_SIZE;
+
+	stats_ext_event->vdev_id = stats_ext_info->vdev_id;
+	stats_ext_event->event_data_len = stats_ext_info->data_len;
+	qdf_mem_copy(stats_ext_event->event_data,
+		     buf_ptr, stats_ext_event->event_data_len);
+
+	status = cdp_wait_for_ext_rx_stats(soc_hdl);
+	if (status != QDF_STATUS_SUCCESS)
+		WMA_LOGE("%s: Timeout for ext hw stats", __func__);
+
+	cdp_txrx_ext_stats_request(soc_hdl, pdev, &ext_stats);
+	qdf_mem_copy(stats_ext_event->event_data +
+		     stats_ext_event->event_data_len,
+		     &ext_stats, sizeof(struct cdp_txrx_ext_stats));
+
+	stats_ext_event->event_data_len += sizeof(struct cdp_txrx_ext_stats);
+
+	cds_msg.type = eWNI_SME_STATS_EXT_EVENT;
+	cds_msg.bodyptr = (void *)stats_ext_event;
+	cds_msg.bodyval = 0;
+
+	status = scheduler_post_message(QDF_MODULE_ID_WMA,
+					QDF_MODULE_ID_SME,
+					QDF_MODULE_ID_SME, &cds_msg);
+	if (status != QDF_STATUS_SUCCESS) {
+		qdf_mem_free(stats_ext_event);
+		return -EFAULT;
+	}
+
+	WMA_LOGD("%s: stats ext event Posted to SME", __func__);
+	return 0;
+}
+#else
+int wma_stats_ext_event_handler(void *handle, uint8_t *event_buf,
+				uint32_t len)
+{
+	WMI_STATS_EXT_EVENTID_param_tlvs *param_buf;
+	tSirStatsExtEvent *stats_ext_event;
+	wmi_stats_ext_event_fixed_param *stats_ext_info;
+	QDF_STATUS status;
+	struct scheduler_msg cds_msg = {0};
+	uint8_t *buf_ptr;
+	uint32_t alloc_len;
+
+	WMA_LOGD("%s: Posting stats ext event to SME", __func__);
+
+	param_buf = (WMI_STATS_EXT_EVENTID_param_tlvs *)event_buf;
+	if (!param_buf) {
+		WMA_LOGE("%s: Invalid stats ext event buf", __func__);
+		return -EINVAL;
+	}
+
+	stats_ext_info = param_buf->fixed_param;
+	buf_ptr = (uint8_t *)stats_ext_info;
 
 	alloc_len = sizeof(tSirStatsExtEvent);
 	alloc_len += stats_ext_info->data_len;
@@ -725,8 +801,8 @@ int wma_stats_ext_event_handler(void *handle, uint8_t *event_buf,
 	WMA_LOGD("%s: stats ext event Posted to SME", __func__);
 	return 0;
 }
+#endif
 #endif /* WLAN_FEATURE_STATS_EXT */
-
 
 /**
  * wma_profile_data_report_event_handler() - fw profiling handler
@@ -1943,6 +2019,20 @@ static int wma_unified_link_radio_stats_event_handler(void *handle,
 	 * num_channels * size of(struct wmi_channel_stats)
 	 */
 	fixed_param = param_tlvs->fixed_param;
+	if (fixed_param && !fixed_param->num_radio &&
+	    !fixed_param->more_radio_events) {
+		WMA_LOGI("FW indicates dummy link radio stats");
+		if (!wma_handle->link_stats_results) {
+			wma_handle->link_stats_results = qdf_mem_malloc(
+						sizeof(*link_stats_results));
+			if (!wma_handle->link_stats_results)
+				return -ENOMEM;
+		}
+		link_stats_results = wma_handle->link_stats_results;
+		link_stats_results->num_radio = fixed_param->num_radio;
+		goto link_radio_stats_cb;
+	}
+
 	radio_stats = param_tlvs->radio_stats;
 	channel_stats = param_tlvs->channel_stats;
 
@@ -2015,21 +2105,6 @@ static int wma_unified_link_radio_stats_event_handler(void *handle,
 	WMA_LOGD("on_time_host_scan: %u, on_time_lpi_scan: %u",
 		radio_stats->on_time_host_scan, radio_stats->on_time_lpi_scan);
 
-	link_stats_results->paramId = WMI_LINK_STATS_RADIO;
-	link_stats_results->rspId = fixed_param->request_id;
-	link_stats_results->ifaceId = 0;
-	link_stats_results->peer_event_number = 0;
-
-	/*
-	 * Backward compatibility:
-	 * There are firmware(s) which will send Radio stats only with
-	 * more_radio_events set to 0 and firmware which sends Radio stats
-	 * followed by tx_power level stats with more_radio_events set to 1.
-	 * if more_radio_events is set to 1, buffer the radio stats and
-	 * wait for tx_power_level stats.
-	 */
-	link_stats_results->moreResultToFollow = fixed_param->more_radio_events;
-
 	results = (uint8_t *) link_stats_results->results;
 	t_radio_stats = (uint8_t *) radio_stats;
 	t_channel_stats = (uint8_t *) channel_stats;
@@ -2088,15 +2163,34 @@ static int wma_unified_link_radio_stats_event_handler(void *handle,
 		}
 	}
 
+link_radio_stats_cb:
+	link_stats_results->paramId = WMI_LINK_STATS_RADIO;
+	link_stats_results->rspId = fixed_param->request_id;
+	link_stats_results->ifaceId = 0;
+	link_stats_results->peer_event_number = 0;
+
+	/*
+	 * Backward compatibility:
+	 * There are firmware(s) which will send Radio stats only with
+	 * more_radio_events set to 0 and firmware which sends Radio stats
+	 * followed by tx_power level stats with more_radio_events set to 1.
+	 * if more_radio_events is set to 1, buffer the radio stats and
+	 * wait for tx_power_level stats.
+	 */
+	link_stats_results->moreResultToFollow = fixed_param->more_radio_events;
+
 	if (link_stats_results->moreResultToFollow) {
 		/* More results coming, don't post yet */
 		return 0;
 	}
-	link_stats_results->nr_received++;
+	if (link_stats_results->num_radio) {
+		link_stats_results->nr_received++;
 
-	if (link_stats_results->num_radio != link_stats_results->nr_received) {
-		/* Not received all radio stats yet, don't post yet */
-		return 0;
+		if (link_stats_results->num_radio !=
+		    link_stats_results->nr_received) {
+			/* Not received all radio stats yet, don't post yet */
+			return 0;
+		}
 	}
 
 	mac->sme.link_layer_stats_cb(mac->hdd_handle,
