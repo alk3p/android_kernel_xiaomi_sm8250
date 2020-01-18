@@ -1586,6 +1586,7 @@ struct DWC_ETH_QOS_res_data {
 	unsigned int emac_hw_version_type;
 	bool early_eth_en;
 	bool pps_lpass_conn_en;
+	int phy_addr;
 };
 
 struct DWC_ETH_QOS_prv_ipa_data {
@@ -1881,6 +1882,7 @@ struct DWC_ETH_QOS_prv_data {
 	struct delayed_work ipv6_addr_assign_wq;
 	bool print_kpi;
 	unsigned long default_ptp_clock;
+	bool wol_enabled;
 };
 
 struct ip_params {
