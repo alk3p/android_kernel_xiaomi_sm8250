@@ -1067,8 +1067,7 @@ process_rx:
 		/* Update the protocol tag in SKB based on CCE metadata */
 		dp_rx_update_protocol_tag(soc, vdev, nbuf, rx_tlv_hdr,
 					  EXCEPTION_DEST_RING_ID, true, true);
-		DP_STATS_INC(peer, rx.to_stack.num, 1);
-		vdev->osif_rx(vdev->osif_vdev, nbuf);
+		dp_rx_deliver_to_stack(soc, vdev, peer, nbuf, NULL);
 	}
 
 	return;
