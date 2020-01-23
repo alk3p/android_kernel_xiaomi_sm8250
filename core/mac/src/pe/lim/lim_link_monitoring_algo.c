@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -373,6 +373,7 @@ lim_tear_down_link_with_ap(struct mac_context *mac, uint8_t sessionId,
 	pe_info("Session %d Vdev %d reason code %d trigger %d",
 		pe_session->peSessionId, pe_session->vdev_id, reasonCode,
 		trigger);
+
 	/* Announce loss of link to Roaming algorithm */
 	/* and cleanup by sending SME_DISASSOC_REQ to SME */
 
@@ -530,7 +531,6 @@ void lim_handle_heart_beat_failure(struct mac_context *mac_ctx,
 					session->dot11mode, NULL, NULL);
 			}
 		} else {
-			pe_debug("HB missed from AP on DFS channel");
 			/*
 			 * Connected on DFS channel so should not send the
 			 * probe request tear down the link directly
