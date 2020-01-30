@@ -3312,7 +3312,12 @@ int swrm_wcd_notify(struct platform_device *pdev, u32 id, void *data)
 		mutex_lock(&swrm->reslock);
 		list_for_each_entry(swr_dev, &mstr->devices, dev_list) {
 			ret = swr_reset_device(swr_dev);
-			if (ret) {
+			if (ret == -ENODEV) {
+				dev_dbg_ratelimited(swrm->dev,
+					"%s slave reset not implemented\n",
+					__func__);
+				ret = 0;
+			} else if (ret) {
 				dev_err(swrm->dev,
 					"%s: failed to reset swr device %d\n",
 					__func__, swr_dev->dev_num);
