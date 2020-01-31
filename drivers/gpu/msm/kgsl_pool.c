@@ -100,7 +100,10 @@ _kgsl_pool_get_page(struct kgsl_page_pool *pool)
 		list_del(&p->lru);
 	}
 	spin_unlock(&pool->list_lock);
-	mod_node_page_state(page_pgdat(p), NR_INDIRECTLY_RECLAIMABLE_BYTES,
+
+	if (p != NULL)
+		mod_node_page_state(page_pgdat(p),
+				NR_INDIRECTLY_RECLAIMABLE_BYTES,
 				-(PAGE_SIZE << pool->pool_order));
 	return p;
 }
