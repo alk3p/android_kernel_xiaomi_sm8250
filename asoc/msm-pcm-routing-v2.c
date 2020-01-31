@@ -2979,24 +2979,29 @@ static int msm_routing_put_fm_pcmrx_switch_mixer(struct snd_kcontrol *kcontrol,
 static void msm_routing_get_lsm_fe_idx(struct snd_kcontrol *kcontrol,
 						u8 *fe_idx)
 {
-	int fe_id;
+	int fe_id = MSM_FRONTEND_DAI_LSM1;
 
-	if (strnstr(kcontrol->id.name, "LSM1", sizeof("LSM1")))
+	if (strnstr(kcontrol->id.name, "LSM1", sizeof("LSM1"))) {
 		fe_id = MSM_FRONTEND_DAI_LSM1;
-	else if (strnstr(kcontrol->id.name, "LSM2", sizeof("LSM2")))
+	} else if (strnstr(kcontrol->id.name, "LSM2", sizeof("LSM2"))) {
 		fe_id = MSM_FRONTEND_DAI_LSM2;
-	else if (strnstr(kcontrol->id.name, "LSM3", sizeof("LSM3")))
+	} else if (strnstr(kcontrol->id.name, "LSM3", sizeof("LSM3"))) {
 		fe_id = MSM_FRONTEND_DAI_LSM3;
-	else if (strnstr(kcontrol->id.name, "LSM4", sizeof("LSM4")))
+	} else if (strnstr(kcontrol->id.name, "LSM4", sizeof("LSM4"))) {
 		fe_id = MSM_FRONTEND_DAI_LSM4;
-	else if (strnstr(kcontrol->id.name, "LSM5", sizeof("LSM5")))
+	} else if (strnstr(kcontrol->id.name, "LSM5", sizeof("LSM5"))) {
 		fe_id = MSM_FRONTEND_DAI_LSM5;
-	else if (strnstr(kcontrol->id.name, "LSM6", sizeof("LSM6")))
+	} else if (strnstr(kcontrol->id.name, "LSM6", sizeof("LSM6"))) {
 		fe_id = MSM_FRONTEND_DAI_LSM6;
-	else if (strnstr(kcontrol->id.name, "LSM7", sizeof("LSM7")))
+	} else if (strnstr(kcontrol->id.name, "LSM7", sizeof("LSM7"))) {
 		fe_id = MSM_FRONTEND_DAI_LSM7;
-	else if (strnstr(kcontrol->id.name, "LSM8", sizeof("LSM8")))
+	} else if (strnstr(kcontrol->id.name, "LSM8", sizeof("LSM8"))) {
 		fe_id = MSM_FRONTEND_DAI_LSM8;
+	} else {
+		pr_err("%s: Invalid kcontrol name:%s\n", __func__,
+				kcontrol->id.name);
+		return;
+	}
 
 	*fe_idx = fe_id - MSM_FRONTEND_DAI_LSM1;
 	pr_debug("%s: fe_id: %d, fe_idx:%d\n", __func__, fe_id, *fe_idx);
