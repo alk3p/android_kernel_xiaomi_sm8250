@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/init.h>
@@ -68,7 +68,7 @@ static int quin_mi2s_switch_enable;
 static int sen_mi2s_switch_enable;
 static int fm_pcmrx_switch_enable;
 static int usb_switch_enable;
-static int lsm_port_index;
+static int lsm_port_index[MAX_LSM_SESSIONS];
 static int slim0_rx_aanc_fb_port;
 static int msm_route_ec_ref_rx;
 static int msm_ec_ref_ch = 4;
@@ -1375,9 +1375,11 @@ static bool route_check_fe_id_adm_support(int fe_id)
 	if ((fe_id >= MSM_FRONTEND_DAI_LSM1) &&
 		 (fe_id <= MSM_FRONTEND_DAI_LSM8)) {
 		/* fe id is listen while port is set to afe */
-		if (lsm_port_index != ADM_LSM_PORT_INDEX) {
+		if (lsm_port_index[fe_id - MSM_FRONTEND_DAI_LSM1] !=
+				ADM_LSM_PORT_INDEX) {
 			pr_debug("%s: fe_id %d, lsm mux slim port %d\n",
-				__func__, fe_id, lsm_port_index);
+				__func__, fe_id,
+				lsm_port_index[fe_id - MSM_FRONTEND_DAI_LSM1]);
 			rc = false;
 		}
 	}
@@ -2968,10 +2970,39 @@ static int msm_routing_put_fm_pcmrx_switch_mixer(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
+static void msm_routing_get_lsm_fe_idx(struct snd_kcontrol *kcontrol,
+						u8 *fe_idx)
+{
+	int fe_id;
+
+	if (strnstr(kcontrol->id.name, "LSM1", sizeof("LSM1")))
+		fe_id = MSM_FRONTEND_DAI_LSM1;
+	else if (strnstr(kcontrol->id.name, "LSM2", sizeof("LSM2")))
+		fe_id = MSM_FRONTEND_DAI_LSM2;
+	else if (strnstr(kcontrol->id.name, "LSM3", sizeof("LSM3")))
+		fe_id = MSM_FRONTEND_DAI_LSM3;
+	else if (strnstr(kcontrol->id.name, "LSM4", sizeof("LSM4")))
+		fe_id = MSM_FRONTEND_DAI_LSM4;
+	else if (strnstr(kcontrol->id.name, "LSM5", sizeof("LSM5")))
+		fe_id = MSM_FRONTEND_DAI_LSM5;
+	else if (strnstr(kcontrol->id.name, "LSM6", sizeof("LSM6")))
+		fe_id = MSM_FRONTEND_DAI_LSM6;
+	else if (strnstr(kcontrol->id.name, "LSM7", sizeof("LSM7")))
+		fe_id = MSM_FRONTEND_DAI_LSM7;
+	else if (strnstr(kcontrol->id.name, "LSM8", sizeof("LSM8")))
+		fe_id = MSM_FRONTEND_DAI_LSM8;
+
+	*fe_idx = fe_id - MSM_FRONTEND_DAI_LSM1;
+	pr_debug("%s: fe_id: %d, fe_idx:%d\n", __func__, fe_id, *fe_idx);
+}
+
 static int msm_routing_lsm_port_get(struct snd_kcontrol *kcontrol,
 				   struct snd_ctl_elem_value *ucontrol)
 {
-	ucontrol->value.integer.value[0] = lsm_port_index;
+	u8 fe_idx = 0;
+
+	msm_routing_get_lsm_fe_idx(kcontrol, &fe_idx);
+	ucontrol->value.integer.value[0] = lsm_port_index[fe_idx];
 	return 0;
 }
 
@@ -2981,6 +3012,7 @@ static int msm_routing_lsm_port_put(struct snd_kcontrol *kcontrol,
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	int mux = ucontrol->value.enumerated.item[0];
 	int lsm_port = AFE_PORT_ID_SLIMBUS_MULTI_CHAN_5_TX;
+	u8 fe_idx = 0;
 
 	if (mux >= e->items) {
 		pr_err("%s: Invalid mux value %d\n", __func__, mux);
@@ -3043,7 +3075,8 @@ static int msm_routing_lsm_port_put(struct snd_kcontrol *kcontrol,
 		break;
 	}
 	set_lsm_port(lsm_port);
-	lsm_port_index = ucontrol->value.integer.value[0];
+	msm_routing_get_lsm_fe_idx(kcontrol, &fe_idx);
+	lsm_port_index[fe_idx] = ucontrol->value.integer.value[0];
 
 	return 0;
 }
@@ -5468,6 +5501,10 @@ static int get_ec_ref_port_id(int value, int *index)
 		*index = 38;
 		port_id = AFE_PORT_ID_SENARY_MI2S_RX;
 		break;
+	case 39:
+		*index = 39;
+		port_id = AFE_PORT_ID_SENARY_MI2S_TX;
+		break;
 	default:
 		*index = 0; /* NONE */
 		pr_err("%s: Invalid value %d\n", __func__, value);
@@ -5525,7 +5562,7 @@ static const char *const ec_ref_rx[] = { "None", "SLIM_RX", "I2S_RX",
 	"WSA_CDC_DMA_TX_0", "WSA_CDC_DMA_TX_1", "WSA_CDC_DMA_TX_2",
 	"SLIM_7_RX", "RX_CDC_DMA_RX_0", "RX_CDC_DMA_RX_1", "RX_CDC_DMA_RX_2",
 	"RX_CDC_DMA_RX_3", "TX_CDC_DMA_TX_0", "TERT_TDM_RX_2", "SEC_TDM_TX_0",
-	"DISPLAY_PORT1", "SEN_MI2S_RX",
+	"DISPLAY_PORT1", "SEN_MI2S_RX", "SENARY_MI2S_TX",
 };
 
 static const struct soc_enum msm_route_ec_ref_rx_enum[] = {
@@ -5758,7 +5795,7 @@ static const char * const ext_ec_ref_rx[] = {"NONE", "PRI_MI2S_TX",
 					"SEC_MI2S_TX", "TERT_MI2S_TX",
 					"QUAT_MI2S_TX", "QUIN_MI2S_TX",
 					"SLIM_1_TX", "PRI_TDM_TX",
-					"SEC_TDM_TX"};
+					"SEC_TDM_TX", "SENARY_MI2S_TX"};
 
 static const struct soc_enum msm_route_ext_ec_ref_rx_enum[] = {
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(ext_ec_ref_rx), ext_ec_ref_rx),
@@ -13140,6 +13177,14 @@ static const struct snd_kcontrol_new mmul5_mixer_controls[] = {
 	msm_routing_put_audio_mixer),
 	SOC_DOUBLE_EXT("QUAT_MI2S_TX", SND_SOC_NOPM,
 	MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+	MSM_FRONTEND_DAI_MULTIMEDIA5, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
+	SOC_DOUBLE_EXT("QUIN_MI2S_TX", SND_SOC_NOPM,
+	MSM_BACKEND_DAI_QUINARY_MI2S_TX,
+	MSM_FRONTEND_DAI_MULTIMEDIA5, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
+	SOC_DOUBLE_EXT("SENARY_MI2S_TX", SND_SOC_NOPM,
+	MSM_BACKEND_DAI_SENARY_MI2S_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA5, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
 	SOC_DOUBLE_EXT("SLIM_7_TX", SND_SOC_NOPM,
@@ -22768,6 +22813,9 @@ static const struct snd_kcontrol_new msm_source_tracking_controls[] = {
 		.info   = msm_source_tracking_info,
 		.get    = msm_audio_source_tracking_get,
 	},
+};
+
+static const struct snd_kcontrol_new msm_source_doa_tracking_controls[] = {
 	{
 		.access = SNDRV_CTL_ELEM_ACCESS_READ,
 		.iface	= SNDRV_CTL_ELEM_IFACE_MIXER,
@@ -26051,12 +26099,15 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"MultiMedia28 Mixer", "INT3_MI2S_TX", "INT3_MI2S_TX"},
 	{"MultiMedia29 Mixer", "INT3_MI2S_TX", "INT3_MI2S_TX"},
 	{"MultiMedia30 Mixer", "INT3_MI2S_TX", "INT3_MI2S_TX"},
+	{"MultiMedia5 Mixer", "QUAT_MI2S_TX", "QUAT_MI2S_TX"},
 	{"MultiMedia6 Mixer", "PRI_MI2S_TX", "PRI_MI2S_TX"},
 	{"MultiMedia6 Mixer", "AUX_PCM_UL_TX", "AUX_PCM_TX"},
 	{"MultiMedia6 Mixer", "SEC_AUX_PCM_UL_TX", "SEC_AUX_PCM_TX"},
 	{"MultiMedia6 Mixer", "SEC_MI2S_TX", "SEC_MI2S_TX"},
 	{"MultiMedia6 Mixer", "QUIN_MI2S_TX", "QUIN_MI2S_TX"},
+	{"MultiMedia5 Mixer", "QUIN_MI2S_TX", "QUIN_MI2S_TX"},
 	{"MultiMedia6 Mixer", "SENARY_MI2S_TX", "SENARY_MI2S_TX"},
+	{"MultiMedia5 Mixer", "SENARY_MI2S_TX", "SENARY_MI2S_TX"},
 
 	{"MultiMedia1 Mixer", "PRI_TDM_TX_0", "PRI_TDM_TX_0"},
 	{"MultiMedia1 Mixer", "PRI_TDM_TX_1", "PRI_TDM_TX_1"},
@@ -29454,6 +29505,20 @@ static const struct snd_pcm_ops msm_routing_pcm_ops = {
 	.prepare        = msm_pcm_routing_prepare,
 };
 
+#ifdef CONFIG_DOA_PARAMS_ENABLED
+void msm_routing_add_doa_control(struct snd_soc_component *component)
+{
+	snd_soc_add_component_controls(component,
+				msm_source_doa_tracking_controls,
+				ARRAY_SIZE(msm_source_doa_tracking_controls));
+}
+#else
+void msm_routing_add_doa_control(struct snd_soc_component *component)
+{
+	return;
+}
+#endif
+
 /* Not used but frame seems to require it */
 static int msm_routing_probe(struct snd_soc_component *component)
 {
@@ -29523,6 +29588,8 @@ static int msm_routing_probe(struct snd_soc_component *component)
 		msm_routing_be_dai_name_table_mixer_controls,
 		ARRAY_SIZE(msm_routing_be_dai_name_table_mixer_controls));
 
+	/* Add doa control based on config */
+	msm_routing_add_doa_control(component);
 	snd_soc_add_component_controls(component, msm_source_tracking_controls,
 				ARRAY_SIZE(msm_source_tracking_controls));
 	snd_soc_add_component_controls(component, adm_channel_config_controls,
