@@ -223,6 +223,13 @@ struct hdd_config {
 #endif /* WLAN_FEATURE_TSF_PLUS */
 	uint32_t dp_proto_event_bitmap;
 	bool get_roam_chan_from_fw;
+
+#ifdef WLAN_FEATURE_PERIODIC_STA_STATS
+	/* Periodicity of logging */
+	uint32_t periodic_stats_timer_interval;
+	/* Duration for which periodic logging should be done */
+	uint32_t periodic_stats_timer_duration;
+#endif /* WLAN_FEATURE_PERIODIC_STA_STATS */
 };
 
 /**
