@@ -5003,9 +5003,6 @@ static int __wlan_hdd_cfg80211_dump_survey(struct wiphy *wiphy,
 	int status;
 	bool filled = false;
 
-	hdd_enter_dev(dev);
-
-	hdd_debug("dump survey index: %d", idx);
 	if (idx > QDF_MAX_NUM_CHAN - 1)
 		return -EINVAL;
 
@@ -5038,7 +5035,7 @@ static int __wlan_hdd_cfg80211_dump_survey(struct wiphy *wiphy,
 
 	if (!filled)
 		return -ENONET;
-	hdd_exit();
+
 	return 0;
 }
 
