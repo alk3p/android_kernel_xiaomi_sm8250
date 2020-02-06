@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1379,10 +1379,11 @@ static void hdd_send_association_event(struct net_device *dev,
 
 		ucfg_p2p_status_connect(adapter->vdev);
 
-		hdd_info("%s(vdevid-%d): " QDF_MAC_ADDR_STR " connected to "
-			QDF_MAC_ADDR_STR, dev->name, adapter->vdev_id,
-			QDF_MAC_ADDR_ARRAY(adapter->mac_addr.bytes),
-			QDF_MAC_ADDR_ARRAY(wrqu.ap_addr.sa_data));
+		hdd_nofl_info("%s(vdevid-%d): " QDF_MAC_ADDR_STR
+			      " connected to "
+			      QDF_MAC_ADDR_STR, dev->name, adapter->vdev_id,
+			      QDF_MAC_ADDR_ARRAY(adapter->mac_addr.bytes),
+			      QDF_MAC_ADDR_ARRAY(wrqu.ap_addr.sa_data));
 		hdd_send_update_beacon_ies_event(adapter, roam_info);
 
 		/*
@@ -1455,8 +1456,8 @@ static void hdd_send_association_event(struct net_device *dev,
 			  dev->name, adapter->vdev_id,
 			  QDF_MAC_ADDR_ARRAY(sta_ctx->conn_info.bssid.bytes));
 	} else {                /* Not Associated */
-		hdd_info("%s(vdevid-%d): disconnected", dev->name,
-			 adapter->vdev_id);
+		hdd_nofl_info("%s(vdevid-%d): disconnected", dev->name,
+			      adapter->vdev_id);
 		memset(wrqu.ap_addr.sa_data, '\0', ETH_ALEN);
 		policy_mgr_decr_session_set_pcl(hdd_ctx->psoc,
 				adapter->device_mode, adapter->vdev_id);

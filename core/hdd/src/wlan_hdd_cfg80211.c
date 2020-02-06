@@ -2688,6 +2688,8 @@ static int __wlan_hdd_cfg80211_do_acs(struct wiphy *wiphy,
 	}
 	hw_mode = nla_get_u8(tb[QCA_WLAN_VENDOR_ATTR_ACS_HW_MODE]);
 
+	hdd_nofl_info("ACS request vid %d hw mode %d", adapter->vdev_id,
+		      hw_mode);
 	if (tb[QCA_WLAN_VENDOR_ATTR_ACS_HT_ENABLED])
 		ht_enabled =
 			nla_get_flag(tb[QCA_WLAN_VENDOR_ATTR_ACS_HT_ENABLED]);
@@ -8795,7 +8797,7 @@ static int __wlan_hdd_cfg80211_wifi_logger_get_ring_data(struct wiphy *wiphy,
 		 * As part of DRIVER ring ID, flush both driver and fw logs.
 		 * For other Ring ID's driver doesn't have any rings to flush
 		 */
-		hdd_info("Bug report triggered by framework");
+		hdd_debug("Bug report triggered by framework");
 
 		status = cds_flush_logs(WLAN_LOG_TYPE_NON_FATAL,
 				WLAN_LOG_INDICATOR_FRAMEWORK,
@@ -17550,7 +17552,7 @@ bool wlan_hdd_handle_sap_sta_dfs_conc(struct hdd_adapter *adapter,
 	/* sap is on non-dfs channel, nothing to handle */
 	if (!wlan_reg_is_dfs_ch(hdd_ctx->pdev,
 				hdd_ap_ctx->operating_channel)) {
-		hdd_info("sap is on non-dfs channel, sta is allowed");
+		hdd_debug("sap is on non-dfs channel, sta is allowed");
 		return true;
 	}
 	/*
@@ -18676,8 +18678,8 @@ static void hdd_populate_crypto_cipher_type(u32 cipher,
 	HDD_SET_BIT(set_val, crypto_cipher_type);
 	status = wlan_crypto_set_vdev_param(vdev, cipher_param_type, set_val);
 	if (QDF_IS_STATUS_ERROR(status))
-		hdd_err("Failed to set cipher params %d type %0x to crypto",
-			cipher_param_type, set_val);
+		hdd_debug("Failed to set cipher params %d type %0x to crypto",
+			  cipher_param_type, set_val);
 }
 
 /**
@@ -20084,7 +20086,7 @@ int wlan_hdd_disconnect(struct hdd_adapter *adapter, u16 reason,
 	wlan_hdd_wait_for_roaming(mac_handle, adapter);
 
 	/*stop tx queues */
-	hdd_info("Disabling queues");
+	hdd_debug("Disabling queues");
 	wlan_hdd_netif_queue_control(adapter,
 		WLAN_STOP_ALL_NETIF_QUEUE_N_CARRIER, WLAN_CONTROL_PATH);
 
