@@ -6024,7 +6024,7 @@ static void dp_peer_delete_wifi3(void *peer_handle, uint32_t bitmap)
 		peer->ctrl_peer = NULL;
 
 	if (!peer->valid) {
-		dp_err("Invalid peer: %pM", peer->mac_addr);
+		dp_err("Invalid peer: %pM", peer->mac_addr.raw);
 		return;
 	}
 
