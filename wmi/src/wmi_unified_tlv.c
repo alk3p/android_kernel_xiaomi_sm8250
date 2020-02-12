@@ -12658,6 +12658,15 @@ static void populate_tlv_service(uint32_t *wmi_service)
 			WMI_SERVICE_WPA3_OWE_ROAM_SUPPORT;
 	wmi_service[wmi_service_6ghz_support] =
 			WMI_SERVICE_6GHZ_SUPPORT;
+	wmi_service[wmi_service_bw_165mhz_support] =
+			WMI_SERVICE_BW_165MHZ_SUPPORT;
+	wmi_service[wmi_service_packet_capture_support] =
+			WMI_SERVICE_PACKET_CAPTURE_SUPPORT;
+	wmi_service[wmi_service_nan_vdev] = WMI_SERVICE_NAN_VDEV_SUPPORT;
+	wmi_service[wmi_service_peer_delete_no_peer_flush_tids_cmd] =
+		WMI_SERVICE_PEER_DELETE_NO_PEER_FLUSH_TIDS_CMD;
+	wmi_service[wmi_service_multiple_vdev_restart_ext] =
+			WMI_SERVICE_UNAVAILABLE;
 }
 
 /**

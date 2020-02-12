@@ -170,6 +170,9 @@ static uint8_t dp_soc_ring_if_nss_offloaded(struct dp_soc *soc,
 /* Threshold for peer's cached buf queue beyond which frames are dropped */
 #define DP_RX_CACHED_BUFQ_THRESH 64
 
+/* Budget to reap monitor status ring */
+#define DP_MON_REAP_BUDGET 1024
+
 /**
  * default_dscp_tid_map - Default DSCP-TID mapping
  *
@@ -327,20 +330,19 @@ uint32_t dp_soc_get_mon_mask_for_interrupt_mode(struct dp_soc *soc, int intr_ctx
 }
 
 /*
- * dp_service_mon_rings()- timer to reap monitor rings
- * reqd as we are not getting ppdu end interrupts
- * @arg: SoC Handle
+ * dp_service_mon_rings()- service monitor rings
+ * @soc: soc dp handle
+ * @quota: number of ring entry that can be serviced
  *
- * Return:
+ * Return: None
  *
  */
-static void dp_service_mon_rings(void *arg)
+static void dp_service_mon_rings(struct  dp_soc *soc, uint32_t quota)
 {
-	struct dp_soc *soc = (struct dp_soc *)arg;
 	int ring = 0, work_done, mac_id;
 	struct dp_pdev *pdev = NULL;
 
-	for  (ring = 0 ; ring < MAX_PDEV_CNT; ring++) {
+	for (ring = 0 ; ring < MAX_PDEV_CNT; ring++) {
 		pdev = soc->pdev_list[ring];
 		if (!pdev)
 			continue;
@@ -355,6 +357,21 @@ static void dp_service_mon_rings(void *arg)
 				  work_done);
 		}
 	}
+}
+
+/*
+ * dp_mon_reap_timer_handler()- timer to reap monitor rings
+ * reqd as we are not getting ppdu end interrupts
+ * @arg: SoC Handle
+ *
+ * Return:
+ *
+ */
+static void dp_mon_reap_timer_handler(void *arg)
+{
+	struct dp_soc *soc = (struct dp_soc *)arg;
+
+	dp_service_mon_rings(soc, QCA_NAPI_BUDGET);
 
 	qdf_timer_mod(&soc->mon_reap_timer, DP_INTR_POLL_TIMER_MS);
 }
@@ -4440,8 +4457,8 @@ static QDF_STATUS dp_rxdma_ring_config(struct dp_soc *soc)
 	 * Needed until we enable ppdu end interrupts
 	 */
 	qdf_timer_init(soc->osdev, &soc->mon_reap_timer,
-			dp_service_mon_rings, (void *)soc,
-			QDF_TIMER_TYPE_WAKE_APPS);
+		       dp_mon_reap_timer_handler, (void *)soc,
+		       QDF_TIMER_TYPE_WAKE_APPS);
 	soc->reap_timer_init = 1;
 	return status;
 }
@@ -5089,26 +5106,6 @@ static inline void dp_peer_rx_bufq_resources_init(struct dp_peer *peer)
 }
 #endif
 
-#ifdef WLAN_FEATURE_STATS_EXT
-/*
- * dp_set_ignore_reo_status_cb() - set ignore reo status cb flag
- * @soc: dp soc handle
- * @flag: flag to set or reset
- *
- * Return: None
- */
-static inline void dp_set_ignore_reo_status_cb(struct dp_soc *soc,
-					       bool flag)
-{
-	soc->ignore_reo_status_cb = flag;
-}
-#else
-static inline void dp_set_ignore_reo_status_cb(struct dp_soc *soc,
-					       bool flag)
-{
-}
-#endif
-
 /*
  * dp_peer_create_wifi3() - attach txrx peer
  * @txrx_vdev: Datapath VDEV handle
@@ -5266,12 +5263,6 @@ static void *dp_peer_create_wifi3(struct cdp_vdev *vdev_handle,
 	    qdf_mem_cmp(peer->mac_addr.raw, vdev->mac_addr.raw,
 			QDF_MAC_ADDR_SIZE) == 0) {
 		vdev->vap_self_peer = peer;
-	}
-
-	if (wlan_op_mode_sta == vdev->opmode &&
-	    qdf_mem_cmp(peer->mac_addr.raw, vdev->mac_addr.raw,
-			QDF_MAC_ADDR_SIZE) != 0) {
-		dp_set_ignore_reo_status_cb(soc, false);
 	}
 
 	for (i = 0; i < DP_MAX_TIDS; i++)
@@ -5779,8 +5770,11 @@ static void dp_vdev_reset_peer(struct dp_vdev *vdev,
 	if (!vdev) {
 		dp_err("vdev is NULL");
 	} else {
-		if (vdev->vap_bss_peer == peer)
-		    vdev->vap_bss_peer = NULL;
+		if (vdev->vap_bss_peer == peer) {
+			vdev->vap_bss_peer = NULL;
+			qdf_mem_zero(vdev->vap_bss_peer_mac_addr,
+				     QDF_MAC_ADDR_SIZE);
+		}
 
 		if (vdev && vdev->vap_bss_peer) {
 		    bss_peer = vdev->vap_bss_peer;
@@ -6039,12 +6033,6 @@ static void dp_peer_delete_wifi3(void *peer_handle, uint32_t bitmap)
 	dp_peer_rx_bufq_resources_deinit(peer);
 
 	qdf_spinlock_destroy(&peer->peer_info_lock);
-
-	if (wlan_op_mode_sta == peer->vdev->opmode &&
-	    qdf_mem_cmp(peer->mac_addr.raw, peer->vdev->mac_addr.raw,
-			QDF_MAC_ADDR_SIZE) != 0) {
-		dp_set_ignore_reo_status_cb(peer->vdev->pdev->soc, true);
-	}
 
 	/*
 	 * Remove the reference added during peer_attach.
@@ -9450,6 +9438,39 @@ static void dp_txrx_post_data_stall_event(
 }
 #endif /* WLAN_SUPPORT_DATA_STALL */
 
+/**
+ * dp_peer_get_ref_find_by_addr - get peer with addr by ref count inc
+ * @dev: physical device instance
+ * @peer_mac_addr: peer mac address
+ * @debug_id: to track enum peer access
+ *
+ * Return: peer instance pointer
+ */
+static void *
+dp_peer_get_ref_find_by_addr(struct cdp_pdev *dev, uint8_t *peer_mac_addr,
+			     uint8_t *local_id,
+			     enum peer_debug_id_type debug_id)
+{
+	struct dp_pdev *pdev = (struct dp_pdev *)dev;
+	struct dp_peer *peer;
+
+	peer = dp_peer_find_hash_find(pdev->soc, peer_mac_addr, 0, DP_VDEV_ALL);
+
+	if (!peer)
+		return NULL;
+
+	if (peer->delete_in_progress) {
+		dp_err("Peer deletion in progress");
+		dp_peer_unref_delete(peer);
+		return NULL;
+	}
+
+	*local_id = peer->local_id;
+	dp_info_rl("peer %pK mac: %pM", peer, peer->mac_addr.raw);
+
+	return peer;
+}
+
 #ifdef WLAN_FEATURE_STATS_EXT
 /* rx hw stats event wait timeout in ms */
 #define DP_REO_STATUS_STATS_TIMEOUT 1000
@@ -9465,13 +9486,14 @@ dp_txrx_ext_stats_request(struct cdp_pdev *ppdev,
 			  struct cdp_txrx_ext_stats *req)
 {
 	struct dp_pdev *pdev = (struct dp_pdev *)ppdev;
-	struct dp_soc *soc = pdev->soc;
+	struct dp_soc *soc = NULL;
 
 	if (!pdev) {
 		dp_err("pdev is null");
 		return QDF_STATUS_E_INVAL;
 	}
 
+	soc = pdev->soc;
 	dp_aggregate_pdev_stats(pdev);
 
 	req->tx_msdu_enqueue = pdev->stats.tx_i.processed.num;
@@ -9499,11 +9521,6 @@ static void dp_rx_hw_stats_cb(struct dp_soc *soc, void *cb_ctxt,
 	struct dp_rx_tid *rx_tid = (struct dp_rx_tid *)cb_ctxt;
 	struct hal_reo_queue_status *queue_status = &reo_status->queue_status;
 
-	if (soc->ignore_reo_status_cb) {
-		qdf_event_set(&soc->rx_hw_stats_event);
-		return;
-	}
-
 	if (queue_status->header.status != HAL_REO_CMD_SUCCESS) {
 		dp_info("REO stats failure %d for TID %d",
 			queue_status->header.status, rx_tid->tid);
@@ -9524,39 +9541,38 @@ static void dp_rx_hw_stats_cb(struct dp_soc *soc, void *cb_ctxt,
  *
  * Return: None
  */
-static void
-dp_request_rx_hw_stats(struct cdp_soc_t *soc_hdl, struct cdp_vdev *pvdev)
+static QDF_STATUS
+dp_request_rx_hw_stats(struct cdp_soc_t *soc_hdl, uint8_t vdev_id)
 {
 	struct dp_soc *soc = (struct dp_soc *)soc_hdl;
-	struct dp_vdev *vdev = (struct dp_vdev *)pvdev;
+	struct dp_vdev *vdev =
+		dp_get_vdev_from_soc_vdev_id_wifi3(soc, vdev_id);
 	struct dp_peer *peer;
+	uint8_t local_id = 0;
+	QDF_STATUS status;
 
-	peer = vdev->vap_bss_peer;
+	if (!vdev) {
+		dp_err("vdev is null for vdev_id: %u", vdev_id);
+		return QDF_STATUS_E_INVAL;
+	}
 
-	if (!peer || peer->delete_in_progress) {
-		dp_err("Peer deletion in progress");
-		qdf_event_set(&soc->rx_hw_stats_event);
-		return;
+	peer = dp_peer_get_ref_find_by_addr((struct cdp_pdev *)vdev->pdev,
+					    vdev->vap_bss_peer_mac_addr,
+					    &local_id,
+					    0);
+
+	if (!peer) {
+		dp_err("Peer is NULL");
+		return QDF_STATUS_E_INVAL;
 	}
 
 	qdf_event_reset(&soc->rx_hw_stats_event);
 	dp_peer_rxtid_stats(peer, dp_rx_hw_stats_cb, NULL);
-}
-
-/**
- * dp_wait_for_ext_rx_stats - wait for rx reo status for rx stats
- * @soc_hdl: cdp opaque soc handle
- *
- * Return: status
- */
-static QDF_STATUS
-dp_wait_for_ext_rx_stats(struct cdp_soc_t *soc_hdl)
-{
-	struct dp_soc *soc = (struct dp_soc *)soc_hdl;
-	QDF_STATUS status;
 
 	status = qdf_wait_single_event(&soc->rx_hw_stats_event,
 				       DP_REO_STATUS_STATS_TIMEOUT);
+
+	dp_peer_unref_delete(peer);
 
 	return status;
 }
@@ -9585,8 +9601,7 @@ static struct cdp_misc_ops dp_ops_misc = {
 #ifdef WLAN_FEATURE_STATS_EXT
 	.txrx_ext_stats_request = dp_txrx_ext_stats_request,
 	.request_rx_hw_stats = dp_request_rx_hw_stats,
-	.wait_for_ext_rx_stats = dp_wait_for_ext_rx_stats,
-#endif
+#endif /* WLAN_FEATURE_STATS_EXT */
 };
 
 static struct cdp_flowctl_ops dp_ops_flowctl = {
@@ -9645,6 +9660,13 @@ static QDF_STATUS dp_bus_suspend(struct cdp_pdev *opaque_pdev)
 	if (soc->intr_mode == DP_INTR_POLL)
 		qdf_timer_stop(&soc->int_timer);
 
+	/* Stop monitor reap timer and reap any pending frames in ring */
+	if (pdev->rx_pktlog_mode != DP_RX_PKTLOG_DISABLED &&
+	    soc->reap_timer_init) {
+		qdf_timer_sync_cancel(&soc->mon_reap_timer);
+		dp_service_mon_rings(soc, DP_MON_REAP_BUDGET);
+	}
+
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -9656,12 +9678,43 @@ static QDF_STATUS dp_bus_resume(struct cdp_pdev *opaque_pdev)
 	if (soc->intr_mode == DP_INTR_POLL)
 		qdf_timer_mod(&soc->int_timer, DP_INTR_POLL_TIMER_MS);
 
+	/* Start monitor reap timer */
+	if (pdev->rx_pktlog_mode != DP_RX_PKTLOG_DISABLED &&
+	    soc->reap_timer_init)
+		qdf_timer_mod(&soc->mon_reap_timer,
+			      DP_INTR_POLL_TIMER_MS);
+
 	return QDF_STATUS_SUCCESS;
+}
+
+/**
+ * dp_process_wow_ack_rsp() - process wow ack response
+ * @soc_hdl: datapath soc handle
+ * @opaque_pdev: data path pdev handle
+ *
+ * Return: none
+ */
+static void dp_process_wow_ack_rsp(struct cdp_soc_t *soc_hdl,
+				   struct cdp_pdev *opaque_pdev)
+{
+	struct dp_soc *soc = (struct dp_soc *)soc_hdl;
+	struct dp_pdev *pdev = (struct dp_pdev *)opaque_pdev;
+
+	/*
+	 * As part of wow enable FW disables the mon status ring and in wow ack
+	 * response from FW reap mon status ring to make sure no packets pending
+	 * in the ring.
+	 */
+	if (pdev->rx_pktlog_mode != DP_RX_PKTLOG_DISABLED &&
+	    soc->reap_timer_init) {
+		dp_service_mon_rings(soc, DP_MON_REAP_BUDGET);
+	}
 }
 
 static struct cdp_bus_ops dp_ops_bus = {
 	.bus_suspend = dp_bus_suspend,
-	.bus_resume = dp_bus_resume
+	.bus_resume = dp_bus_resume,
+	.process_wow_ack_rsp = dp_process_wow_ack_rsp,
 };
 
 static struct cdp_ocb_ops dp_ops_ocb = {
@@ -9680,34 +9733,6 @@ static struct cdp_mob_stats_ops dp_ops_mob_stats = {
 static struct cdp_cfg_ops dp_ops_cfg = {
 	/* WIFI 3.0 DP NOT IMPLEMENTED YET */
 };
-
-/*
- * dp_peer_get_ref_find_by_addr - get peer with addr by ref count inc
- * @dev: physical device instance
- * @peer_mac_addr: peer mac address
- * @local_id: local id for the peer
- * @debug_id: to track enum peer access
- *
- * Return: peer instance pointer
- */
-static inline void *
-dp_peer_get_ref_find_by_addr(struct cdp_pdev *dev, uint8_t *peer_mac_addr,
-			     uint8_t *local_id,
-			     enum peer_debug_id_type debug_id)
-{
-	struct dp_pdev *pdev = (struct dp_pdev *)dev;
-	struct dp_peer *peer;
-
-	peer = dp_peer_find_hash_find(pdev->soc, peer_mac_addr, 0, DP_VDEV_ALL);
-
-	if (!peer)
-		return NULL;
-
-	*local_id = peer->local_id;
-	dp_info_rl("peer %pK id %d", peer, *local_id);
-
-	return peer;
-}
 
 /*
  * dp_peer_release_ref - release peer ref count

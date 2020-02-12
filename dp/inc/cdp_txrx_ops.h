@@ -1045,9 +1045,8 @@ struct cdp_misc_ops {
 					       uint32_t low_th);
 	QDF_STATUS (*txrx_ext_stats_request)(struct cdp_pdev *pdev,
 					     struct cdp_txrx_ext_stats *req);
-	void (*request_rx_hw_stats)(struct cdp_soc_t *soc_hdl,
-				    struct cdp_vdev *vdev);
-	QDF_STATUS (*wait_for_ext_rx_stats)(struct cdp_soc_t *soc_hdl);
+	QDF_STATUS (*request_rx_hw_stats)(struct cdp_soc_t *soc_hdl,
+					  uint8_t vdev_id);
 };
 
 /**
@@ -1245,10 +1244,13 @@ struct cdp_ipa_ops {
  * struct cdp_bus_ops - mcl bus suspend/resume ops
  * @bus_suspend:
  * @bus_resume:
+ * @process_wow_ack_rsp: handler for wow ack response
  */
 struct cdp_bus_ops {
 	QDF_STATUS (*bus_suspend)(struct cdp_pdev *opaque_pdev);
 	QDF_STATUS (*bus_resume)(struct cdp_pdev *opaque_pdev);
+	void (*process_wow_ack_rsp)(struct cdp_soc_t *soc_hdl,
+				    struct cdp_pdev *opaque_pdev);
 };
 
 /**
