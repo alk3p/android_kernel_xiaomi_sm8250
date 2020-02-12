@@ -3563,6 +3563,8 @@ int hdd_set_ldpc(struct hdd_adapter *adapter, int value)
 	ret = sme_update_he_ldpc_supp(mac_handle, adapter->vdev_id, value);
 	if (ret)
 		hdd_err("Failed to set HE LDPC value");
+	ret = sme_set_auto_rate_ldpc(mac_handle, adapter->vdev_id,
+				     (value ? 0 : 1));
 
 	return ret;
 }
@@ -6048,12 +6050,12 @@ static int __iw_setchar_getnone(struct net_device *dev,
 	case WE_WOWL_ADD_PTRN:
 		hdd_debug("ADD_PTRN");
 		if (!hdd_add_wowl_ptrn(adapter, str_arg))
-			return -EINVAL;
+			ret = -EINVAL;
 		break;
 	case WE_WOWL_DEL_PTRN:
 		hdd_debug("DEL_PTRN");
 		if (!hdd_del_wowl_ptrn(adapter, str_arg))
-			return -EINVAL;
+			ret = -EINVAL;
 		break;
 	case WE_NEIGHBOR_REPORT_REQUEST:
 	{
