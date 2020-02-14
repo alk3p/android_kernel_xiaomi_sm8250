@@ -1801,6 +1801,9 @@ static void _sde_encoder_dsc_disable(struct sde_encoder_virt *sde_enc)
 	struct sde_hw_ctl *hw_ctl = NULL;
 	struct sde_ctl_dsc_cfg cfg;
 
+	if (!_sde_encoder_is_dsc_enabled(&sde_enc->base))
+		return;
+
 	if (!sde_enc || !sde_enc->phys_encs[0] ||
 			!sde_enc->phys_encs[0]->connector) {
 		SDE_ERROR("invalid params %d %d\n",
@@ -5947,14 +5950,6 @@ int sde_encoder_update_caps_for_cont_splash(struct drm_encoder *encoder,
 		return ret;
 	}
 
-	ret = sde_rm_reserve(&sde_kms->rm, encoder, encoder->crtc->state,
-			conn->state, false);
-	if (ret) {
-		SDE_ERROR_ENC(sde_enc,
-			"failed to reserve hw resources, %d\n", ret);
-		return ret;
-	}
-
 	if (sde_conn->encoder) {
 		conn->state->best_encoder = sde_conn->encoder;
 		SDE_DEBUG_ENC(sde_enc,
@@ -5963,6 +5958,14 @@ int sde_encoder_update_caps_for_cont_splash(struct drm_encoder *encoder,
 	} else {
 		SDE_ERROR_ENC(sde_enc, "No encoder mapped to connector=%d\n",
 				conn->base.id);
+	}
+
+	ret = sde_rm_reserve(&sde_kms->rm, encoder, encoder->crtc->state,
+			conn->state, false);
+	if (ret) {
+		SDE_ERROR_ENC(sde_enc,
+			"failed to reserve hw resources, %d\n", ret);
+		return ret;
 	}
 
 	SDE_DEBUG_ENC(sde_enc, "connector topology = %llu\n",
