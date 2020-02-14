@@ -202,6 +202,11 @@ static int va_macro_clk_div_get(struct snd_soc_component *component)
 	if (!va_macro_get_data(component, &va_dev, &va_priv, __func__))
 		return -EINVAL;
 
+	if ((va_priv->version == BOLERO_VERSION_2_1)
+		&& !va_priv->lpi_enable
+		&& (va_priv->dmic_clk_div == VA_MACRO_CLK_DIV_16))
+		return VA_MACRO_CLK_DIV_8;
+
 	return va_priv->dmic_clk_div;
 }
 
@@ -1125,13 +1130,14 @@ static int va_macro_enable_dec(struct snd_soc_dapm_widget *w,
 		/* Enable TX CLK */
 		snd_soc_component_update_bits(component,
 				tx_vol_ctl_reg, 0x20, 0x20);
-		snd_soc_component_update_bits(component,
+		if (!(is_amic_enabled(component, decimator) < BOLERO_ADC_MAX)) {
+			snd_soc_component_update_bits(component,
 				hpf_gate_reg, 0x01, 0x00);
-		/*
-		 * Minimum 1 clk cycle delay is required as per HW spec
-		 */
-		usleep_range(1000, 1010);
-
+			/*
+		 	 * Minimum 1 clk cycle delay is required as per HW spec
+		 	 */
+			usleep_range(1000, 1010);
+		}
 		hpf_cut_off_freq = (snd_soc_component_read32(
 					component, dec_cfg_reg) &
 				   TX_HPF_CUT_OFF_FREQ_MASK) >> 5;
@@ -1149,15 +1155,16 @@ static int va_macro_enable_dec(struct snd_soc_dapm_widget *w,
 				va_tx_unmute_delay = unmute_delay;
 		}
 		snd_soc_component_update_bits(component,
-				hpf_gate_reg, 0x03, 0x03);
+				hpf_gate_reg, 0x03, 0x02);
+		if (!(is_amic_enabled(component, decimator) < BOLERO_ADC_MAX))
+			snd_soc_component_update_bits(component,
+				hpf_gate_reg, 0x03, 0x00);
 		/*
 		 * Minimum 1 clk cycle delay is required as per HW spec
 		 */
 		usleep_range(1000, 1010);
 		snd_soc_component_update_bits(component,
-			hpf_gate_reg, 0x02, 0x00);
-		snd_soc_component_update_bits(component,
-			hpf_gate_reg, 0x01, 0x01);
+			hpf_gate_reg, 0x03, 0x01);
 		/*
 		 * 6ms delay is required as per HW spec
 		 */
@@ -1186,9 +1193,15 @@ static int va_macro_enable_dec(struct snd_soc_dapm_widget *w,
 						dec_cfg_reg,
 						TX_HPF_CUT_OFF_FREQ_MASK,
 						hpf_cut_off_freq << 5);
-				snd_soc_component_update_bits(component,
+				if (is_amic_enabled(component, decimator) <
+					BOLERO_ADC_MAX)
+					snd_soc_component_update_bits(component,
 						hpf_gate_reg,
-						0x02, 0x02);
+						0x03, 0x02);
+				else
+					snd_soc_component_update_bits(component,
+						hpf_gate_reg,
+						0x03, 0x03);
 				/*
 				 * Minimum 1 clk cycle delay is required
 				 * as per HW spec
@@ -1196,7 +1209,7 @@ static int va_macro_enable_dec(struct snd_soc_dapm_widget *w,
 				usleep_range(1000, 1010);
 				snd_soc_component_update_bits(component,
 						hpf_gate_reg,
-						0x02, 0x00);
+						0x03, 0x01);
 			}
 		}
 		cancel_delayed_work_sync(

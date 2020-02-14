@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
  */
 
 #ifndef BOLERO_CDC_H
@@ -52,7 +52,8 @@ enum {
 	BOLERO_MACRO_EVT_CLK_RESET,
 	BOLERO_MACRO_EVT_REG_WAKE_IRQ,
 	BOLERO_MACRO_EVT_RX_COMPANDER_SOFT_RST,
-	BOLERO_MACRO_EVT_BCS_CLK_OFF
+	BOLERO_MACRO_EVT_BCS_CLK_OFF,
+	BOLERO_MACRO_EVT_SSR_GFMUX_UP,
 };
 
 enum {
