@@ -1476,7 +1476,6 @@ QDF_STATUS hdd_wmm_init(struct hdd_adapter *adapter)
 	enum sme_qos_wmmuptype *dscp_to_up_map = adapter->dscp_to_up_map;
 	uint8_t dscp;
 
-	hdd_enter();
 
 	/* DSCP to User Priority Lookup Table
 	 * By default use the 3 Precedence bits of DSCP as the User Priority
