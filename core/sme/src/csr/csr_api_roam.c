@@ -1010,6 +1010,9 @@ QDF_STATUS csr_update_channel_list(struct mac_context *mac)
 	uint16_t cnt = 0;
 	uint8_t  channel;
 	bool is_unsafe_chan;
+	bool is_5mhz_enabled;
+	bool is_10mhz_enabled;
+
 	qdf_device_t qdf_ctx = cds_get_context(QDF_MODULE_ID_QDF_DEVICE);
 
 	if (!qdf_ctx) {
@@ -1030,6 +1033,13 @@ QDF_STATUS csr_update_channel_list(struct mac_context *mac)
 	pChanList = qdf_mem_malloc(bufLen);
 	if (!pChanList)
 		return QDF_STATUS_E_NOMEM;
+
+	is_5mhz_enabled = cds_is_5_mhz_enabled();
+	if (is_5mhz_enabled)
+		sme_nofl_debug("quarter_rate enabled");
+	is_10mhz_enabled = cds_is_10_mhz_enabled();
+	if (is_10mhz_enabled)
+		sme_nofl_debug("half_rate enabled");
 
 	for (i = 0; i < pScan->base_channels.numChannels; i++) {
 		struct csr_sta_roam_policy_params *roam_policy =
@@ -1116,18 +1126,12 @@ QDF_STATUS csr_update_channel_list(struct mac_context *mac)
 			else
 				pChanList->chanParam[num_channel].dfsSet =
 					true;
-			if (cds_is_5_mhz_enabled())
-				pChanList->chanParam[num_channel].quarter_rate
-					= 1;
-			else if (cds_is_10_mhz_enabled())
-				pChanList->chanParam[num_channel].half_rate = 1;
-			QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_DEBUG,
-				"channel:%d, pwr=%d, DFS=%d qrate %d hrate %d ",
-				pChanList->chanParam[num_channel].chanId,
-				pChanList->chanParam[num_channel].pwr,
-				pChanList->chanParam[num_channel].dfsSet,
-				pChanList->chanParam[num_channel].quarter_rate,
-				pChanList->chanParam[num_channel].half_rate);
+			pChanList->chanParam[num_channel].quarter_rate =
+							is_5mhz_enabled;
+
+			pChanList->chanParam[num_channel].half_rate =
+							is_10mhz_enabled;
+
 			num_channel++;
 		}
 	}
@@ -21502,8 +21506,7 @@ csr_update_op_class_array(struct mac_context *mac_ctx,
 	uint8_t num_channels = channel_info->numChannels;
 	uint8_t ch_bandwidth;
 
-	sme_debug("Num of %s channels,  %d",
-		ch_name, num_channels);
+	sme_debug("Num %s channels,  %d", ch_name, num_channels);
 
 	for (idx = 0; idx < num_channels &&
 			*i < (REG_MAX_SUPP_OPER_CLASSES - 1); idx++) {
@@ -21513,9 +21516,6 @@ csr_update_op_class_array(struct mac_context *mac_ctx,
 					mac_ctx->scan.countryCodeCurrent,
 					channel_info->channelList[idx],
 					ch_bandwidth);
-			sme_debug("for chan %d, op class: %d",
-				channel_info->channelList[idx], class);
-
 			found = false;
 			for (j = 0; j < REG_MAX_SUPP_OPER_CLASSES - 1;
 				j++) {
@@ -21568,11 +21568,6 @@ static void csr_init_operating_classes(struct mac_context *mac)
 			}
 		}
 	}
-
-	sme_debug("Number of unique supported op classes %d",
-		numClasses);
-	for (i = 0; i < numClasses; i++)
-		sme_debug("supported opClasses[%d] = %d", i, opClasses[i]);
 
 	/* Set the ordered list of op classes in regdomain
 	 * for use by other modules
