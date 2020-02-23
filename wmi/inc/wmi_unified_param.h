@@ -4861,6 +4861,7 @@ typedef enum {
 	wmi_service_ready_ext2_event_id,
 	wmi_oem_data_event_id,
 	wmi_roam_stats_event_id,
+	wmi_roam_scan_chan_list_id,
 	wmi_events_max,
 } wmi_conv_event_id;
 
@@ -5354,6 +5355,7 @@ typedef enum {
 	wmi_service_nan_vdev,
 	wmi_service_multiple_vdev_restart_ext,
 	wmi_service_peer_delete_no_peer_flush_tids_cmd,
+	wmi_roam_scan_chan_list_to_host_support,
 	wmi_services_max,
 } wmi_conv_service_ids;
 #define WMI_SERVICE_UNAVAILABLE 0xFFFF
