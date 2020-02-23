@@ -222,6 +222,7 @@ struct hdd_config {
 	uint8_t tsf_ptp_options;
 #endif /* WLAN_FEATURE_TSF_PLUS */
 	uint32_t dp_proto_event_bitmap;
+	bool get_roam_chan_from_fw;
 };
 
 /**

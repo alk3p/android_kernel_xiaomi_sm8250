@@ -1961,6 +1961,7 @@ struct hdd_context {
 #endif
 	qdf_time_t runtime_resume_start_time_stamp;
 	qdf_time_t runtime_suspend_done_time_stamp;
+	bool roam_ch_from_fw_supported;
 };
 
 /**
