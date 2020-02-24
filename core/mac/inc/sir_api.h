@@ -1272,6 +1272,7 @@ struct disassoc_ind {
 	struct qdf_mac_addr peer_macaddr;
 	uint16_t staId;
 	uint32_t reasonCode;
+	bool from_ap;
 };
 
 /* / Definition for Disassociation confirm */
@@ -1332,6 +1333,7 @@ struct deauth_ind {
 	uint16_t staId;
 	uint32_t reasonCode;
 	int8_t rssi;
+	bool from_ap;
 };
 
 /* / Definition for Deauthetication confirm */
