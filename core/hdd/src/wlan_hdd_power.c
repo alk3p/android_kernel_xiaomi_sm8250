@@ -1924,8 +1924,10 @@ static int __wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 			goto resume_ol_rx;
 	}
 
-	if (hdd_ctx->enable_dp_rx_threads)
-		dp_txrx_suspend(cds_get_context(QDF_MODULE_ID_SOC));
+	if (hdd_ctx->enable_dp_rx_threads) {
+		if (dp_txrx_suspend(cds_get_context(QDF_MODULE_ID_SOC)))
+			goto resume_ol_rx;
+	}
 
 	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
 		   TRACE_CODE_HDD_CFG80211_SUSPEND_WLAN,
