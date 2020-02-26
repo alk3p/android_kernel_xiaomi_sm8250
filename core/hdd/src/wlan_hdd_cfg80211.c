@@ -23018,8 +23018,6 @@ static void wlan_hdd_chan_info_cb(struct scan_chan_info *info)
 	struct scan_chan_info *chan;
 	uint8_t idx;
 
-	hdd_enter();
-
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 	if (wlan_hdd_validate_context(hdd_ctx) != 0) {
 		hdd_err("hdd_ctx is invalid");
@@ -23048,8 +23046,6 @@ static void wlan_hdd_chan_info_cb(struct scan_chan_info *info)
 
 		}
 	}
-
-	hdd_exit();
 }
 
 /**

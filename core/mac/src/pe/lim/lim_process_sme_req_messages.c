@@ -596,7 +596,8 @@ __lim_handle_sme_start_bss_request(struct mac_context *mac_ctx, uint32_t *msg_bu
 					sme_start_bss_req->bssid.bytes,
 					&session_id, mac_ctx->lim.maxStation,
 					sme_start_bss_req->bssType,
-					sme_start_bss_req->sessionId);
+					sme_start_bss_req->sessionId,
+					sme_start_bss_req->bssPersona);
 			if (!session) {
 				pe_warn("Session Can not be created");
 				ret_code = eSIR_SME_RESOURCES_UNAVAILABLE;
@@ -650,8 +651,6 @@ __lim_handle_sme_start_bss_request(struct mac_context *mac_ctx, uint32_t *msg_bu
 			     (uint8_t *) &sme_start_bss_req->ssId,
 			     (sme_start_bss_req->ssId.length + 1));
 
-		session->bssType = sme_start_bss_req->bssType;
-
 		session->nwType = sme_start_bss_req->nwType;
 
 		session->beaconParams.beaconInterval =
@@ -660,11 +659,6 @@ __lim_handle_sme_start_bss_request(struct mac_context *mac_ctx, uint32_t *msg_bu
 		/* Store the channel number in session Table */
 		session->currentOperChannel =
 			sme_start_bss_req->channelId;
-
-		/* Store Persona */
-		session->opmode = sme_start_bss_req->bssPersona;
-		QDF_TRACE(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_DEBUG,
-			  FL("PE PERSONA=%d"), session->opmode);
 
 		/* Update the phymode */
 		session->gLimPhyMode = sme_start_bss_req->nwType;
@@ -1367,7 +1361,8 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 			session = pe_create_session(mac_ctx, bss_desc->bssId,
 					&session_id, mac_ctx->lim.maxStation,
 					eSIR_INFRASTRUCTURE_MODE,
-					sme_join_req->sessionId);
+					sme_join_req->sessionId,
+					sme_join_req->staPersona);
 			if (!session) {
 				pe_err("Session Can not be created");
 				ret_code = eSIR_SME_RESOURCES_UNAVAILABLE;
@@ -1402,7 +1397,6 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 		/* Copying of bssId is already done, while creating session */
 		sir_copy_mac_addr(session->self_mac_addr,
 				  sme_join_req->self_mac_addr);
-		session->bssType = sme_join_req->bsstype;
 
 		session->statypeForBss = STA_ENTRY_PEER;
 		session->limWmeEnabled = sme_join_req->isWMEenabled;
@@ -1447,20 +1441,11 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 		 * self and peer rates
 		 */
 		session->supported_nss_1x1 = true;
-		/*Store Persona */
-		session->opmode = sme_join_req->staPersona;
-		pe_debug("enable Smps: %d mode: %d send action: %d supported nss 1x1: %d opmode %d cbMode %d",
+		pe_debug("enable Smps: %d mode: %d send action: %d supported nss 1x1: %d cbMode %d nwType: %d dot11mode: %d force_24ghz_in_ht20 %d",
 			 session->enableHtSmps, session->htSmpsvalue,
 			 session->send_smps_action, session->supported_nss_1x1,
-			 session->opmode, sme_join_req->cbMode);
-
-		/*Store Persona */
-		session->opmode = sme_join_req->staPersona;
-		QDF_TRACE(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_DEBUG,
-			  FL("PE PERSONA=%d cbMode %u nwType: %d dot11mode: %d force_24ghz_in_ht20 %d"),
-			  session->opmode, sme_join_req->cbMode,
-			  session->nwType, session->dot11mode,
-			  sme_join_req->force_24ghz_in_ht20);
+			 sme_join_req->cbMode, session->nwType,
+			 session->dot11mode, sme_join_req->force_24ghz_in_ht20);
 
 		/* Copy The channel Id to the session Table */
 		session->currentOperChannel = bss_desc->channelId;
