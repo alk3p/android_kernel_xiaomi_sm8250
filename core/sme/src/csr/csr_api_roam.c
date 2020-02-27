@@ -64,6 +64,7 @@
 #include "wlan_qct_sys.h"
 #include "wlan_blm_api.h"
 #include "wlan_policy_mgr_i.h"
+#include "wlan_p2p_cfg_api.h"
 
 #define RSN_AUTH_KEY_MGMT_SAE           WLAN_RSN_SEL(WLAN_AKM_SAE)
 #define MAX_PWR_FCC_CHAN_12 8
@@ -20428,6 +20429,16 @@ csr_roam_offload_scan(struct mac_context *mac_ctx, uint8_t session_id,
 		}
 	}
 
+	if (cfg_p2p_is_roam_config_disabled(mac_ctx->psoc) &&
+	    (command == ROAM_SCAN_OFFLOAD_START ||
+	     command == ROAM_SCAN_OFFLOAD_UPDATE_CFG) &&
+	    (policy_mgr_mode_specific_connection_count(mac_ctx->psoc,
+						PM_P2P_CLIENT_MODE, NULL) ||
+	    policy_mgr_mode_specific_connection_count(mac_ctx->psoc,
+						PM_P2P_GO_MODE, NULL))) {
+		sme_info("roaming not supported for active p2p connection");
+		return QDF_STATUS_E_FAILURE;
+	}
 	/*
 	 * The Dynamic Config Items Update may happen even if the state is in
 	 * INIT. It is important to ensure that the command is passed down to
