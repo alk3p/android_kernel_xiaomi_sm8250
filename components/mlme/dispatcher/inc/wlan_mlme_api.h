@@ -2389,4 +2389,21 @@ char *mlme_get_roam_fail_reason_str(uint32_t result);
  * Return: Meaningful string from enum WMI_ROAM_TRIGGER_SUB_REASON_ID
  */
 char *mlme_get_sub_reason_str(uint32_t sub_reason);
+
+#ifdef WLAN_FEATURE_ROAM_OFFLOAD
+/**
+ * wlan_mlme_get_roaming_triggers  - Get the roaming triggers bitmap
+ * @psoc: Pointer to PSOC object
+ *
+ * Return: Roaming triggers value
+ */
+uint32_t wlan_mlme_get_roaming_triggers(struct wlan_objmgr_psoc *psoc);
+#else
+static inline
+uint32_t wlan_mlme_get_roaming_triggers(struct wlan_objmgr_psoc *psoc)
+{
+	return 0xFFFF;
+}
+#endif
+
 #endif /* _WLAN_MLME_API_H_ */
