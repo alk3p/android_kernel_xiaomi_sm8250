@@ -7079,7 +7079,7 @@ static void csr_process_fils_join_rsp(struct mac_context *mac_ctx,
 					roam_info->fils_join_rsp->tk_len,
 					roam_info->fils_join_rsp->tk, 0);
 	if (!QDF_IS_STATUS_SUCCESS(status)) {
-		sme_err("Set context for unicast fail");
+		sme_debug("Set context for unicast fail");
 		goto process_fils_join_rsp_fail;
 	}
 	return;
@@ -11770,10 +11770,11 @@ csr_roam_chk_lnk_disassoc_ind(struct mac_context *mac_ctx, tSirSmeRsp *msg_ptr)
 		return;
 	}
 
-	sme_err("DISASSOCIATION from peer =" QDF_MAC_ADDR_STR "reason: %d status: %d session: %d",
-		QDF_MAC_ADDR_ARRAY(pDisassocInd->peer_macaddr.bytes),
-		pDisassocInd->reasonCode,
-		pDisassocInd->status_code, sessionId);
+	sme_nofl_info("disassoc from peer " QDF_MAC_ADDR_STR
+		      "reason: %d status: %d vid: %d",
+		      QDF_MAC_ADDR_ARRAY(pDisassocInd->peer_macaddr.bytes),
+		      pDisassocInd->reasonCode,
+		      pDisassocInd->status_code, sessionId);
 	/*
 	 * If we are in neighbor preauth done state then on receiving
 	 * disassoc or deauth we dont roam instead we just disassoc
@@ -15660,8 +15661,8 @@ csr_update_he_caps_mcs(struct wlan_mlme_cfg *mlme_cfg,
 		tx_mcs_map = HE_SET_MCS_4_NSS(tx_mcs_map, mcs_map, 2);
 		rx_mcs_map = HE_SET_MCS_4_NSS(rx_mcs_map, mcs_map, 2);
 	}
-	sme_info("new HE Nss MCS MAP: Rx 0x%0X, Tx: 0x%0X",
-			rx_mcs_map, tx_mcs_map);
+	sme_debug("new HE Nss MCS MAP: Rx 0x%0X, Tx: 0x%0X",
+		  rx_mcs_map, tx_mcs_map);
 	csr_session->he_config.tx_he_mcs_map_lt_80 = tx_mcs_map;
 	csr_session->he_config.rx_he_mcs_map_lt_80 = rx_mcs_map;
 }
@@ -15854,13 +15855,14 @@ QDF_STATUS csr_send_join_req_msg(struct mac_context *mac, uint32_t sessionId,
 		qdf_mem_copy(&csr_join_req->self_mac_addr,
 			     &pSession->self_mac_addr,
 			     sizeof(tSirMacAddr));
-		sme_info("vdevid-%d: Connecting to ssid:%.*s bssid: "QDF_MAC_ADDR_STR" rssi: %d channel: %d country_code: %c%c",
-			 sessionId, csr_join_req->ssId.length,
-			 csr_join_req->ssId.ssId,
-			 QDF_MAC_ADDR_ARRAY(pBssDescription->bssId),
-			 pBssDescription->rssi, pBssDescription->channelId,
-			 mac->scan.countryCodeCurrent[0],
-			 mac->scan.countryCodeCurrent[1]);
+		sme_nofl_info("vdev-%d: Connecting to %.*s " QDF_MAC_ADDR_STR
+			      " rssi: %d channel: %d CC: %c%c",
+			      sessionId, csr_join_req->ssId.length,
+			      csr_join_req->ssId.ssId,
+			      QDF_MAC_ADDR_ARRAY(pBssDescription->bssId),
+			      pBssDescription->rssi, pBssDescription->channelId,
+			      mac->scan.countryCodeCurrent[0],
+			      mac->scan.countryCodeCurrent[1]);
 		/* bsstype */
 		dw_tmp = csr_translate_bsstype_to_mac_type
 						(pProfile->BSSType);
@@ -16657,8 +16659,8 @@ QDF_STATUS csr_send_join_req_msg(struct mac_context *mac, uint32_t sessionId,
 						QDF_MC_TIMER_TO_SEC_UNIT)/
 						QDF_MC_TIMER_TO_MS_UNIT);
 			if (!QDF_IS_STATUS_SUCCESS(packetdump_timer_status))
-				sme_err("cannot start packetdump timer status: %d",
-					packetdump_timer_status);
+				sme_debug("cannot start packetdump timer status: %d",
+					  packetdump_timer_status);
 		}
 #ifndef WLAN_MDM_CODE_REDUCTION_OPT
 		if (eWNI_SME_JOIN_REQ == messageType) {
@@ -20264,7 +20266,7 @@ csr_handle_roam_state_change(struct mac_context *mac, uint8_t vdev_id,
 
 	if (requested_state != ROAM_DEINIT &&
 	    !csr_is_conn_state_connected_infra(mac, vdev_id)) {
-		sme_err("ROAM: roam state change requested in disconnected state");
+		sme_debug("ROAM: roam state change requested in disconnected state");
 		return status;
 	}
 
@@ -21960,7 +21962,7 @@ void csr_process_set_hw_mode(struct mac_context *mac, tSmeCmd *command)
 	status = policy_mgr_validate_dbs_switch(mac->psoc, action);
 
 	if (QDF_IS_STATUS_ERROR(status)) {
-		sme_err("Hw mode change not sent to FW status = %d", status);
+		sme_debug("Hw mode change not sent to FW status = %d", status);
 		if (status == QDF_STATUS_E_ALREADY)
 			hw_mode_change_status = SET_HW_MODE_STATUS_ALREADY;
 		goto fail;
@@ -22025,7 +22027,7 @@ fail:
 	if (!param)
 		return;
 
-	sme_err("Sending set HW fail response to SME");
+	sme_debug("Sending set HW fail response to SME");
 	param->status = hw_mode_change_status;
 	param->cfgd_hw_mode_index = 0;
 	param->num_vdev_mac_entries = 0;
@@ -22938,7 +22940,7 @@ QDF_STATUS
 csr_roam_update_cfg(struct mac_context *mac, uint8_t vdev_id, uint8_t reason)
 {
 	if (!MLME_IS_ROAM_INITIALIZED(mac->psoc, vdev_id)) {
-		sme_err("Update cfg received in roam uninitialized state");
+		sme_debug("Update cfg received in roam uninitialized state");
 		return QDF_STATUS_E_INVAL;
 	}
 

@@ -1810,8 +1810,9 @@ void lim_process_ap_mlm_del_sta_rsp(struct mac_context *mac_ctx,
 		goto end;
 	}
 
-	pe_warn("AP received the DEL_STA_RSP for assocID: %X",
-		del_sta_params->assocId);
+	pe_debug("AP received the DEL_STA_RSP for assocID: %X sta mac "
+		QDF_MAC_ADDR_STR, del_sta_params->assocId,
+		QDF_MAC_ADDR_ARRAY(sta_ds->staAddr));
 	if ((eLIM_MLM_WT_DEL_STA_RSP_STATE != sta_ds->mlmStaContext.mlmState) &&
 	    (eLIM_MLM_WT_ASSOC_DEL_STA_RSP_STATE !=
 	     sta_ds->mlmStaContext.mlmState)) {
