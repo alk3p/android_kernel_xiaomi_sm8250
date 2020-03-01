@@ -202,7 +202,7 @@ static int va_macro_clk_div_get(struct snd_soc_component *component)
 	if (!va_macro_get_data(component, &va_dev, &va_priv, __func__))
 		return -EINVAL;
 
-	if ((va_priv->version == BOLERO_VERSION_2_1)
+	if ((va_priv->version >= BOLERO_VERSION_2_0)
 		&& !va_priv->lpi_enable
 		&& (va_priv->dmic_clk_div == VA_MACRO_CLK_DIV_16))
 		return VA_MACRO_CLK_DIV_8;
@@ -325,9 +325,6 @@ static int va_macro_event_handler(struct snd_soc_component *component,
 		break;
 	case BOLERO_MACRO_EVT_SSR_DOWN:
 		if (va_priv->swr_ctrl_data) {
-			swrm_wcd_notify(
-				va_priv->swr_ctrl_data[0].va_swr_pdev,
-				SWR_DEVICE_DOWN, NULL);
 			swrm_wcd_notify(
 				va_priv->swr_ctrl_data[0].va_swr_pdev,
 				SWR_DEVICE_SSR_DOWN, NULL);
