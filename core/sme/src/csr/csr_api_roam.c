@@ -22425,12 +22425,10 @@ static QDF_STATUS csr_process_roam_sync_callback(struct mac_context *mac_ctx,
 		if (vdev_roam_params->source == USERSPACE_INITIATED ||
 		    mac_ctx->nud_fail_behaviour == DISCONNECT_AFTER_NUD_FAIL) {
 			/* Userspace roam req fail, disconnect with AP */
-			sme_debug("LFR3: roam invoke from user-space fail, dis cur AP");
 			csr_roam_disconnect(mac_ctx, session_id,
 					eCSR_DISCONNECT_REASON_DEAUTH,
 					eSIR_MAC_USER_TRIGGERED_ROAM_FAILURE);
 		}
-		sme_debug("Roaming Failed, clearing roam invoke in progress");
 		vdev_roam_params->roam_invoke_in_progress = false;
 		goto end;
 	case SIR_ROAM_SYNCH_PROPAGATION:
