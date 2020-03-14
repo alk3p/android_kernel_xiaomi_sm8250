@@ -1442,6 +1442,30 @@ mlme_init_adaptive_11r_cfg(struct wlan_objmgr_psoc *psoc,
 }
 #endif
 
+#if defined(WLAN_SAE_SINGLE_PMK) && defined(WLAN_FEATURE_ROAM_OFFLOAD)
+/**
+ * mlme_init_sae_single_pmk_cfg() - initialize sae_same_pmk_config
+ * flag
+ * @psoc: Pointer to PSOC
+ * @lfr:  pointer to mlme lfr config
+ *
+ * Return: None
+ */
+static void
+mlme_init_sae_single_pmk_cfg(struct wlan_objmgr_psoc *psoc,
+			     struct wlan_mlme_lfr_cfg *lfr)
+{
+	lfr->sae_single_pmk_feature_enabled = cfg_get(psoc, CFG_SAE_SINGLE_PMK);
+}
+
+#else
+static inline void
+mlme_init_sae_single_pmk_cfg(struct wlan_objmgr_psoc *psoc,
+			     struct wlan_mlme_lfr_cfg *lfr)
+{
+}
+#endif
+
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 static void mlme_init_roam_offload_cfg(struct wlan_objmgr_psoc *psoc,
 				       struct wlan_mlme_lfr_cfg *lfr)
@@ -1460,7 +1484,10 @@ static void mlme_init_roam_offload_cfg(struct wlan_objmgr_psoc *psoc,
 	lfr->idle_data_packet_count =
 		cfg_get(psoc, CFG_LFR_IDLE_ROAM_PACKET_COUNT);
 	lfr->idle_roam_min_rssi = cfg_get(psoc, CFG_LFR_IDLE_ROAM_MIN_RSSI);
+	lfr->roam_trigger_bitmap =
+		cfg_get(psoc, CFG_ROAM_TRIGGER_BITMAP);
 	lfr->idle_roam_band = cfg_get(psoc, CFG_LFR_IDLE_ROAM_BAND);
+	mlme_init_sae_single_pmk_cfg(psoc, lfr);
 }
 
 #else
@@ -1870,9 +1897,11 @@ static void mlme_init_scoring_cfg(struct wlan_objmgr_psoc *psoc,
 		mlme_limit_max_per_index_score(
 			cfg_get(psoc, CFG_SCORING_OCE_WAN_SCORE_IDX_15_TO_12));
 	scoring_cfg->roam_trigger_bitmap =
-				cfg_get(psoc, CFG_ROAM_TRIGGER_BITMAP);
+			cfg_get(psoc, CFG_ROAM_SCORE_DELTA_TRIGGER_BITMAP);
 	scoring_cfg->roam_score_delta = cfg_get(psoc, CFG_ROAM_SCORE_DELTA);
 	scoring_cfg->apsd_enabled = (bool)cfg_default(CFG_APSD_ENABLED);
+	scoring_cfg->min_roam_score_delta =
+				cfg_get(psoc, CFG_CAND_MIN_ROAM_SCORE_DELTA);
 }
 
 static void mlme_init_oce_cfg(struct wlan_objmgr_psoc *psoc,
@@ -2383,22 +2412,24 @@ void mlme_set_self_disconnect_ies(struct wlan_objmgr_vdev *vdev,
 
 	mlme_priv = vdev_mlme->ext_vdev_ptr;
 
-	if (mlme_priv->self_disconnect_ies.data) {
-		qdf_mem_free(mlme_priv->self_disconnect_ies.data);
-		mlme_priv->self_disconnect_ies.len = 0;
+	if (mlme_priv->disconnect_info.self_discon_ies.data) {
+		qdf_mem_free(mlme_priv->disconnect_info.self_discon_ies.data);
+		mlme_priv->disconnect_info.self_discon_ies.len = 0;
 	}
 
-	mlme_priv->self_disconnect_ies.data = qdf_mem_malloc(ie->len);
-	if (!mlme_priv->self_disconnect_ies.data)
+	mlme_priv->disconnect_info.self_discon_ies.data =
+				qdf_mem_malloc(ie->len);
+	if (!mlme_priv->disconnect_info.self_discon_ies.data)
 		return;
 
-	qdf_mem_copy(mlme_priv->self_disconnect_ies.data, ie->data, ie->len);
-	mlme_priv->self_disconnect_ies.len = ie->len;
+	qdf_mem_copy(mlme_priv->disconnect_info.self_discon_ies.data,
+		     ie->data, ie->len);
+	mlme_priv->disconnect_info.self_discon_ies.len = ie->len;
 
 	mlme_legacy_debug("Self disconnect IEs");
 	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_MLME, QDF_TRACE_LEVEL_DEBUG,
-			   mlme_priv->self_disconnect_ies.data,
-			   mlme_priv->self_disconnect_ies.len);
+			   mlme_priv->disconnect_info.self_discon_ies.data,
+			   mlme_priv->disconnect_info.self_discon_ies.len);
 }
 
 void mlme_free_self_disconnect_ies(struct wlan_objmgr_vdev *vdev)
@@ -2414,10 +2445,10 @@ void mlme_free_self_disconnect_ies(struct wlan_objmgr_vdev *vdev)
 
 	mlme_priv = vdev_mlme->ext_vdev_ptr;
 
-	if (mlme_priv->self_disconnect_ies.data) {
-		qdf_mem_free(mlme_priv->self_disconnect_ies.data);
-		mlme_priv->self_disconnect_ies.data = NULL;
-		mlme_priv->self_disconnect_ies.len = 0;
+	if (mlme_priv->disconnect_info.self_discon_ies.data) {
+		qdf_mem_free(mlme_priv->disconnect_info.self_discon_ies.data);
+		mlme_priv->disconnect_info.self_discon_ies.data = NULL;
+		mlme_priv->disconnect_info.self_discon_ies.len = 0;
 	}
 }
 
@@ -2431,10 +2462,9 @@ struct wlan_ies *mlme_get_self_disconnect_ies(struct wlan_objmgr_vdev *vdev)
 		mlme_legacy_err("vdev component object is NULL");
 		return NULL;
 	}
-
 	mlme_priv = vdev_mlme->ext_vdev_ptr;
 
-	return &mlme_priv->self_disconnect_ies;
+	return &mlme_priv->disconnect_info.self_discon_ies;
 }
 
 void mlme_set_peer_disconnect_ies(struct wlan_objmgr_vdev *vdev,
@@ -2456,22 +2486,24 @@ void mlme_set_peer_disconnect_ies(struct wlan_objmgr_vdev *vdev,
 
 	mlme_priv = vdev_mlme->ext_vdev_ptr;
 
-	if (mlme_priv->peer_disconnect_ies.data) {
-		qdf_mem_free(mlme_priv->peer_disconnect_ies.data);
-		mlme_priv->peer_disconnect_ies.len = 0;
+	if (mlme_priv->disconnect_info.peer_discon_ies.data) {
+		qdf_mem_free(mlme_priv->disconnect_info.peer_discon_ies.data);
+		mlme_priv->disconnect_info.peer_discon_ies.len = 0;
 	}
 
-	mlme_priv->peer_disconnect_ies.data = qdf_mem_malloc(ie->len);
-	if (!mlme_priv->peer_disconnect_ies.data)
+	mlme_priv->disconnect_info.peer_discon_ies.data =
+					qdf_mem_malloc(ie->len);
+	if (!mlme_priv->disconnect_info.peer_discon_ies.data)
 		return;
 
-	qdf_mem_copy(mlme_priv->peer_disconnect_ies.data, ie->data, ie->len);
-	mlme_priv->peer_disconnect_ies.len = ie->len;
+	qdf_mem_copy(mlme_priv->disconnect_info.peer_discon_ies.data,
+		     ie->data, ie->len);
+	mlme_priv->disconnect_info.peer_discon_ies.len = ie->len;
 
 	mlme_legacy_debug("peer disconnect IEs");
 	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_MLME, QDF_TRACE_LEVEL_DEBUG,
-			   mlme_priv->peer_disconnect_ies.data,
-			   mlme_priv->peer_disconnect_ies.len);
+			   mlme_priv->disconnect_info.peer_discon_ies.data,
+			   mlme_priv->disconnect_info.peer_discon_ies.len);
 }
 
 void mlme_free_peer_disconnect_ies(struct wlan_objmgr_vdev *vdev)
@@ -2487,10 +2519,10 @@ void mlme_free_peer_disconnect_ies(struct wlan_objmgr_vdev *vdev)
 
 	mlme_priv = vdev_mlme->ext_vdev_ptr;
 
-	if (mlme_priv->peer_disconnect_ies.data) {
-		qdf_mem_free(mlme_priv->peer_disconnect_ies.data);
-		mlme_priv->peer_disconnect_ies.data = NULL;
-		mlme_priv->peer_disconnect_ies.len = 0;
+	if (mlme_priv->disconnect_info.peer_discon_ies.data) {
+		qdf_mem_free(mlme_priv->disconnect_info.peer_discon_ies.data);
+		mlme_priv->disconnect_info.peer_discon_ies.data = NULL;
+		mlme_priv->disconnect_info.peer_discon_ies.len = 0;
 	}
 }
 
@@ -2507,7 +2539,61 @@ struct wlan_ies *mlme_get_peer_disconnect_ies(struct wlan_objmgr_vdev *vdev)
 
 	mlme_priv = vdev_mlme->ext_vdev_ptr;
 
-	return &mlme_priv->peer_disconnect_ies;
+	return &mlme_priv->disconnect_info.peer_discon_ies;
+}
+
+void mlme_set_discon_reason_n_from_ap(struct wlan_objmgr_psoc *psoc,
+				      uint8_t vdev_id, bool from_ap,
+				      uint32_t reason_code)
+{
+	struct wlan_objmgr_vdev *vdev;
+	struct mlme_legacy_priv *mlme_priv;
+
+	if (!psoc)
+		return;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
+						    WLAN_LEGACY_MAC_ID);
+	if (!vdev)
+		return;
+	mlme_priv = wlan_vdev_mlme_get_ext_hdl(vdev);
+	if (!mlme_priv) {
+		mlme_legacy_err("vdev legacy private object is NULL");
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_MAC_ID);
+		return;
+	}
+
+	mlme_priv->disconnect_info.from_ap = from_ap;
+	mlme_priv->disconnect_info.discon_reason = reason_code;
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_MAC_ID);
+}
+
+void mlme_get_discon_reason_n_from_ap(struct wlan_objmgr_psoc *psoc,
+				      uint8_t vdev_id, bool *from_ap,
+				      uint32_t *reason_code)
+{
+	struct wlan_objmgr_vdev *vdev;
+	struct mlme_legacy_priv *mlme_priv;
+
+	if (!psoc)
+		return;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
+						    WLAN_LEGACY_MAC_ID);
+	if (!vdev)
+		return;
+	mlme_priv = wlan_vdev_mlme_get_ext_hdl(vdev);
+	if (!mlme_priv) {
+		mlme_legacy_err("vdev legacy private object is NULL");
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_MAC_ID);
+		return;
+	}
+
+	*from_ap = mlme_priv->disconnect_info.from_ap;
+	*reason_code = mlme_priv->disconnect_info.discon_reason;
+	mlme_priv->disconnect_info.from_ap = false;
+	mlme_priv->disconnect_info.discon_reason = 0;
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_MAC_ID);
 }
 
 #if defined(WLAN_FEATURE_HOST_ROAM) || defined(WLAN_FEATURE_ROAM_OFFLOAD)
@@ -2532,10 +2618,9 @@ static void
 mlme_print_roaming_state(uint8_t vdev_id, enum roam_offload_state cur_state,
 			 enum roam_offload_state new_state)
 {
-	mlme_legacy_debug("ROAM: vdev[%d] ROAM State Changed from [%s] to [%s]",
-			  vdev_id, mlme_roam_state_to_string(cur_state),
-			  mlme_roam_state_to_string(new_state));
-
+	mlme_legacy_debug("ROAM: vdev %d: %s(%d) --> %s(%d)",
+			  vdev_id, mlme_roam_state_to_string(cur_state), cur_state,
+			  mlme_roam_state_to_string(new_state), new_state);
 	/* TODO: Try to print the state change requestor also */
 }
 

@@ -1263,6 +1263,7 @@ void wma_populate_peer_he_cap(struct peer_assoc_params *peer,
 	WMI_HEOPS_DEFPE_SET(he_ops, he_op->default_pe);
 	WMI_HEOPS_TWT_SET(he_ops, he_op->twt_required);
 	WMI_HEOPS_RTSTHLD_SET(he_ops, he_op->txop_rts_threshold);
+	WMI_HEOPS_ERSUDIS_SET(he_ops, he_op->er_su_disable);
 	WMI_HEOPS_PARTBSSCOLOR_SET(he_ops, he_op->partial_bss_col);
 	WMI_HEOPS_BSSCOLORDISABLE_SET(he_ops, he_op->bss_col_disabled);
 	peer->peer_he_ops = he_ops;
@@ -1384,6 +1385,11 @@ void wma_set_he_txbf_params(uint8_t vdev_id, bool su_bfer,
 	uint32_t hemu_mode;
 	QDF_STATUS status;
 	tp_wma_handle wma = cds_get_context(QDF_MODULE_ID_WMA);
+
+	if (!wma) {
+		wma_err("Invalid WMA handle");
+		return;
+	}
 
 	hemu_mode = DOT11AX_HEMU_MODE;
 	hemu_mode |= ((su_bfer << HE_SUBFER) | (su_bfee << HE_SUBFEE) |

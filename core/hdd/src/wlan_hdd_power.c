@@ -888,6 +888,38 @@ int wlan_hdd_ipv4_changed(struct notifier_block *nb,
 	return NOTIFY_DONE;
 }
 
+#ifdef FEATURE_RUNTIME_PM
+int wlan_hdd_pm_qos_notify(struct notifier_block *nb, unsigned long curr_val,
+			   void *context)
+{
+	struct hdd_context *hdd_ctx = container_of(nb, struct hdd_context,
+						   pm_qos_notifier);
+	void *hif_ctx = cds_get_context(QDF_MODULE_ID_HIF);
+
+	if (!hif_ctx) {
+		hdd_err("Hif context is Null");
+		return -EINVAL;
+	}
+
+	hdd_debug("PM QOS update. Current value: %ld", curr_val);
+	qdf_spin_lock_irqsave(&hdd_ctx->pm_qos_lock);
+
+	if (!hdd_ctx->runtime_pm_prevented &&
+	    curr_val != PM_QOS_CPU_DMA_LAT_DEFAULT_VALUE) {
+		hif_pm_runtime_get_noresume(hif_ctx);
+		hdd_ctx->runtime_pm_prevented = true;
+	} else if (hdd_ctx->runtime_pm_prevented &&
+		   curr_val == PM_QOS_CPU_DMA_LAT_DEFAULT_VALUE) {
+		hif_pm_runtime_put_noidle(hif_ctx);
+		hdd_ctx->runtime_pm_prevented = false;
+	}
+
+	qdf_spin_unlock_irqrestore(&hdd_ctx->pm_qos_lock);
+
+	return NOTIFY_DONE;
+}
+#endif
+
 /**
  * hdd_get_ipv4_local_interface() - get ipv4 local interafce from iface list
  * @adapter: Adapter context for which ARP offload is to be configured
@@ -927,11 +959,9 @@ void hdd_enable_arp_offload(struct hdd_adapter *adapter,
 	struct pmo_arp_req *arp_req;
 	struct in_ifaddr *ifa;
 
-	hdd_enter();
-
 	arp_req = qdf_mem_malloc(sizeof(*arp_req));
 	if (!arp_req)
-		goto out;
+		return;
 
 	arp_req->psoc = psoc;
 	arp_req->vdev_id = adapter->vdev_id;
@@ -962,9 +992,6 @@ void hdd_enable_arp_offload(struct hdd_adapter *adapter,
 
 free_req:
 	qdf_mem_free(arp_req);
-
-out:
-	hdd_exit();
 }
 
 void hdd_disable_arp_offload(struct hdd_adapter *adapter,
@@ -972,11 +999,10 @@ void hdd_disable_arp_offload(struct hdd_adapter *adapter,
 {
 	QDF_STATUS status;
 
-	hdd_enter();
 	status = ucfg_pmo_flush_arp_offload_req(adapter->vdev);
 	if (status != QDF_STATUS_SUCCESS) {
 		hdd_err("Failed to flush arp Offload");
-		goto out;
+		return;
 	}
 
 	status = ucfg_pmo_disable_arp_offload_in_fwr(adapter->vdev,
@@ -986,8 +1012,6 @@ void hdd_disable_arp_offload(struct hdd_adapter *adapter,
 			PMO_OFFLOAD_DISABLE);
 	else
 		hdd_info("fail to disable arp offload");
-out:
-	hdd_exit();
 }
 
 void hdd_enable_mc_addr_filtering(struct hdd_adapter *adapter,
@@ -996,22 +1020,18 @@ void hdd_enable_mc_addr_filtering(struct hdd_adapter *adapter,
 	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	QDF_STATUS status;
 
-	hdd_enter();
-
 	if (wlan_hdd_validate_context(hdd_ctx))
-		goto out;
+		return;
 
 	if (!hdd_adapter_is_connected_sta(adapter))
-		goto out;
+		return;
 
 	status = ucfg_pmo_enable_mc_addr_filtering_in_fwr(hdd_ctx->psoc,
 							  adapter->vdev_id,
 							  trigger);
 	if (QDF_IS_STATUS_ERROR(status))
-		hdd_err("failed to enable mc list; status:%d", status);
+		hdd_debug("failed to enable mc list; status:%d", status);
 
-out:
-	hdd_exit();
 }
 
 void hdd_disable_mc_addr_filtering(struct hdd_adapter *adapter,
@@ -1020,31 +1040,24 @@ void hdd_disable_mc_addr_filtering(struct hdd_adapter *adapter,
 	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	QDF_STATUS status;
 
-	hdd_enter();
-
 	if (wlan_hdd_validate_context(hdd_ctx))
-		goto out;
+		return;
 
 	if (!hdd_adapter_is_connected_sta(adapter))
-		goto out;
+		return;
 
 	status = ucfg_pmo_disable_mc_addr_filtering_in_fwr(hdd_ctx->psoc,
 							   adapter->vdev_id,
 							   trigger);
 	if (QDF_IS_STATUS_ERROR(status))
 		hdd_err("failed to disable mc list; status:%d", status);
-
-out:
-	hdd_exit();
 }
 
 int hdd_cache_mc_addr_list(struct pmo_mc_addr_list_params *mc_list_config)
 {
 	QDF_STATUS status;
 
-	hdd_enter();
 	status = ucfg_pmo_cache_mc_addr_list(mc_list_config);
-	hdd_exit();
 
 	return qdf_status_to_os_return(status);
 }
@@ -1055,8 +1068,6 @@ void hdd_disable_and_flush_mc_addr_list(struct hdd_adapter *adapter,
 	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	QDF_STATUS status;
 
-	hdd_enter();
-
 	if (!hdd_adapter_is_connected_sta(adapter))
 		goto flush_mc_list;
 
@@ -1065,7 +1076,7 @@ void hdd_disable_and_flush_mc_addr_list(struct hdd_adapter *adapter,
 							   adapter->vdev_id,
 							   trigger);
 	if (QDF_IS_STATUS_ERROR(status))
-		hdd_err("failed to disable mc list; status:%d", status);
+		hdd_debug("failed to disable mc list; status:%d", status);
 
 flush_mc_list:
 	status = ucfg_pmo_flush_mc_addr_list(hdd_ctx->psoc,
@@ -1073,7 +1084,6 @@ flush_mc_list:
 	if (QDF_IS_STATUS_ERROR(status))
 		hdd_debug("failed to flush mc list; status:%d", status);
 
-	hdd_exit();
 }
 
 /**
@@ -1892,8 +1902,10 @@ static int __wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 			goto resume_ol_rx;
 	}
 
-	if (hdd_ctx->enable_dp_rx_threads)
-		dp_txrx_suspend(cds_get_context(QDF_MODULE_ID_SOC));
+	if (hdd_ctx->enable_dp_rx_threads) {
+		if (dp_txrx_suspend(cds_get_context(QDF_MODULE_ID_SOC)))
+			goto resume_ol_rx;
+	}
 
 	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
 		   TRACE_CODE_HDD_CFG80211_SUSPEND_WLAN,
@@ -2287,7 +2299,7 @@ static int __wlan_hdd_cfg80211_get_txpower(struct wiphy *wiphy,
 	case QDF_SAP_MODE:
 	case QDF_P2P_GO_MODE:
 		if (!test_bit(SOFTAP_BSS_STARTED, &adapter->event_flags)) {
-			hdd_err("SAP is not started yet");
+			hdd_debug("SAP is not started yet");
 			return 0;
 		}
 		break;

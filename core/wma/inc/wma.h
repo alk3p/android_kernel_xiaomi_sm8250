@@ -1165,7 +1165,8 @@ typedef struct {
 	QDF_STATUS (*pe_disconnect_cb) (struct mac_context *mac,
 					uint8_t vdev_id,
 					uint8_t *deauth_disassoc_frame,
-					uint16_t deauth_disassoc_frame_len);
+					uint16_t deauth_disassoc_frame_len,
+					uint16_t reason_code);
 	qdf_wake_lock_t wmi_cmd_rsp_wake_lock;
 	qdf_runtime_lock_t wmi_cmd_rsp_runtime_lock;
 	qdf_runtime_lock_t sap_prevent_runtime_pm_lock;

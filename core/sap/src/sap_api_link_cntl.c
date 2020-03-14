@@ -266,9 +266,36 @@ wlansap_filter_unsafe_ch(struct wlan_objmgr_psoc *psoc,
 
 	sap_debug("Updated ACS ch list len %d", num_safe_ch);
 	sap_ctx->acs_cfg->ch_list_count = num_safe_ch;
+}
 
-	for (i = 0; i < num_safe_ch; i++)
-		sap_debug("Ch %d", sap_ctx->acs_cfg->ch_list[i]);
+static void
+wlan_sap_filter_non_preferred_channels(struct wlan_objmgr_pdev *pdev,
+				       struct sap_context *sap_ctx)
+{
+	uint16_t i;
+	uint16_t num_ch = 0;
+	bool preferred_freq_found = false;
+
+	for (i = 0; i < sap_ctx->acs_cfg->ch_list_count; i++) {
+		if (sap_ctx->acs_cfg->ch_list[i] == 12 ||
+		    sap_ctx->acs_cfg->ch_list[i] == 13 ||
+		    sap_ctx->acs_cfg->ch_list[i] == 14) {
+			sap_debug("Skip channel %d if preferred channel present",
+				  sap_ctx->acs_cfg->ch_list[i]);
+			continue;
+		}
+		sap_ctx->acs_cfg->ch_list[num_ch++] =
+						sap_ctx->acs_cfg->ch_list[i];
+		preferred_freq_found = true;
+	}
+
+	if (!preferred_freq_found) {
+		sap_debug("No preferred ch, list unchanged");
+		return;
+	}
+	sap_debug("preferred channel found updated ACS ch list len %d",
+		  num_ch);
+	sap_ctx->acs_cfg->ch_list_count = num_ch;
 }
 
 QDF_STATUS wlansap_pre_start_bss_acs_scan_callback(mac_handle_t mac_handle,
@@ -285,6 +312,8 @@ QDF_STATUS wlansap_pre_start_bss_acs_scan_callback(mac_handle_t mac_handle,
 
 	/* This has to be done before the ACS selects default channel */
 	wlansap_filter_unsafe_ch(mac_ctx->psoc, sap_ctx);
+
+	wlan_sap_filter_non_preferred_channels(mac_ctx->pdev, sap_ctx);
 
 	if (!sap_ctx->acs_cfg->ch_list_count) {
 		sap_err("No channel left for SAP operation, hotspot fail");
@@ -330,8 +359,6 @@ QDF_STATUS wlansap_pre_start_bss_acs_scan_callback(mac_handle_t mac_handle,
 	sap_config_acs_result(mac_handle, sap_ctx,
 			sap_ctx->acs_cfg->ht_sec_ch);
 
-	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-		  FL("Channel selected = %d"), sap_ctx->channel);
 	sap_ctx->sap_state = eSAP_ACS_CHANNEL_SELECTED;
 	sap_ctx->sap_status = eSAP_STATUS_SUCCESS;
 close_session:
@@ -376,9 +403,9 @@ wlansap_roam_process_ch_change_success(struct mac_context *mac_ctx,
 	 * Channel change is successful. If the new channel is a DFS channel,
 	 * then we will to perform channel availability check for 60 seconds
 	 */
-	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_MED,
-		  FL("sapdfs: changing target channel to [%d] state %d"),
-		  mac_ctx->sap.SapDfsInfo.target_channel, sap_ctx->fsm_state);
+	sap_nofl_debug("sapdfs: SAP CSA: chan to [%d] state %d",
+		       mac_ctx->sap.SapDfsInfo.target_channel,
+		       sap_ctx->fsm_state);
 	sap_ctx->channel = mac_ctx->sap.SapDfsInfo.target_channel;
 
 	/* If SAP is not in starting or started state don't proceed further */
@@ -410,8 +437,6 @@ wlansap_roam_process_ch_change_success(struct mac_context *mac_ctx,
 
 	/* check if currently selected channel is a DFS channel */
 	if (is_ch_dfs && sap_ctx->pre_cac_complete) {
-		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_MED, FL(
-		    "sapdfs: => SAP_STARTING, on pre cac"));
 		/* Start beaconing on the new pre cac channel */
 		wlansap_start_beacon_req(sap_ctx);
 		sap_ctx->fsm_state = SAP_STARTING;
@@ -428,20 +453,12 @@ wlansap_roam_process_ch_change_success(struct mac_context *mac_ctx,
 					mac_ctx->psoc,
 					sap_ctx->sessionId)) {
 			sap_ctx->fsm_state = SAP_INIT;
-			QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_MED,
-				  "%s: %d: sapdfs: => SAP_INIT with ignore cac false on sapctx[%pK]",
-				  __func__, __LINE__, sap_ctx);
 			/* DFS Channel */
 			sap_event.event = eSAP_DFS_CHANNEL_CAC_START;
 			sap_event.params = csr_roam_info;
 			sap_event.u1 = 0;
 			sap_event.u2 = 0;
 		} else {
-			QDF_TRACE(QDF_MODULE_ID_SAP,
-				  QDF_TRACE_LEVEL_INFO_MED,
-				  "%s: %d: sapdfs: SAP_STARTING with ignore cac true on sapctx[%pK]",
-				  __func__, __LINE__, sap_ctx);
-
 			/* Start beaconing on the new channel */
 			wlansap_start_beacon_req(sap_ctx);
 			sap_ctx->fsm_state = SAP_STARTING;
@@ -452,9 +469,6 @@ wlansap_roam_process_ch_change_success(struct mac_context *mac_ctx,
 			sap_event.u2 = eCSR_ROAM_RESULT_INFRA_STARTED;
 		}
 	} else {
-		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_MED,
-			  "%s: %d: sapdfs: => SAP_STARTING on sapctx[%pK]",
-			  __func__, __LINE__, sap_ctx);
 		/* non-DFS channel */
 		sap_ctx->fsm_state = SAP_STARTING;
 		mac_ctx->sap.SapDfsInfo.sap_radar_found_status = false;

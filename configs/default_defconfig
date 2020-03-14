@@ -181,6 +181,9 @@ CONFIG_WLAN_FEATURE_ACTION_OUI := y
 #Flag to enable Adaptive 11r feature
 CONFIG_ADAPTIVE_11R := y
 
+#Flag to enable sae single pmk feature
+CONFIG_SAE_SINGLE_PMK := y
+
 #Flag to enable FILS Feature (11ai)
 CONFIG_WLAN_FEATURE_FILS := y
 ifneq ($(CONFIG_QCA_CLD_WLAN),)
@@ -360,6 +363,9 @@ ifeq ($(CONFIG_LITHIUM), y)
 # Enable VERBOSE debug INI mechanism
 #
 CONFIG_VERBOSE_DEBUG := y
+ifeq ($(CONFIG_PCI_MSM), y)
+	CONFIG_FEATURE_HAL_DELAYED_REG_WRITE := y
+endif
 endif
 
 CONFIG_QCA_WIFI_QCA8074 := y
@@ -516,6 +522,15 @@ CONFIG_ATH_SUPPORT_SPECTRAL := n
 ifeq ($(CONFIG_REMOVE_PKT_LOG), n)
 ifeq ($(CONFIG_HELIUMPLUS), y)
 CONFIG_PKTLOG_LEGACY := y
+endif
+
+#Customize DSCP_to-UP map based on RFC8325
+ifeq ($(CONFIG_HELIUMPLUS), y)
+CONFIG_WLAN_CUSTOM_DSCP_UP_MAP := y
+CONFIG_WLAN_SEND_DSCP_UP_MAP_TO_FW := y
+endif
+ifeq ($(CONFIG_LITHIUM), y)
+CONFIG_WLAN_CUSTOM_DSCP_UP_MAP := y
 endif
 
 ifeq ($(CONFIG_ROME_IF), sdio)

@@ -260,6 +260,27 @@ wma_roam_stats_event_handler(WMA_HANDLE handle, uint8_t *event,
 }
 #endif
 
+#ifdef WLAN_FEATURE_ROAM_OFFLOAD
+/**
+ * wma_roam_scan_chan_list_event_handler() - roam scan chan list event handler
+ * @handle: wma handle
+ * @event: pointer to fw event
+ * @len: length of event
+ *
+ * Return: Success or Failure status
+ */
+int wma_roam_scan_chan_list_event_handler(WMA_HANDLE handle,
+					  uint8_t *event,
+					  uint32_t len);
+#else
+static inline int
+wma_roam_scan_chan_list_event_handler(WMA_HANDLE handle, uint8_t *event,
+				      uint32_t len)
+{
+	return 0;
+}
+#endif
+
 /**
  * wma_update_per_roam_config() -per roam config parameter updation to FW
  * @handle: wma handle

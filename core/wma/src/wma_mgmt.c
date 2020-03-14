@@ -372,9 +372,10 @@ int wma_peer_sta_kickout_event_handler(void *handle, uint8_t *event,
 		return -EINVAL;
 	}
 
-	WMA_LOGA("%s: PEER:[%pM], ADDR:[%pN], INTERFACE:%d, peer_id:%d, reason:%d",
-		__func__, macaddr, wma->interfaces[vdev_id].addr, vdev_id,
-		 peer_id, kickout_event->reason);
+	wma_nofl_info("STA kickout for %pM, on mac %pM, vdev %d, reason:%d",
+		      macaddr, wma->interfaces[vdev_id].addr, vdev_id,
+		      kickout_event->reason);
+
 	if (wma->interfaces[vdev_id].roaming_in_progress) {
 		WMA_LOGE("Ignore STA kick out since roaming is in progress");
 		return -EINVAL;
@@ -415,32 +416,6 @@ int wma_peer_sta_kickout_event_handler(void *handle, uint8_t *event,
 			     (void *)del_sta_ctx, 0);
 		goto exit_handler;
 #endif /* FEATURE_WLAN_TDLS */
-	case WMI_PEER_STA_KICKOUT_REASON_XRETRY:
-		if (wma->interfaces[vdev_id].type == WMI_VDEV_TYPE_STA &&
-		    (wma->interfaces[vdev_id].sub_type == 0 ||
-		     wma->interfaces[vdev_id].sub_type ==
-		     WMI_UNIFIED_VDEV_SUBTYPE_P2P_CLIENT) &&
-		    !qdf_mem_cmp(wma->interfaces[vdev_id].bssid,
-				    macaddr, QDF_MAC_ADDR_SIZE)) {
-			wma_sta_kickout_event(HOST_STA_KICKOUT_REASON_XRETRY,
-							vdev_id, macaddr);
-			/*
-			 * KICKOUT event is for current station-AP connection.
-			 * Treat it like final beacon miss. Station may not have
-			 * missed beacons but not able to transmit frames to AP
-			 * for a long time. Must disconnect to get out of
-			 * this sticky situation.
-			 * In future implementation, roaming module will also
-			 * handle this event and perform a scan.
-			 */
-			WMA_LOGW("%s: WMI_PEER_STA_KICKOUT_REASON_XRETRY event for STA",
-				__func__);
-			wma_beacon_miss_handler(wma, vdev_id,
-						kickout_event->rssi);
-			goto exit_handler;
-		}
-		break;
-
 	case WMI_PEER_STA_KICKOUT_REASON_UNSPECIFIED:
 		/*
 		 * Default legacy value used by original firmware implementation
@@ -470,6 +445,7 @@ int wma_peer_sta_kickout_event_handler(void *handle, uint8_t *event,
 		}
 		break;
 
+	case WMI_PEER_STA_KICKOUT_REASON_XRETRY:
 	case WMI_PEER_STA_KICKOUT_REASON_INACTIVITY:
 	/*
 	 * Handle SA query kickout is same as inactivity kickout.
@@ -496,15 +472,22 @@ int wma_peer_sta_kickout_event_handler(void *handle, uint8_t *event,
 	qdf_mem_copy(del_sta_ctx->addr2, macaddr, QDF_MAC_ADDR_SIZE);
 	qdf_mem_copy(del_sta_ctx->bssId, wma->interfaces[vdev_id].addr,
 		     QDF_MAC_ADDR_SIZE);
-	del_sta_ctx->reasonCode = HAL_DEL_STA_REASON_CODE_KEEP_ALIVE;
+	if (kickout_event->reason ==
+		WMI_PEER_STA_KICKOUT_REASON_SA_QUERY_TIMEOUT)
+		del_sta_ctx->reasonCode =
+			HAL_DEL_STA_REASON_CODE_SA_QUERY_TIMEOUT;
+	else if (kickout_event->reason == WMI_PEER_STA_KICKOUT_REASON_XRETRY)
+		del_sta_ctx->reasonCode = HAL_DEL_STA_REASON_CODE_XRETRY;
+	else
+		del_sta_ctx->reasonCode = HAL_DEL_STA_REASON_CODE_KEEP_ALIVE;
+
 	if (wmi_service_enabled(wma->wmi_handle,
 				wmi_service_hw_db2dbm_support))
 		del_sta_ctx->rssi = kickout_event->rssi;
 	else
 		del_sta_ctx->rssi = kickout_event->rssi +
 					WMA_TGT_NOISE_FLOOR_DBM;
-	wma_sta_kickout_event(HOST_STA_KICKOUT_REASON_KEEP_ALIVE,
-							vdev_id, macaddr);
+	wma_sta_kickout_event(del_sta_ctx->reasonCode, vdev_id, macaddr);
 	wma_send_msg(wma, SIR_LIM_DELETE_STA_CONTEXT_IND, (void *)del_sta_ctx,
 		     0);
 	wma_lost_link_info_handler(wma, vdev_id, del_sta_ctx->rssi);
@@ -1565,10 +1548,8 @@ QDF_STATUS wma_send_peer_assoc(tp_wma_handle wma,
 	    || params->encryptType == eSIR_ED_WPI
 #endif /* FEATURE_WLAN_WAPI */
 	    ) {
-		if (!params->no_ptk_4_way) {
+		if (!params->no_ptk_4_way)
 			cmd->peer_flags |= WMI_PEER_NEED_PTK_4_WAY;
-			wma_nofl_debug("no ptk 4 way %d", params->no_ptk_4_way);
-		}
 		wma_nofl_debug("Acquire set key wake lock for %d ms",
 			       WMA_VDEV_SET_KEY_WAKELOCK_TIMEOUT);
 		wma_acquire_wakelock(&intr->vdev_set_key_wakelock,
@@ -1634,8 +1615,6 @@ QDF_STATUS wma_send_peer_assoc(tp_wma_handle wma,
 		wma_nofl_debug("Num tx_streams: %d, Disabled txSTBC",
 			       intr->tx_streams);
 	}
-	wma_nofl_debug("peer_nss %d peer_ht_rates.num_rates %d ", cmd->peer_nss,
-		       peer_ht_rates.num_rates);
 
 	cmd->vht_capable = params->vhtCapable;
 	if (params->vhtCapable) {
@@ -1659,9 +1638,9 @@ QDF_STATUS wma_send_peer_assoc(tp_wma_handle wma,
 		}
 	}
 
-	wma_debug("rx_max_rate: %d, rx_mcs: %x, tx_max_rate: %d, tx_mcs: %x",
+	wma_debug("rx_max_rate %d, rx_mcs %x, tx_max_rate %d, tx_mcs: %x num rates %d",
 		  cmd->rx_max_rate, cmd->rx_mcs_set, cmd->tx_max_rate,
-		  cmd->tx_mcs_set);
+		  cmd->tx_mcs_set, peer_ht_rates.num_rates);
 
 	/*
 	 * Limit nss to max number of rf chain supported by target
@@ -1674,16 +1653,6 @@ QDF_STATUS wma_send_peer_assoc(tp_wma_handle wma,
 
 	intr->nss = cmd->peer_nss;
 	cmd->peer_phymode = phymode;
-	wma_debug("vdev_id %d associd %d peer_flags %x rate_caps %x peer_caps %x",
-		  cmd->vdev_id, cmd->peer_associd, cmd->peer_flags,
-		  cmd->peer_rate_caps, cmd->peer_caps);
-	wma_debug("listen_intval %d ht_caps %x max_mpdu %d nss %d phymode %d",
-		  cmd->peer_listen_intval, cmd->peer_ht_caps,
-		  cmd->peer_max_mpdu, cmd->peer_nss, cmd->peer_phymode);
-	wma_debug("peer_mpdu_density %d encr_type %d cmd->peer_vht_caps %x",
-		  cmd->peer_mpdu_density, params->encryptType,
-		  cmd->peer_vht_caps);
-
 	status = wmi_unified_peer_assoc_send(wma->wmi_handle,
 					 cmd);
 	if (QDF_IS_STATUS_ERROR(status))
@@ -2990,7 +2959,6 @@ static QDF_STATUS wma_store_bcn_tmpl(tp_wma_handle wma, uint8_t vdev_id,
 			 SIR_MAX_BEACON_SIZE - sizeof(uint32_t)));
 		return QDF_STATUS_E_INVAL;
 	}
-	wma_nofl_debug("Storing received beacon template buf to local buffer");
 	qdf_spin_lock_bh(&bcn->lock);
 
 	/*
@@ -3220,7 +3188,6 @@ void wma_send_beacon(tp_wma_handle wma, tpSendbeaconParams bcn_info)
 
 	if (wmi_service_enabled(wma->wmi_handle,
 				   wmi_service_beacon_offload)) {
-		wma_nofl_debug("Beacon Offload Enabled Sending Unified command");
 		status = wma_unified_bcn_tmpl_send(wma, vdev_id, bcn_info, 4);
 		if (QDF_IS_STATUS_ERROR(status)) {
 			WMA_LOGE("%s : wmi_unified_bcn_tmpl_send Failed ",
@@ -4673,7 +4640,8 @@ QDF_STATUS wma_register_roaming_callbacks(
 	QDF_STATUS (*pe_disconnect_cb) (struct mac_context *mac,
 					uint8_t vdev_id,
 					uint8_t *deauth_disassoc_frame,
-					uint16_t deauth_disassoc_frame_len))
+					uint16_t deauth_disassoc_frame_len,
+					uint16_t reason_code))
 {
 
 	tp_wma_handle wma = cds_get_context(QDF_MODULE_ID_WMA);

@@ -962,9 +962,7 @@ static void wma_process_cli_set_cmd(tp_wma_handle wma,
 	struct target_psoc_info *tgt_hdl;
 	struct sir_set_tx_rx_aggregation_size aggr;
 
-	WMA_LOGD("wmihandle %pK", wma->wmi_handle);
 	qdf_mem_zero(&aggr, sizeof(aggr));
-
 	if (!mac) {
 		WMA_LOGE("%s: Failed to get mac", __func__);
 		return;
@@ -3692,6 +3690,10 @@ QDF_STATUS wma_open(struct wlan_objmgr_psoc *psoc,
 					   wmi_roam_stats_event_id,
 					   wma_roam_stats_event_handler,
 					   WMA_RX_SERIALIZER_CTX);
+	wmi_unified_register_event_handler(
+		wma_handle->wmi_handle, wmi_roam_scan_chan_list_id,
+		wma_roam_scan_chan_list_event_handler,
+		WMA_RX_SERIALIZER_CTX);
 #endif /* WLAN_FEATURE_ROAM_OFFLOAD */
 	wmi_unified_register_event_handler(wma_handle->wmi_handle,
 				wmi_rssi_breach_event_id,
@@ -5095,6 +5097,9 @@ static inline void wma_update_target_services(struct wmi_unified *wmi_handle,
 
 	if (wmi_service_enabled(wmi_handle, wmi_service_vdev_latency_config))
 		g_fw_wlan_feat_caps |= (1 << VDEV_LATENCY_CONFIG);
+	if (wmi_service_enabled(wmi_handle,
+				wmi_roam_scan_chan_list_to_host_support))
+		cfg->is_roam_scan_ch_to_host = true;
 }
 
 /**
@@ -5667,6 +5672,9 @@ static void wma_update_nan_target_caps(tp_wma_handle wma_handle,
 	if (wmi_service_enabled(wma_handle->wmi_handle,
 				wmi_service_ndi_sap_support))
 		tgt_cfg->nan_caps.ndi_sap_supported = 1;
+
+	if (wmi_service_enabled(wma_handle->wmi_handle, wmi_service_nan_vdev))
+		tgt_cfg->nan_caps.nan_vdev_allowed = 1;
 }
 #else
 static void wma_update_nan_target_caps(tp_wma_handle wma_handle,
@@ -5750,8 +5758,10 @@ wma_is_dbs_mandatory(struct wlan_objmgr_psoc *psoc,
 	uint8_t supported_band = 0;
 
 	if (!policy_mgr_find_if_fw_supports_dbs(psoc) ||
-	    !policy_mgr_find_if_hwlist_has_dbs(psoc))
+	    !policy_mgr_find_if_hwlist_has_dbs(psoc)) {
+		wma_debug("DBS is not mandatory");
 		return false;
+	}
 
 	total_mac_phy_cnt = target_psoc_get_total_mac_phy_cnt(tgt_hdl);
 	mac_phy_cap = target_psoc_get_mac_phy_cap(tgt_hdl);
@@ -5805,6 +5815,10 @@ static int wma_update_hdd_cfg(tp_wma_handle wma_handle)
 		WMA_LOGE("%s: wlan_res_cfg is null", __func__);
 		return -EINVAL;
 	}
+
+	wlan_res_cfg->nan_separate_iface_support =
+		ucfg_nan_is_vdev_creation_allowed(wma_handle->psoc) &&
+		ucfg_nan_get_is_separate_nan_iface(wma_handle->psoc);
 
 	service_ext_param =
 			target_psoc_get_service_ext_param(tgt_hdl);
@@ -9344,6 +9358,9 @@ static QDF_STATUS wma_mc_process_msg(struct scheduler_msg *msg)
 		wma_update_roam_offload_flag(wma_handle, msg->bodyptr);
 		qdf_mem_free(msg->bodyptr);
 		break;
+	case WMA_ROAM_SCAN_CH_REQ:
+		wma_get_roam_scan_ch(wma_handle->wmi_handle, msg->bodyval);
+		break;
 	default:
 		WMA_LOGD("Unhandled WMA message of type %d", msg->type);
 		if (msg->bodyptr)
@@ -9462,15 +9479,16 @@ QDF_STATUS wma_send_pdev_set_pcl_cmd(tp_wma_handle wma_handle,
 		    WLAN_REG_IS_5GHZ_CH(msg->chan_weights.saved_chan_list[i]))
 			msg->chan_weights.weighed_valid_list[i] =
 				WEIGHT_OF_DISALLOWED_CHANNELS;
-		WMA_LOGD("%s: chan:%d weight[%d]=%d", __func__,
-			 msg->chan_weights.saved_chan_list[i], i,
-			 msg->chan_weights.weighed_valid_list[i]);
 	}
 
 	if (!QDF_IS_STATUS_SUCCESS(status)) {
 		WMA_LOGE("%s: Error in creating weighed pcl", __func__);
 		return status;
 	}
+	wma_debug("Dump channel list send to wmi");
+	policy_mgr_dump_channel_list(msg->chan_weights.saved_num_chan,
+				     msg->chan_weights.saved_chan_list,
+				     msg->chan_weights.weighed_valid_list);
 
 	if (wmi_unified_pdev_set_pcl_cmd(wma_handle->wmi_handle,
 					 &msg->chan_weights))

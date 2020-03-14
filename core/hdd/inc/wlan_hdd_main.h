@@ -921,6 +921,7 @@ enum dhcp_nego_status {
  * @tx_retry_fw: the number of retried frames from firmware to remote station
  * @tx_retry_exhaust_fw: the number of frames retried but finally failed from
  *                    firmware to remote station
+ * @assoc_req_ies: Assoc request IEs of the peer station
  */
 struct hdd_station_info {
 	bool in_use;
@@ -977,6 +978,7 @@ struct hdd_station_info {
 	uint32_t tx_total_fw;
 	uint32_t tx_retry_fw;
 	uint32_t tx_retry_exhaust_fw;
+	struct wlan_ies assoc_req_ies;
 };
 
 /**
@@ -1139,6 +1141,8 @@ struct hdd_context;
  * @event_flags: a bitmap of hdd_adapter_flags
  * @latency_level: 0 - normal, 1 - moderate, 2 - low, 3 - ultralow
  * @acs_complete_event: acs complete event
+ * @last_disconnect_reason: Last disconnected internal reason code
+ *                          as per enum qca_disconnect_reason_codes
  */
 struct hdd_adapter {
 	/* Magic cookie for adapter sanity verification.  Note that this
@@ -1389,6 +1393,7 @@ struct hdd_adapter {
 #ifdef WLAN_FEATURE_MOTION_DETECTION
 	bool motion_detection_mode;
 #endif /* WLAN_FEATURE_MOTION_DETECTION */
+	enum qca_disconnect_reason_codes last_disconnect_reason;
 };
 
 #define WLAN_HDD_GET_STATION_CTX_PTR(adapter) (&(adapter)->session.station)
@@ -1809,6 +1814,11 @@ struct hdd_context {
 	/* IPv4 notifier callback for handling ARP offload on change in IP */
 	struct notifier_block ipv4_notifier;
 
+#ifdef FEATURE_RUNTIME_PM
+	struct notifier_block pm_qos_notifier;
+	bool runtime_pm_prevented;
+	qdf_spinlock_t pm_qos_lock;
+#endif
 	/* number of rf chains supported by target */
 	uint32_t  num_rf_chains;
 	/* Is htTxSTBC supported by target */
@@ -1951,6 +1961,7 @@ struct hdd_context {
 #endif
 	qdf_time_t runtime_resume_start_time_stamp;
 	qdf_time_t runtime_suspend_done_time_stamp;
+	bool roam_ch_from_fw_supported;
 };
 
 /**

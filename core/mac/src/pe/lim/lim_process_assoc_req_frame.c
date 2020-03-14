@@ -2172,11 +2172,11 @@ void lim_process_assoc_req_frame(struct mac_context *mac_ctx, uint8_t *rx_pkt_in
 	hdr = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
 	frame_len = WMA_GET_RX_PAYLOAD_LEN(rx_pkt_info);
 
-	pe_debug("Rcvd: %s Req Frame sessionid: %d systemrole: %d MlmState: %d from: "
-		   QDF_MAC_ADDR_STR,
-		(LIM_ASSOC == sub_type) ? "Assoc" : "ReAssoc",
-		session->peSessionId, GET_LIM_SYSTEM_ROLE(session),
-		session->limMlmState, QDF_MAC_ADDR_ARRAY(hdr->sa));
+	pe_nofl_debug("Assoc req RX: subtype %d vdev %d sys role %d lim state %d rssi %d from " QDF_MAC_ADDR_STR,
+		      sub_type, session->vdev_id, GET_LIM_SYSTEM_ROLE(session),
+		      session->limMlmState,
+		      WMA_GET_RX_RSSI_NORMALIZED(rx_pkt_info),
+		      QDF_MAC_ADDR_ARRAY(hdr->sa));
 
 	if (LIM_IS_STA_ROLE(session)) {
 		pe_err("Rcvd unexpected ASSOC REQ, sessionid: %d sys sub_type: %d for role: %d from: "
@@ -2797,8 +2797,14 @@ bool lim_fill_lim_assoc_ind_params(
 		assoc_ind->ecsa_capable =
 		((struct s_ext_cap *)assoc_req->ExtCap.bytes)->ext_chan_switch;
 	/* updates VHT information in assoc indication */
-	 qdf_mem_copy(&assoc_ind->vht_caps, &assoc_req->VHTCaps,
-		      sizeof(tDot11fIEVHTCaps));
+	if (assoc_req->VHTCaps.present)
+		qdf_mem_copy(&assoc_ind->vht_caps, &assoc_req->VHTCaps,
+			     sizeof(tDot11fIEVHTCaps));
+	else if (assoc_req->vendor_vht_ie.VHTCaps.present)
+		qdf_mem_copy(&assoc_ind->vht_caps,
+			     &assoc_req->vendor_vht_ie.VHTCaps,
+			     sizeof(tDot11fIEVHTCaps));
+
 	lim_fill_assoc_ind_vht_info(mac_ctx, session_entry, assoc_req,
 				    assoc_ind, sta_ds);
 	assoc_ind->he_caps_present = assoc_req->he_cap.present;
