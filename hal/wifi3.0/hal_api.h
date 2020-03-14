@@ -70,6 +70,30 @@ hal_set_verbose_debug(bool flag)
 #define HAL_STATS_INC(_handle, _field, _delta)
 #endif
 
+#ifdef ENABLE_HAL_REG_WR_HISTORY
+#define HAL_REG_WRITE_FAIL_HIST_ADD(hal_soc, offset, wr_val, rd_val) \
+	hal_reg_wr_fail_history_add(hal_soc, offset, wr_val, rd_val)
+
+void hal_reg_wr_fail_history_add(struct hal_soc *hal_soc,
+				 uint32_t offset,
+				 uint32_t wr_val,
+				 uint32_t rd_val);
+
+static inline int hal_history_get_next_index(qdf_atomic_t *table_index,
+					     int array_size)
+{
+	int record_index = qdf_atomic_inc_return(table_index);
+
+	return record_index & (array_size - 1);
+}
+#else
+#define HAL_REG_WRITE_FAIL_HIST_ADD(hal_soc, offset, wr_val, rd_val) \
+	hal_err("write failed at reg offset 0x%x, write 0x%x read 0x%x\n", \
+		offset,	\
+		wr_val,	\
+		rd_val)
+#endif
+
 /**
  * hal_reg_write_result_check() - check register writing result
  * @hal_soc: HAL soc handle
@@ -86,14 +110,8 @@ static inline void hal_reg_write_result_check(struct hal_soc *hal_soc,
 
 	value = qdf_ioread32(hal_soc->dev_base_addr + offset);
 	if (exp_val != value) {
-		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO_HIGH,
-			  "register offset 0x%x write failed!\n", offset);
-		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO_HIGH,
-			  "the expectation 0x%x, actual value 0x%x\n",
-			  exp_val,
-			  value);
+		HAL_REG_WRITE_FAIL_HIST_ADD(hal_soc, offset, exp_val, value);
 		HAL_STATS_INC(hal_soc, reg_write_fail, 1);
-		QDF_BUG(0);
 	}
 }
 
@@ -345,7 +363,46 @@ static inline void hal_write_address_32_mb(struct hal_soc *hal_soc,
 	hal_write32_mb(hal_soc, offset, value);
 }
 
+#if defined(FEATURE_HAL_DELAYED_WRITE)
+static inline void hal_srng_write_address_32_mb(struct hal_soc *hal_soc,
+						struct hal_srng *srng,
+						void __iomem *addr,
+						uint32_t value)
+{
+	hal_delayed_reg_write(hal_soc, srng, addr, value);
+}
+#else
+static inline void hal_srng_write_address_32_mb(struct hal_soc *hal_soc,
+						struct hal_srng *srng,
+						void __iomem *addr,
+						uint32_t value)
+{
+	hal_write_address_32_mb(hal_soc, addr, value);
+}
+#endif
+
 #ifndef QCA_WIFI_QCA6390
+/**
+ * hal_read32_mb() - Access registers to read configuration
+ * @hal_soc: hal soc handle
+ * @offset: offset address from the BAR
+ * @value: value to write
+ *
+ * Description: Register address space is split below:
+ *     SHADOW REGION       UNWINDOWED REGION    WINDOWED REGION
+ *  |--------------------|-------------------|------------------|
+ * BAR  NO FORCE WAKE  BAR+4K  FORCE WAKE  BAR+512K  FORCE WAKE
+ *
+ * 1. Any access to the shadow region, doesn't need force wake
+ *    and windowing logic to access.
+ * 2. Any access beyond BAR + 4K:
+ *    If init_phase enabled, no force wake is needed and access
+ *    should be based on windowed or unwindowed access.
+ *    If init_phase disabled, force wake is needed and access
+ *    should be based on windowed or unwindowed access.
+ *
+ * Return: < 0 for failure/>= 0 for success
+ */
 static inline uint32_t hal_read32_mb(struct hal_soc *hal_soc, uint32_t offset)
 {
 	uint32_t ret;
@@ -417,8 +474,41 @@ static inline uint32_t hal_read32_mb(struct hal_soc *hal_soc, uint32_t offset)
 	return ret;
 }
 
-static inline uint32_t hal_read_address_32_mb(struct hal_soc *soc,
-					      void __iomem *addr)
+#ifdef FEATURE_HAL_DELAYED_REG_WRITE
+/**
+ * hal_dump_reg_write_srng_stats() - dump SRNG reg write stats
+ * @hal_soc: HAL soc handle
+ *
+ * Return: none
+ */
+void hal_dump_reg_write_srng_stats(struct hal_soc *hal_soc_hdl);
+
+/**
+ * hal_dump_reg_write_stats() - dump reg write stats
+ * @hal_soc: HAL soc handle
+ *
+ * Return: none
+ */
+void hal_dump_reg_write_stats(struct hal_soc *hal_soc_hdl);
+#else
+static inline void hal_dump_reg_write_srng_stats(struct hal_soc *hal_soc_hdl)
+{
+}
+
+static inline void hal_dump_reg_write_stats(struct hal_soc *hal_soc_hdl)
+{
+}
+#endif
+
+/**
+ * hal_read_address_32_mb() - Read 32-bit value from the register
+ * @soc: soc handle
+ * @addr: register address to read
+ *
+ * Return: 32-bit value
+ */
+static inline
+uint32_t hal_read_address_32_mb(struct hal_soc *soc, void __iomem *addr)
 {
 	uint32_t offset;
 	uint32_t ret;
@@ -1244,13 +1334,15 @@ static inline void hal_srng_access_end_unlocked(void *hal_soc, void *hal_ring)
 		}
 	} else {
 		if (srng->ring_dir == HAL_SRNG_SRC_RING)
-			hal_write_address_32_mb(hal_soc,
-				srng->u.src_ring.hp_addr,
-				srng->u.src_ring.hp);
+			hal_srng_write_address_32_mb(hal_soc,
+						     srng,
+						     srng->u.src_ring.hp_addr,
+						     srng->u.src_ring.hp);
 		else
-			hal_write_address_32_mb(hal_soc,
-				srng->u.dst_ring.tp_addr,
-				srng->u.dst_ring.tp);
+			hal_srng_write_address_32_mb(hal_soc,
+						     srng,
+						     srng->u.dst_ring.tp_addr,
+						     srng->u.dst_ring.tp);
 	}
 }
 

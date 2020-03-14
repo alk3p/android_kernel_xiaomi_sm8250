@@ -2023,6 +2023,12 @@ QDF_STATUS (*extract_get_elna_bypass_resp)(wmi_unified_t wmi_handle,
 					 void *resp_buf,
 					 struct get_elna_bypass_response *resp);
 #endif /* WLAN_FEATURE_ELNA */
+#ifdef WLAN_SEND_DSCP_UP_MAP_TO_FW
+QDF_STATUS (*send_dscp_tid_map_cmd)(wmi_unified_t wmi_handle,
+				    uint32_t *dscp_to_tid_map);
+#endif
+QDF_STATUS (*send_roam_scan_ch_list_req_cmd)(wmi_unified_t wmi_hdl,
+					     uint32_t vdev_id);
 };
 
 /* Forward declartion for psoc*/
