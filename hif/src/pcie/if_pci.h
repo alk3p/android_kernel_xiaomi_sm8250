@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -28,6 +28,7 @@
 #include "hif.h"
 #include "cepci.h"
 #include "ce_main.h"
+#include <qdf_threads.h>
 
 #ifdef QCA_HIF_HIA_EXTND
 extern int32_t frac, intval, ar900b_20_targ_clk, qca9888_20_targ_clk;

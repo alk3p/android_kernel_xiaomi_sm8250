@@ -2105,6 +2105,7 @@ static QDF_STATUS dp_soc_interrupt_attach(void *txrx_soc)
 	}
 
 	hif_configure_ext_group_interrupts(soc->hif_handle);
+	hif_config_irq_set_perf_affinity_hint(soc->hif_handle);
 
 	return QDF_STATUS_SUCCESS;
 }
