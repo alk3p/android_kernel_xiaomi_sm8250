@@ -6091,7 +6091,6 @@ void dp_peer_unref_delete(void *peer_handle)
 #ifdef PEER_CACHE_RX_PKTS
 static inline void dp_peer_rx_bufq_resources_deinit(struct dp_peer *peer)
 {
-	dp_rx_flush_rx_cached(peer, true);
 	qdf_list_destroy(&peer->bufq_info.cached_bufq);
 	qdf_spinlock_destroy(&peer->bufq_info.bufq_lock);
 }
@@ -6110,6 +6109,7 @@ static inline void dp_peer_rx_bufq_resources_deinit(struct dp_peer *peer)
 static void dp_peer_delete_wifi3(void *peer_handle, uint32_t bitmap)
 {
 	struct dp_peer *peer = (struct dp_peer *)peer_handle;
+	struct dp_soc *soc = peer->vdev->pdev->soc;
 
 	/* redirect the peer's rx delivery function to point to a
 	 * discard func
@@ -6137,6 +6137,9 @@ static void dp_peer_delete_wifi3(void *peer_handle, uint32_t bitmap)
 		FL("peer %pK (%pM)"),  peer, peer->mac_addr.raw);
 
 	dp_local_peer_id_free(peer->vdev->pdev, peer);
+
+	/* Drop all rx packets before deleting peer */
+	dp_clear_peer_internal(soc, peer);
 
 	dp_peer_rx_bufq_resources_deinit(peer);
 
