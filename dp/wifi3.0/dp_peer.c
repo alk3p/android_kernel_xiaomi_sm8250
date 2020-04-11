@@ -1713,6 +1713,7 @@ static void dp_reo_desc_free(struct dp_soc *soc, void *cb_ctxt,
 	struct reo_desc_list_node *freedesc =
 		(struct reo_desc_list_node *)cb_ctxt;
 	struct dp_rx_tid *rx_tid = &freedesc->rx_tid;
+	unsigned long curr_ts = qdf_get_system_timestamp();
 
 	if ((reo_status->fl_cache_status.header.status !=
 		HAL_REO_CMD_SUCCESS) &&
@@ -1725,7 +1726,8 @@ static void dp_reo_desc_free(struct dp_soc *soc, void *cb_ctxt,
 			  freedesc->rx_tid.tid);
 	}
 	QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO_HIGH,
-		  "%s: hw_qdesc_paddr: %pK, tid:%d", __func__,
+		  "%s:%lu hw_qdesc_paddr: %pK, tid:%d", __func__,
+		  curr_ts,
 		  (void *)(rx_tid->hw_qdesc_paddr), rx_tid->tid);
 	qdf_mem_unmap_nbytes_single(soc->osdev,
 		rx_tid->hw_qdesc_paddr,
@@ -2039,6 +2041,7 @@ void dp_rx_tid_delete_cb(struct dp_soc *soc, void *cb_ctxt,
 		qdf_mem_zero(reo_status, sizeof(*reo_status));
 		reo_status->fl_cache_status.header.status = HAL_REO_CMD_DRAIN;
 		dp_reo_desc_free(soc, (void *)freedesc, reo_status);
+		DP_STATS_INC(soc, rx.err.reo_cmd_send_drain, 1);
 		return;
 	} else if (reo_status->rx_queue_status.header.status !=
 		HAL_REO_CMD_SUCCESS) {
@@ -2059,6 +2062,20 @@ void dp_rx_tid_delete_cb(struct dp_soc *soc, void *cb_ctxt,
 	freedesc->free_ts = curr_ts;
 	qdf_list_insert_back_size(&soc->reo_desc_freelist,
 		(qdf_list_node_t *)freedesc, &list_size);
+
+#ifdef REO_DESC_DEFER_FREE
+	/* MCL path add the desc back to reo_desc_freelist when REO FLUSH
+	 * failed. it may cause the number of REO queue pending  in free
+	 * list is even larger than REO_CMD_RING max size and lead REO CMD
+	 * flood then cause REO HW in an unexpected condition. So it's
+	 * needed to limit the number REO cmds in a batch operation.
+	 */
+	if (list_size > REO_DESC_FREELIST_SIZE) {
+	    dp_err_log("%lu:freedesc number %d in freelist", curr_ts, list_size);
+	    /* limit the batch queue size */
+	    list_size = REO_DESC_FREELIST_SIZE;
+	}
+#endif
 
 	while ((qdf_list_peek_front(&soc->reo_desc_freelist,
 		(qdf_list_node_t **)&desc) == QDF_STATUS_SUCCESS) &&
@@ -2626,6 +2643,29 @@ int dp_addba_requestprocess_wifi3(void *peer_handle,
 		qdf_spin_unlock_bh(&rx_tid->tid_lock);
 		return QDF_STATUS_E_FAILURE;
 	}
+
+	if (rx_tid->rx_ba_win_size_override == 1) {
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO,
+			  "%s disable BA session by refuse addba req",
+			  __func__);
+
+		buffersize = 1;
+		rx_tid->userstatuscode = IEEE80211_STATUS_REFUSED;
+	} else if (rx_tid->rx_ba_win_size_override) {
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO,
+			  "%s override BA win to %d", __func__,
+			    rx_tid->rx_ba_win_size_override);
+
+		buffersize = rx_tid->rx_ba_win_size_override;
+		rx_tid->userstatuscode = IEEE80211_STATUS_SUCCESS;
+	} else {
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO,
+			  "%s restore BA win %d based on addba req",
+			  __func__, buffersize);
+
+		rx_tid->userstatuscode = IEEE80211_STATUS_SUCCESS;
+	}
+
 	dp_check_ba_buffersize(peer, tid, buffersize);
 
 	if (dp_rx_tid_setup_wifi3(peer, tid,
@@ -2984,6 +3024,65 @@ dp_rx_sec_ind_handler(void *soc_handle, uint16_t peer_id,
 	dp_peer_unref_del_find_by_id(peer);
 }
 
+QDF_STATUS
+dp_rx_delba_ind_handler(void *soc_handle, uint16_t peer_id,
+			uint8_t tid, uint16_t win_sz)
+{
+	struct dp_soc *soc = (struct dp_soc *)soc_handle;
+	struct dp_peer *peer;
+	struct dp_rx_tid *rx_tid;
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+
+	peer = dp_peer_find_by_id(soc, peer_id);
+
+	if (!peer) {
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+			  "Couldn't find peer from ID %d",
+			  peer_id);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	qdf_assert_always(tid < DP_MAX_TIDS);
+
+	rx_tid = &peer->rx_tid[tid];
+
+	if (rx_tid->hw_qdesc_vaddr_unaligned) {
+		if (!rx_tid->delba_tx_status) {
+			QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO,
+				  "%s: PEER_ID: %d TID: %d, BA win: %d ",
+				  __func__, peer_id, tid, win_sz);
+
+			qdf_spin_lock_bh(&rx_tid->tid_lock);
+
+			rx_tid->delba_tx_status = 1;
+
+			rx_tid->rx_ba_win_size_override =
+			    qdf_min((uint16_t)63, win_sz);
+
+			rx_tid->delba_rcode =
+			    IEEE80211_REASON_QOS_SETUP_REQUIRED;
+
+			qdf_spin_unlock_bh(&rx_tid->tid_lock);
+
+			if (soc->cdp_soc.ol_ops->send_delba)
+				soc->cdp_soc.ol_ops->send_delba(
+					peer->vdev->pdev->ctrl_pdev,
+					peer->ctrl_peer,
+					peer->mac_addr.raw,
+					tid,
+					peer->vdev->ctrl_vdev,
+					rx_tid->delba_rcode);
+		}
+	} else {
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+			  "BA session is not setup for TID:%d ", tid);
+		status = QDF_STATUS_E_FAILURE;
+	}
+
+	dp_peer_unref_del_find_by_id(peer);
+
+	return status;
+}
 #ifdef CONFIG_MCL
 /**
  * dp_register_peer() - Register peer into physical device
