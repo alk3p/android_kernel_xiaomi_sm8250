@@ -68,6 +68,8 @@ struct wsa_reg_mask_val {
 
 static const struct wsa_reg_mask_val reg_init[] = {
 	{WSA883X_PA_FSM_BYP, 0x01, 0x00},
+	{WSA883X_ISENSE2, 0xE0, 0x40},
+	{WSA883X_ADC_6, 0x02, 0x02},
 	{WSA883X_CDC_SPK_DSM_A2_0, 0xFF, 0x0A},
 	{WSA883X_CDC_SPK_DSM_A2_1, 0x0F, 0x08},
 	{WSA883X_CDC_SPK_DSM_A3_0, 0xFF, 0xF3},
@@ -106,8 +108,12 @@ static const struct wsa_reg_mask_val reg_init[] = {
 	{WSA883X_OTP_REG_3, 0xFF, 0xC9},
 	{WSA883X_OTP_REG_4, 0xC0, 0x40},
 	{WSA883X_TAGC_CTL, 0x01, 0x01},
+	{WSA883X_ADC_2, 0x40, 0x00},
+	{WSA883X_ADC_7, 0x04, 0x04},
+	{WSA883X_ADC_7, 0x02, 0x02},
 	{WSA883X_CKWD_CTL_0, 0x60, 0x00},
 	{WSA883X_CKWD_CTL_1, 0x1F, 0x1B},
+	{WSA883X_GMAMP_SUP1, 0x60, 0x60},
 };
 
 static int wsa883x_get_temperature(struct snd_soc_component *component,
@@ -1460,14 +1466,22 @@ static int wsa883x_swr_probe(struct swr_device *pdev)
 	wcd_request_irq(&wsa883x->irq_info, WSA883X_IRQ_INT_OCP,
 			"WSA OCP", wsa883x_ocp_handle_irq, NULL);
 
+	wcd_disable_irq(&wsa883x->irq_info, WSA883X_IRQ_INT_OCP);
+
 	wcd_request_irq(&wsa883x->irq_info, WSA883X_IRQ_INT_CLIP,
 			"WSA CLIP", wsa883x_clip_handle_irq, NULL);
+
+	wcd_disable_irq(&wsa883x->irq_info, WSA883X_IRQ_INT_CLIP);
 
 	wcd_request_irq(&wsa883x->irq_info, WSA883X_IRQ_INT_PDM_WD,
 			"WSA PDM WD", wsa883x_pdm_wd_handle_irq, NULL);
 
+	wcd_disable_irq(&wsa883x->irq_info, WSA883X_IRQ_INT_PDM_WD);
+
 	wcd_request_irq(&wsa883x->irq_info, WSA883X_IRQ_INT_CLK_WD,
 			"WSA CLK WD", wsa883x_clk_wd_handle_irq, NULL);
+
+	wcd_disable_irq(&wsa883x->irq_info, WSA883X_IRQ_INT_CLK_WD);
 
 	wcd_request_irq(&wsa883x->irq_info, WSA883X_IRQ_INT_INTR_PIN,
 			"WSA EXT INT", wsa883x_ext_int_handle_irq, NULL);
@@ -1478,6 +1492,8 @@ static int wsa883x_swr_probe(struct swr_device *pdev)
 
 	wcd_request_irq(&wsa883x->irq_info, WSA883X_IRQ_INT_PA_ON_ERR,
 			"WSA PA ERR", wsa883x_pa_on_err_handle_irq, NULL);
+
+	wcd_disable_irq(&wsa883x->irq_info, WSA883X_IRQ_INT_PA_ON_ERR);
 
 	ret = snd_soc_register_component(&pdev->dev, &soc_codec_dev_wsa883x,
 				     NULL, 0);
