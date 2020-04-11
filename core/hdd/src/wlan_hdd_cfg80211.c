@@ -5922,9 +5922,11 @@ wlan_hdd_add_fils_params_roam_auth_event(struct sk_buff *skb,
 
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 void hdd_send_roam_scan_ch_list_event(struct hdd_context *hdd_ctx,
-				      uint16_t buf_len, uint8_t *buf)
+				      uint8_t vdev_id, uint16_t buf_len,
+				      uint8_t *buf)
 {
 	struct sk_buff *vendor_event;
+	struct hdd_adapter *adapter;
 	uint32_t len, ret;
 
 	if (!hdd_ctx) {
@@ -5932,10 +5934,14 @@ void hdd_send_roam_scan_ch_list_event(struct hdd_context *hdd_ctx,
 		return;
 	}
 
+	adapter = hdd_get_adapter_by_vdev(hdd_ctx, vdev_id);
+	if (!adapter)
+		return;
+
 	len = nla_total_size(buf_len) + NLMSG_HDRLEN;
 	vendor_event =
 		cfg80211_vendor_event_alloc(
-			hdd_ctx->wiphy, NULL, len,
+			hdd_ctx->wiphy, &(adapter->wdev), len,
 			QCA_NL80211_VENDOR_SUBCMD_UPDATE_STA_INFO_INDEX,
 			GFP_KERNEL);
 
@@ -21084,9 +21090,9 @@ fn_end:
  * wlan_hdd_del_station() - delete station wrapper
  * @adapter: pointer to the hdd adapter
  *
- * Return: None
+ * Return: Errno
  */
-void wlan_hdd_del_station(struct hdd_adapter *adapter)
+int wlan_hdd_del_station(struct hdd_adapter *adapter)
 {
 	struct station_del_parameters del_sta;
 
@@ -21094,13 +21100,14 @@ void wlan_hdd_del_station(struct hdd_adapter *adapter)
 	del_sta.subtype = SIR_MAC_MGMT_DEAUTH >> 4;
 	del_sta.reason_code = eCsrForcedDeauthSta;
 
-	wlan_hdd_cfg80211_del_station(adapter->wdev.wiphy, adapter->dev,
-				      &del_sta);
+	return wlan_hdd_cfg80211_del_station(adapter->wdev.wiphy,
+					     adapter->dev, &del_sta);
 }
 #else
-void wlan_hdd_del_station(struct hdd_adapter *adapter)
+int wlan_hdd_del_station(struct hdd_adapter *adapter)
 {
-	wlan_hdd_cfg80211_del_station(adapter->wdev.wiphy, adapter->dev, NULL);
+	return wlan_hdd_cfg80211_del_station(adapter->wdev.wiphy,
+					     adapter->dev, NULL);
 }
 #endif
 
