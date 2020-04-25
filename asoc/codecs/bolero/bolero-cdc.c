@@ -14,6 +14,7 @@
 #include <soc/snd_event.h>
 #include <linux/pm_runtime.h>
 #include <soc/swr-common.h>
+#include <dsp/digital-cdc-rsc-mgr.h>
 #include "bolero-cdc.h"
 #include "internal.h"
 #include "bolero-clk-rsc.h"
@@ -1077,7 +1078,7 @@ EXPORT_SYMBOL(bolero_tx_mclk_enable);
  * Returns 0 on success or -EINVAL on error.
  */
 int bolero_register_event_listener(struct snd_soc_component *component,
-				   bool enable)
+				   bool enable, bool is_dmic_sva)
 {
 	struct bolero_priv *priv = NULL;
 	int ret = 0;
@@ -1096,7 +1097,8 @@ int bolero_register_event_listener(struct snd_soc_component *component,
 
 	if (priv->macro_params[TX_MACRO].reg_evt_listener)
 		ret = priv->macro_params[TX_MACRO].reg_evt_listener(component,
-								    enable);
+								    enable,
+								    is_dmic_sva);
 
 	return ret;
 }
@@ -1380,7 +1382,7 @@ int bolero_runtime_resume(struct device *dev)
 	}
 
 	if (priv->core_hw_vote_count == 0) {
-		ret = clk_prepare_enable(priv->lpass_core_hw_vote);
+		ret = digital_cdc_rsc_mgr_hw_vote_enable(priv->lpass_core_hw_vote);
 		if (ret < 0) {
 			dev_err(dev, "%s:lpass core hw enable failed\n",
 				__func__);
@@ -1398,7 +1400,7 @@ audio_vote:
 	}
 
 	if (priv->core_audio_vote_count == 0) {
-		ret = clk_prepare_enable(priv->lpass_audio_hw_vote);
+		ret = digital_cdc_rsc_mgr_hw_vote_enable(priv->lpass_audio_hw_vote);
 		if (ret < 0) {
 			dev_err(dev, "%s:lpass audio hw enable failed\n",
 				__func__);
@@ -1423,7 +1425,8 @@ int bolero_runtime_suspend(struct device *dev)
 	mutex_lock(&priv->vote_lock);
 	if (priv->lpass_core_hw_vote != NULL) {
 		if (--priv->core_hw_vote_count == 0)
-			clk_disable_unprepare(priv->lpass_core_hw_vote);
+			digital_cdc_rsc_mgr_hw_vote_disable(
+					priv->lpass_core_hw_vote);
 		if (priv->core_hw_vote_count < 0)
 			priv->core_hw_vote_count = 0;
 	} else {
@@ -1435,7 +1438,8 @@ int bolero_runtime_suspend(struct device *dev)
 
 	if (priv->lpass_audio_hw_vote != NULL) {
 		if (--priv->core_audio_vote_count == 0)
-			clk_disable_unprepare(priv->lpass_audio_hw_vote);
+			digital_cdc_rsc_mgr_hw_vote_disable(
+					priv->lpass_audio_hw_vote);
 		if (priv->core_audio_vote_count < 0)
 			priv->core_audio_vote_count = 0;
 	} else {

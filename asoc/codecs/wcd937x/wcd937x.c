@@ -163,6 +163,10 @@ static int wcd937x_set_port_params(struct snd_soc_component *component,
 		map = &wcd937x->tx_port_mapping;
 		num_ports = wcd937x->num_tx_ports;
 		break;
+	default:
+		dev_err(component->dev, "%s Invalid path selected %u\n",
+					__func__, path);
+		return -EINVAL;
 	}
 
 	for (i = 0; i <= num_ports; i++) {
@@ -207,6 +211,10 @@ static int wcd937x_parse_port_mapping(struct device *dev,
 		map = &wcd937x->tx_port_mapping;
 		num_ports = &wcd937x->num_tx_ports;
 		break;
+	default:
+		dev_err(dev, "%s Invalid path selected %u\n",
+				 __func__, path);
+		return -EINVAL;
 	}
 
 	if (!of_find_property(dev->of_node, prop,
@@ -570,7 +578,8 @@ static int wcd937x_codec_ear_dac_event(struct snd_soc_dapm_widget *w,
 			snd_soc_component_update_bits(component,
 				WCD937X_HPH_NEW_INT_RDAC_HD2_CTL_L,
 				0x0F, 0x06);
-		snd_soc_component_update_bits(component,
+		if (wcd937x->comp1_enable)
+			snd_soc_component_update_bits(component,
 				WCD937X_DIGITAL_CDC_COMP_CTL_0,
 				0x02, 0x02);
 		usleep_range(5000, 5010);
@@ -588,6 +597,10 @@ static int wcd937x_codec_ear_dac_event(struct snd_soc_dapm_widget *w,
 			snd_soc_component_update_bits(component,
 				WCD937X_HPH_NEW_INT_RDAC_HD2_CTL_L,
 				0x0F, 0x01);
+		if (wcd937x->comp1_enable)
+			snd_soc_component_update_bits(component,
+				WCD937X_DIGITAL_CDC_COMP_CTL_0,
+				0x02, 0x00);
 		break;
 	};
 	return 0;
@@ -1449,7 +1462,7 @@ int wcd937x_micbias_control(struct snd_soc_component *component,
 		mutex_unlock(&wcd937x->ana_tx_clk_lock);
 		if (wcd937x->micb_ref[micb_index] == 1) {
 			snd_soc_component_update_bits(component,
-				WCD937X_DIGITAL_CDC_DIG_CLK_CTL, 0xE0, 0xE0);
+				WCD937X_DIGITAL_CDC_DIG_CLK_CTL, 0xF0, 0xF0);
 			snd_soc_component_update_bits(component,
 				WCD937X_DIGITAL_CDC_ANA_CLK_CTL, 0x10, 0x10);
 			snd_soc_component_update_bits(component,

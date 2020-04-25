@@ -496,8 +496,6 @@ static void tx_macro_tx_hpf_corner_freq_callback(struct work_struct *work)
 				hpf_cut_off_freq << 5);
 		snd_soc_component_update_bits(component, hpf_gate_reg,
 						0x03, 0x02);
-		/* Minimum 1 clk cycle delay is required as per HW spec */
-		usleep_range(1000, 1010);
 		snd_soc_component_update_bits(component, hpf_gate_reg,
 						0x03, 0x01);
 	} else {
@@ -984,26 +982,22 @@ static int tx_macro_enable_dec(struct snd_soc_dapm_widget *w,
 				   &tx_priv->tx_mute_dwork[decimator].dwork,
 				   msecs_to_jiffies(tx_unmute_delay));
 		if (tx_priv->tx_hpf_work[decimator].hpf_cut_off_freq !=
-							CF_MIN_3DB_150HZ) {
+							CF_MIN_3DB_150HZ)
 			queue_delayed_work(system_freezable_wq,
 				&tx_priv->tx_hpf_work[decimator].dwork,
 				msecs_to_jiffies(hpf_delay));
+
+		snd_soc_component_update_bits(component,
+				hpf_gate_reg, 0x03, 0x02);
+		if (!is_amic_enabled(component, decimator))
 			snd_soc_component_update_bits(component,
-					hpf_gate_reg, 0x03, 0x02);
-			if (!is_amic_enabled(component, decimator))
-				snd_soc_component_update_bits(component,
 					hpf_gate_reg, 0x03, 0x00);
-			/*
-			 * Minimum 1 clk cycle delay is required as per HW spec
-			 */
-			usleep_range(1000, 1010);
-			snd_soc_component_update_bits(component,
-					hpf_gate_reg, 0x03, 0x01);
-			/*
-			 * 6ms delay is required as per HW spec
-			 */
-			usleep_range(6000, 6010);
-		}
+		snd_soc_component_update_bits(component,
+				hpf_gate_reg, 0x03, 0x01);
+		/*
+		 * 6ms delay is required as per HW spec
+		 */
+		usleep_range(6000, 6010);
 		/* apply gain after decimator is enabled */
 		snd_soc_component_write(component, tx_gain_ctl_reg,
 			      snd_soc_component_read32(component,
@@ -2428,7 +2422,7 @@ static const struct snd_kcontrol_new tx_macro_snd_controls[] = {
 };
 
 static int tx_macro_register_event_listener(struct snd_soc_component *component,
-					    bool enable)
+					    bool enable, bool is_dmic_sva)
 {
 	struct device *tx_dev = NULL;
 	struct tx_macro_priv *tx_priv = NULL;
@@ -2455,10 +2449,12 @@ static int tx_macro_register_event_listener(struct snd_soc_component *component,
 			ret = swrm_wcd_notify(
 				tx_priv->swr_ctrl_data[0].tx_swr_pdev,
 				SWR_REGISTER_WAKEUP, NULL);
-			msm_cdc_pinctrl_set_wakeup_capable(
+			if (!is_dmic_sva)
+				msm_cdc_pinctrl_set_wakeup_capable(
 					tx_priv->tx_swr_gpio_p, false);
 		} else {
-			msm_cdc_pinctrl_set_wakeup_capable(
+			if (!is_dmic_sva)
+				msm_cdc_pinctrl_set_wakeup_capable(
 					tx_priv->tx_swr_gpio_p, true);
 			ret = swrm_wcd_notify(
 				tx_priv->swr_ctrl_data[0].tx_swr_pdev,
