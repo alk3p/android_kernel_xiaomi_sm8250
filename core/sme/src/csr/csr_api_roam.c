@@ -10120,13 +10120,9 @@ void csr_roaming_state_msg_processor(struct mac_context *mac, void *msg_buf)
 		break;
 	case eWNI_SME_DEAUTH_RSP:
 		/* or the Deauthentication response message... */
-		if (CSR_IS_ROAM_SUBSTATE_DEAUTH_REQ(mac, pSmeRsp->sessionId)) {
-			csr_remove_nonscan_cmd_from_pending_list(mac,
-					pSmeRsp->sessionId,
-					eSmeCommandWmStatusChange);
+		if (CSR_IS_ROAM_SUBSTATE_DEAUTH_REQ(mac, pSmeRsp->sessionId))
 			csr_roam_roaming_state_deauth_rsp_processor(mac,
 						(struct deauth_rsp *) pSmeRsp);
-		}
 		break;
 	case eWNI_SME_START_BSS_RSP:
 		/* or the Start BSS response message... */
@@ -18622,6 +18618,8 @@ csr_update_roam_scan_offload_request(struct mac_context *mac_ctx,
 	if (!req_buf->roam_offload_enabled)
 		return;
 
+	req_buf->enable_self_bss_roam =
+			mac_ctx->mlme_cfg->lfr.enable_self_bss_roam;
 	req_buf->roam_triggers.vdev_id = session->vdev_id;
 	req_buf->roam_triggers.trigger_bitmap =
 		mlme_get_roam_trigger_bitmap(mac_ctx->psoc, session->vdev_id);
