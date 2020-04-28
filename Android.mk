@@ -26,7 +26,7 @@ endif # opensource
 LOCAL_DEV_NAME := $(patsubst .%,%,\
 	$(lastword $(strip $(subst /, ,$(LOCAL_PATH)))))
 
-ifeq (1, $(strip $(shell expr $(words $(strip $(TARGET_WLAN_CHIP))) \>= 2)))
+ifneq ($(TARGET_WLAN_CHIP),)
 
 ifeq ($(LOCAL_DEV_NAME), qcacld-3.0)
 LOCAL_MULTI_KO := true
