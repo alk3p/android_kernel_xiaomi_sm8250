@@ -215,9 +215,5 @@ static inline int hif_pm_runtime_put_auto(struct device *dev)
 	return pm_runtime_put_autosuspend(dev);
 }
 
-static inline int hif_pm_runtime_resume(struct device *dev)
-{
-	return pm_runtime_resume(dev);
-}
 #endif /* FEATURE_RUNTIME_PM */
 #endif /* __ATH_PCI_H__ */
