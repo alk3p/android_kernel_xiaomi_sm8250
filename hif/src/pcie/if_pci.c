@@ -2639,9 +2639,12 @@ void hif_pci_prevent_linkdown(struct hif_softc *scn, bool flag)
  */
 int hif_pci_bus_suspend(struct hif_softc *scn)
 {
+	QDF_STATUS ret;
+
 	hif_apps_irqs_disable(GET_HIF_OPAQUE_HDL(scn));
 
-	if (hif_drain_tasklets(scn)) {
+	ret = hif_try_complete_tasks(scn);
+	if (QDF_IS_STATUS_ERROR(ret)) {
 		hif_apps_irqs_enable(GET_HIF_OPAQUE_HDL(scn));
 		return -EBUSY;
 	}
@@ -3801,11 +3804,14 @@ static void hif_pci_get_soc_info_pld(struct hif_pci_softc *sc,
 				     struct device *dev)
 {
 	struct pld_soc_info info;
+	struct hif_softc *scn = HIF_GET_SOFTC(sc);
 
 	pld_get_soc_info(dev, &info);
 	sc->mem = info.v_addr;
 	sc->ce_sc.ol_sc.mem    = info.v_addr;
 	sc->ce_sc.ol_sc.mem_pa = info.p_addr;
+	scn->target_info.target_version = info.soc_id;
+	scn->target_info.target_revision = 0;
 }
 
 static void hif_pci_get_soc_info_nopld(struct hif_pci_softc *sc,
@@ -4449,10 +4455,10 @@ static int __hif_pm_runtime_prevent_suspend(struct hif_pci_softc
 
 	qdf_atomic_inc(&hif_sc->pm_stats.prevent_suspend);
 
-	HIF_ERROR("%s: in pm_state:%s ret: %d", __func__,
-		hif_pm_runtime_state_to_string(
-			qdf_atomic_read(&hif_sc->pm_state)),
-					ret);
+	hif_debug("%s: in pm_state:%s ret: %d", __func__,
+		  hif_pm_runtime_state_to_string(
+			  qdf_atomic_read(&hif_sc->pm_state)),
+		  ret);
 
 	return ret;
 }
@@ -4497,10 +4503,10 @@ static int __hif_pm_runtime_allow_suspend(struct hif_pci_softc *hif_sc,
 	hif_pm_runtime_mark_last_busy(hif_ctx);
 	ret = hif_pm_runtime_put_auto(hif_sc->dev);
 
-	HIF_ERROR("%s: in pm_state:%s ret: %d", __func__,
-		hif_pm_runtime_state_to_string(
-			qdf_atomic_read(&hif_sc->pm_state)),
-					ret);
+	hif_debug("%s: in pm_state:%s ret: %d", __func__,
+		  hif_pm_runtime_state_to_string(
+			  qdf_atomic_read(&hif_sc->pm_state)),
+		  ret);
 
 	qdf_atomic_inc(&hif_sc->pm_stats.allow_suspend);
 	return ret;
