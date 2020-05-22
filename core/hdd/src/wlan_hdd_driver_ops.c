@@ -688,21 +688,7 @@ static void __hdd_soc_remove(struct device *dev)
  */
 static void hdd_soc_remove(struct device *dev)
 {
-	struct osif_psoc_sync *psoc_sync;
-	int errno;
-
-	/* by design, this will fail to lookup if we never probed the SoC */
-	errno = osif_psoc_sync_trans_start_wait(dev, &psoc_sync);
-	if (errno)
-		return;
-
-	osif_psoc_sync_unregister(dev);
-	osif_psoc_sync_wait_for_ops(psoc_sync);
-
 	__hdd_soc_remove(dev);
-
-	osif_psoc_sync_trans_stop(psoc_sync);
-	osif_psoc_sync_destroy(psoc_sync);
 }
 
 #ifdef FEATURE_WLAN_DIAG_SUPPORT
@@ -1065,6 +1051,8 @@ static int __wlan_hdd_bus_suspend(struct wow_enable_params wow_params)
 		goto resume_pmo;
 	}
 
+	pld_request_bus_bandwidth(hdd_ctx->parent_dev, PLD_BUS_WIDTH_NONE);
+
 	hdd_info("bus suspend succeeded");
 	return 0;
 
@@ -1211,6 +1199,8 @@ int wlan_hdd_bus_resume(void)
 		hdd_err("Failed to get hif context");
 		return -EINVAL;
 	}
+
+	pld_request_bus_bandwidth(hdd_ctx->parent_dev, PLD_BUS_WIDTH_MEDIUM);
 
 	status = hif_bus_resume(hif_ctx);
 	if (status) {
@@ -1448,7 +1438,7 @@ static int wlan_hdd_runtime_resume(struct device *dev)
 		hdd_err("PMO Runtime resume failed: %d", status);
 	} else {
 		if (policy_mgr_get_connection_count(hdd_ctx->psoc))
-			hdd_bus_bw_compute_timer_start(hdd_ctx);
+			hdd_bus_bw_compute_timer_try_start(hdd_ctx);
 	}
 
 	hdd_debug("Runtime resume done");
@@ -1782,12 +1772,20 @@ static int wlan_hdd_pld_runtime_suspend(struct device *dev,
 
 	errno = osif_psoc_sync_op_start(dev, &psoc_sync);
 	if (errno)
-		return errno;
+		goto out;
 
 	errno = wlan_hdd_runtime_suspend(dev);
 
 	osif_psoc_sync_op_stop(psoc_sync);
 
+out:
+	/* If it returns other errno to kernel, it will treat
+	 * it as critical issue, so all the future runtime
+	 * PM api will return error, pm runtime can't be work
+	 * anymore. Such case found in SSR.
+	 */
+	if (errno && errno != -EAGAIN && errno != -EBUSY)
+		errno = -EAGAIN;
 	return errno;
 }
 
