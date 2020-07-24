@@ -101,8 +101,6 @@ extern const uint16_t touch_key_array[TOUCH_KEY_NUM];
 /*---Customerized func.---*/
 #define NVT_TOUCH_PROC 1
 #define NVT_TOUCH_EXT_PROC 1
-#define NVT_TOUCH_MP 1
-#define NVT_TOUCH_MP_SETTING_CRITERIA_FROM_CSV 1
 #define MT_PROTOCOL_B 1
 #define WAKEUP_GESTURE 1
 #define FUNCPAGE_PALM 4
@@ -204,9 +202,6 @@ struct nvt_ts_data {
 	struct pinctrl *ts_pinctrl;
 	struct pinctrl_state *pinctrl_state_active;
 	struct pinctrl_state *pinctrl_state_suspend;
-#ifndef NVT_SAVE_TESTDATA_IN_FILE
-	void *testdata;
-#endif
 	int db_wakeup;
 	bool lkdown_readed;
 	bool boot_firmware_updated;
