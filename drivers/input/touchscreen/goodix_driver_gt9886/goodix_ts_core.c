@@ -2014,9 +2014,6 @@ static int goodix_ts_suspend(struct goodix_ts_core *core_data)
 		}
 	}
 	mutex_unlock(&goodix_modules.mutex);
-#ifdef CONFIG_FACTORY_BUILD
-	goodix_ts_power_off(core_data);
-#endif
 out:
 	goodix_ts_release_connects(core_data);
 	core_data->ts_event.touch_data.touch_num = 0;
@@ -2050,9 +2047,6 @@ static int goodix_ts_resume(struct goodix_ts_core *core_data)
 		/*goodix_ts_irq_enable(core_data, true);*/
 		goto out;
 	}
-#ifdef CONFIG_FACTORY_BUILD
-	goodix_ts_power_on(core_data);
-#endif
 	mutex_lock(&goodix_modules.mutex);
 	if (!list_empty(&goodix_modules.head)) {
 		list_for_each_entry_safe(ext_module, next,
@@ -3267,10 +3261,6 @@ static int goodix_ts_probe(struct platform_device *pdev)
 		gtp_init_touchmode_data();
 #endif
 	core_data->fod_status = 0;
-
-#ifdef CONFIG_FACTORY_BUILD
-	core_data->fod_status = 1;
-#endif
 
 out:
 	if (r) {

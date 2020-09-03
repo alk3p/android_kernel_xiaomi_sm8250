@@ -9417,11 +9417,7 @@ static void smblib_wireless_delay_work(struct work_struct *work)
 		vote(chg->awake_votable, DC_AWAKE_VOTER, false, 0);
 	}
 }
-#ifdef CONFIG_FACTORY_BUILD
-#define MAX_DC_CURRENT_UA 2260000
-#else
 #define MAX_DC_CURRENT_UA 2500000
-#endif
 #define POWER_GOOD_OFF_DELAY_MS 1800
 #define WIRED_OVP_CLOSE_DELAY_MS 100
 #define POWER_GOOD_OFF_WIRED_DELAY_MS 1500

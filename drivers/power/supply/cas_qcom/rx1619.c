@@ -2345,7 +2345,6 @@ static void rx1619_fw_download_work(struct work_struct *work)
 				 "[rx1619] %s: FW Version correct so skip upgrade\n",
 				 __func__);
 		} else {
-#ifndef CONFIG_FACTORY_BUILD
 			dev_info(chip->dev, "[rx1619] %s: FW download start\n",
 				 __func__);
 			if (!rx1619_onekey_download_firmware(chip))
@@ -2371,11 +2370,6 @@ static void rx1619_fw_download_work(struct work_struct *work)
 					 rx_fw_version);
 				chip->fw_version = g_fw_rx_id;
 			}
-#else
-			dev_info(chip->dev,
-				 "[rx1619] %s: factory build, don't update\n",
-				 __func__);
-#endif
 		}
 		rx_set_reverse_gpio(chip, false);
 		chip->fw_update = false;
