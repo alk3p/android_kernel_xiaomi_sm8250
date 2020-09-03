@@ -45,9 +45,6 @@ struct ds28e16_data {
 	int version;
 	int cycle_count;
 	bool batt_verified;
-#ifdef	CONFIG_FACTORY_BUILD
-	bool factory_enable;
-#endif
 
 	struct delayed_work	battery_verify_work;
 	struct power_supply *verify_psy;
@@ -1020,9 +1017,6 @@ static int verify_get_property(struct power_supply *psy, enum power_supply_prope
 	unsigned char pagedata[16] = {0x00};
 	unsigned char buf[50];
 	int ret;
-#ifdef	CONFIG_FACTORY_BUILD
-	static bool chip_ok_flag;
-#endif
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_VERIFY_MODEL_NAME:
@@ -1055,23 +1049,10 @@ static int verify_get_property(struct power_supply *psy, enum power_supply_prope
 		ds_err("get chip_ok read RomID = %02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x\n",
 				mi_romid[0], mi_romid[1], mi_romid[2], mi_romid[3],
 				mi_romid[4], mi_romid[5], mi_romid[6], mi_romid[7]);
-#ifdef CONFIG_FACTORY_BUILD
-		ds_err("CONFIG_FACTORY_BUILD, chip_ok_flag=%d.\n", chip_ok_flag);
-		if ((mi_romid[0] == 0x9f) && (mi_romid[6] == 0x04) && ((mi_romid[5] & 0xf0) == 0xf0)) {
-			val->intval = true;
-			if (data->factory_enable)
-				chip_ok_flag = true;
-		} else if (chip_ok_flag) {
-			val->intval = true;
-		} else {
-			val->intval = false;
-		}
-#else
 		if ((mi_romid[0] == 0x9f) && (mi_romid[6] == 0x04) && ((mi_romid[5] & 0xf0) == 0xf0))
 			val->intval = true;
 		else
 			val->intval = false;
-#endif
 		break;
 	case POWER_SUPPLY_PROP_DS_STATUS:
 		ret = DS28E16_cmd_readStatus(buf);
@@ -1236,11 +1217,6 @@ static int ds28e16_parse_dt(struct device *dev,
 		ds_err("Unable to read bootloader address\n");
 	else if (error != -EINVAL)
 		pdata->version = val;
-
-#ifdef	CONFIG_FACTORY_BUILD
-	pdata->factory_enable = of_property_read_bool(np,
-			"mi,factory-enable");
-#endif
 
 	return 0;
 }

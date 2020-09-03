@@ -3296,7 +3296,6 @@ static void idtp9220_fw_download_work(struct work_struct *work)
 			&& fw_app_ver[0] >= FW_VERSION) && (crc_ok)){
 			dev_info(di->dev, "FW: 0x%x, crc: %d so skip upgrade\n", fw_app_ver[0], crc_ok);
 		} else {
-#ifndef CONFIG_FACTORY_BUILD
 			idtp9220_set_reverse_gpio(di, true);
 			msleep(100);
 			dev_info(di->dev, "%s: FW download start\n", __func__);
@@ -3315,9 +3314,6 @@ static void idtp9220_fw_download_work(struct work_struct *work)
 			else
 				dev_info(di->dev, "crc verify success.\n");
 			idtp9220_set_reverse_gpio(di, false);
-#else
-			dev_info(di->dev, "%s: factory build, don't update\n", __func__);
-#endif
 		}
 		di->fw_update = false;
 		pm_relax(di->dev);

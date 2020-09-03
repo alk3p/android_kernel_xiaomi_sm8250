@@ -97,9 +97,7 @@ extern int fts_charger_mode_set(struct i2c_client *client, bool on);
 *****************************************************************************/
 #define EVENT_INPUT 0x1
 
-#ifndef CONFIG_FACTORY_BUILD
 static int fts_ts_clear_buffer(void);
-#endif
 static void fts_release_all_finger(void);
 static int fts_ts_suspend(struct device *dev);
 static int fts_ts_resume(struct device *dev);
@@ -2499,7 +2497,6 @@ static int fts_ts_remove(struct i2c_client *client)
 	FTS_FUNC_EXIT();
 	return 0;
 }
-#ifndef CONFIG_FACTORY_BUILD
 /*****************************************************************************
 * Name: fts_ts_clear_buffer
 * Brief: during irq disabled, FTS_REG_INT_ACK(0x3E) register will store three frames
@@ -2522,7 +2519,6 @@ static int fts_ts_clear_buffer(void)
 	}
 	return ret;
 }
-#endif
 
 /*****************************************************************************
 *  Name: fts_ts_suspend
@@ -2572,7 +2568,6 @@ static int fts_ts_suspend(struct device *dev)
 	fts_irq_disable_sync();
 
 	ts_data->fod_point_released = false;
-#ifndef CONFIG_FACTORY_BUILD
 #if FTS_GESTURE_EN
 	if (fts_gesture_suspend(ts_data->client) == 0) {
 		if(ts_data->fod_status == -1 || ts_data->fod_status == 100){
@@ -2620,16 +2615,9 @@ static int fts_ts_suspend(struct device *dev)
 	}
 sleep_mode:
 #endif
-#endif
 #if FTS_PINCTRL_EN
 	fts_pinctrl_select_suspend(ts_data);
 #endif
-#if defined(FTS_POWER_SOURCE_CUST_EN) && defined(CONFIG_FACTORY_BUILD)
-	ret = fts_power_source_ctrl(ts_data, DISABLE);
-	if (ret < 0) {
-		FTS_ERROR("power off fail, ret=%d", ret);
-	}
-#else
 	/* TP enter sleep mode */
 	ret = fts_palm_enable(ts_data, 0);
 	if (!ret)
@@ -2638,11 +2626,8 @@ sleep_mode:
 	ret = fts_i2c_write_reg(ts_data->client, FTS_REG_POWER_MODE, FTS_REG_POWER_MODE_SLEEP_VALUE);
 	if (ret < 0)
 		FTS_ERROR("set TP to sleep mode fail, ret=%d", ret);
-#endif
 	ts_data->suspended = true;
-#ifndef CONFIG_FACTORY_BUILD
 release_finger:
-#endif
 	mutex_lock(&fts_data->report_mutex);
 	fts_release_all_finger();
 	mutex_unlock(&fts_data->report_mutex);
@@ -2671,16 +2656,10 @@ static int fts_ts_resume(struct device *dev)
 		return 0;
 	}
 
-#if defined(FTS_POWER_SOURCE_CUST_EN) && defined(CONFIG_FACTORY_BUILD)
-	fts_power_source_ctrl(ts_data, ENABLE);
-#endif
-
 #if FTS_PINCTRL_EN
 	fts_pinctrl_select_normal(ts_data);
 #endif
 
-
-#ifndef CONFIG_FACTORY_BUILD
 #ifdef CONFIG_TOUCHSCREEN_FTS_FOD
 	FTS_INFO("%s finger_in_fod:%d fod_finger_skip:%d\n", __func__, ts_data->finger_in_fod, ts_data->fod_finger_skip);
 	if (ts_data->pdata->reset_when_resume && !ts_data->finger_in_fod && !ts_data->fod_finger_skip) {
@@ -2693,17 +2672,6 @@ static int fts_ts_resume(struct device *dev)
 #else
 	if (ts_data->pdata->reset_when_resume) {
 		FTS_ERROR("normal----reset when resume");
-		fts_reset_proc(50);
-		mutex_lock(&fts_data->report_mutex);
-		fts_release_all_finger();
-		mutex_unlock(&fts_data->report_mutex);
-	}
-#endif
-#endif
-
-#ifdef CONFIG_FACTORY_BUILD
-	if (ts_data->pdata->reset_when_resume) {
-		FTS_INFO("factory----reset when resume");
 		fts_reset_proc(50);
 		mutex_lock(&fts_data->report_mutex);
 		fts_release_all_finger();

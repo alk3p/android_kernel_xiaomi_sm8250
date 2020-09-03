@@ -3004,30 +3004,18 @@ int dsi_panel_set_disp_param(struct dsi_panel *panel, u32 param)
 		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_MI_SRGB);
 		break;
 	case DISPPARAM_DOZE_BRIGHTNESS_HBM:
-#ifdef CONFIG_FACTORY_BUILD
-		pr_info("doze hbm On\n");
-		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_MI_DOZE_HBM);
-		mi_cfg->dimming_state = STATE_DIM_BLOCK;
-#else
 		if (mi_cfg->in_aod) {
 			pr_info("doze hbm On\n");
 			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_MI_DOZE_HBM);
 			mi_cfg->dimming_state = STATE_DIM_BLOCK;
 		}
-#endif
 		break;
 	case DISPPARAM_DOZE_BRIGHTNESS_LBM:
-#ifdef CONFIG_FACTORY_BUILD
-		pr_info("doze lbm On\n");
-		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_MI_DOZE_LBM);
-		mi_cfg->dimming_state = STATE_DIM_BLOCK;
-#else
 		if (mi_cfg->in_aod) {
 			pr_info("doze lbm On\n");
 			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_MI_DOZE_LBM);
 			mi_cfg->dimming_state = STATE_DIM_BLOCK;
 		}
-#endif
 		break;
 	case DISPPARAM_DOZE_OFF:
 		pr_info("doze Off\n");

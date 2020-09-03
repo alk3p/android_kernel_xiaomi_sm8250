@@ -1835,9 +1835,6 @@ static int fts_ts_suspend(struct device *dev)
 	fts_esdcheck_suspend();
 #endif
 
-#ifdef CONFIG_FACTORY_BUILD
-	ts_data->poweroff_on_sleep = true;
-#endif
 	if (ts_data->gesture_mode && !ts_data->poweroff_on_sleep) {
 		fts_gesture_suspend(ts_data);
 	} else {
