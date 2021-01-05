@@ -2422,7 +2422,7 @@ static const struct snd_kcontrol_new tx_macro_snd_controls[] = {
 };
 
 static int tx_macro_register_event_listener(struct snd_soc_component *component,
-					    bool enable, bool is_dmic_sva)
+					    bool enable)
 {
 	struct device *tx_dev = NULL;
 	struct tx_macro_priv *tx_priv = NULL;
@@ -2449,12 +2449,10 @@ static int tx_macro_register_event_listener(struct snd_soc_component *component,
 			ret = swrm_wcd_notify(
 				tx_priv->swr_ctrl_data[0].tx_swr_pdev,
 				SWR_REGISTER_WAKEUP, NULL);
-			if (!is_dmic_sva)
-				msm_cdc_pinctrl_set_wakeup_capable(
+			msm_cdc_pinctrl_set_wakeup_capable(
 					tx_priv->tx_swr_gpio_p, false);
 		} else {
-			if (!is_dmic_sva)
-				msm_cdc_pinctrl_set_wakeup_capable(
+			msm_cdc_pinctrl_set_wakeup_capable(
 					tx_priv->tx_swr_gpio_p, true);
 			ret = swrm_wcd_notify(
 				tx_priv->swr_ctrl_data[0].tx_swr_pdev,
@@ -2649,36 +2647,6 @@ static int tx_macro_clk_div_get(struct snd_soc_component *component)
 		return -EINVAL;
 
 	return tx_priv->dmic_clk_div;
-}
-
-static int tx_macro_clk_switch(struct snd_soc_component *component, int clk_src)
-{
-	struct device *tx_dev = NULL;
-	struct tx_macro_priv *tx_priv = NULL;
-	int ret = 0;
-
-	if (!component)
-		return -EINVAL;
-
-	tx_dev = bolero_get_device_ptr(component->dev, TX_MACRO);
-	if (!tx_dev) {
-		dev_err(component->dev,
-			"%s: null device for macro!\n", __func__);
-		return -EINVAL;
-	}
-	tx_priv = dev_get_drvdata(tx_dev);
-	if (!tx_priv) {
-		dev_err(component->dev,
-			"%s: priv is null for macro!\n", __func__);
-		return -EINVAL;
-	}
-	if (tx_priv->swr_ctrl_data) {
-		ret = swrm_wcd_notify(
-			tx_priv->swr_ctrl_data[0].tx_swr_pdev,
-			SWR_REQ_CLK_SWITCH, &clk_src);
-	}
-
-	return ret;
 }
 
 static int tx_macro_core_vote(void *handle, bool enable)
@@ -3180,7 +3148,6 @@ static void tx_macro_init_ops(struct macro_ops *ops,
 	ops->reg_wake_irq = tx_macro_reg_wake_irq;
 	ops->set_port_map = tx_macro_set_port_map;
 	ops->clk_div_get = tx_macro_clk_div_get;
-	ops->clk_switch = tx_macro_clk_switch;
 	ops->reg_evt_listener = tx_macro_register_event_listener;
 	ops->clk_enable = __tx_macro_mclk_enable;
 }
