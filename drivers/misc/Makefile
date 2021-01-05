@@ -75,3 +75,4 @@ obj-$(CONFIG_WIGIG_SENSING_SPI)	+= wigig_sensing.o
 obj-$(CONFIG_QTI_XR_SMRTVWR_MISC) += qxr-stdalonevwr.o
 
 obj-$(CONFIG_MOTOR_DRV8846) += drv8846.o
+obj-$(CONFIG_HALL_AKM09970) += akm09970.o
