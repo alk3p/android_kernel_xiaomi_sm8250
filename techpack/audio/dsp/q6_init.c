@@ -24,6 +24,11 @@ static int __init audio_q6_init(void)
 	avtimer_init();
 	msm_mdf_init();
 	voice_mhi_init();
+/* for mius start */
+#ifdef CONFIG_US_PROXIMITY
+	mius_driver_init();
+#endif
+/* for mius end */
 	digital_cdc_rsc_mgr_init();
 	return 0;
 }
@@ -46,6 +51,11 @@ static void __exit audio_q6_exit(void)
 	audio_cal_exit();
 	adsp_err_exit();
 	voice_mhi_exit();
+/* for mius start */
+#ifdef CONFIG_US_PROXIMITY
+	mius_driver_exit();
+#endif
+/* for mius end */
 }
 
 module_init(audio_q6_init);
