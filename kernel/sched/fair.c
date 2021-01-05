@@ -6158,7 +6158,7 @@ boosted_cpu_util(int cpu, unsigned long other_util,
 
 	trace_sched_boost_cpu(cpu, util, margin);
 
-	return util + margin;
+	return util;
 }
 
 #else /* CONFIG_SCHED_TUNE */
@@ -6185,7 +6185,7 @@ boosted_task_util(struct task_struct *task)
 
 	trace_sched_boost_task(task, util, margin);
 
-	return util + margin;
+	return util;
 }
 
 static unsigned long cpu_util_without(int cpu, struct task_struct *p);
