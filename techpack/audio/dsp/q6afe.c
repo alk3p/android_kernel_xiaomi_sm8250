@@ -2051,6 +2051,15 @@ fail_idx:
 	return ret;
 }
 
+afe_ultrasound_state_t elus_afe = {
+	.ptr_apr= &this_afe.apr,
+	.ptr_status= &this_afe.status,
+	.ptr_state= &this_afe.state,
+	.ptr_wait= this_afe.wait,
+	.timeout_ms= TIMEOUT_MS,
+};
+EXPORT_SYMBOL(elus_afe);
+
 /* for mius start */
 #ifdef CONFIG_US_PROXIMITY
 afe_mi_ultrasound_state_t mius_afe = {
@@ -2430,9 +2439,11 @@ static int afe_send_port_topology_id(u16 port_id)
 
 	ret = afe_get_cal_topology_id(port_id, &topology_id, AFE_TOPOLOGY_CAL);
 	if (ret < 0) {
-		pr_debug("%s: Check for LSM topology\n", __func__);
-		ret = afe_get_cal_topology_id(port_id, &topology_id,
-					      AFE_LSM_TOPOLOGY_CAL);
+		if (port_id >= AFE_PORT_ID_VA_CODEC_DMA_TX_0 && port_id <= AFE_PORT_ID_VA_CODEC_DMA_TX_2) {
+			pr_info("%s: Check for LSM topology\n", __func__);
+			ret = afe_get_cal_topology_id(port_id, &topology_id,
+							AFE_LSM_TOPOLOGY_CAL);
+		}
 	}
 	if (ret || !topology_id) {
 		pr_debug("%s: AFE port[%d] get_cal_topology[%d] invalid!\n",
