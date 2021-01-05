@@ -21,6 +21,7 @@
 #include "msm_gem.h"
 #include "msm_kms.h"
 #include "sde_trace.h"
+#include "xiaomi_frame_stat.h"
 
 #define MULTIPLE_CONN_DETECTED(x) (x > 1)
 
@@ -80,6 +81,10 @@ static inline bool _msm_seamless_for_conn(struct drm_connector *connector,
 	}
 
 	if (enable)
+		return false;
+
+	if (!connector->state->crtc &&
+		old_conn_state->crtc->state->connectors_changed)
 		return false;
 
 	if (msm_is_mode_seamless(&connector->encoder->crtc->state->mode))
@@ -477,6 +482,12 @@ int msm_atomic_prepare_fb(struct drm_plane *plane,
 	return msm_framebuffer_prepare(new_state->fb, kms->aspace);
 }
 
+extern struct device *connector_kdev;
+void complete_time_generate_event(struct drm_device *dev)
+{
+	sysfs_notify(&connector_kdev->kobj, NULL, "complete_commit_time");
+}
+
 /* The (potentially) asynchronous part of the commit.  At this point
  * nothing can fail short of armageddon.
  */
@@ -519,12 +530,18 @@ static void complete_commit(struct msm_commit *c)
 
 	drm_atomic_state_put(state);
 
+	priv->complete_commit_time = ktime_get()/1000;
+
+	complete_time_generate_event(dev);
+
 	commit_destroy(c);
 }
 
 static void _msm_drm_commit_work_cb(struct kthread_work *work)
 {
 	struct msm_commit *commit = NULL;
+	ktime_t start, end;
+	s64 duration;
 
 	if (!work) {
 		DRM_ERROR("%s: Invalid commit work data!\n", __func__);
@@ -533,9 +550,16 @@ static void _msm_drm_commit_work_cb(struct kthread_work *work)
 
 	commit = container_of(work, struct msm_commit, commit_work);
 
+	start = ktime_get();
+	frame_stat_collector(0, COMMIT_START_TS);
+
 	SDE_ATRACE_BEGIN("complete_commit");
 	complete_commit(commit);
 	SDE_ATRACE_END("complete_commit");
+
+	end = ktime_get();
+	duration = ktime_to_ns(ktime_sub(end, start));
+	frame_stat_collector(duration, COMMIT_END_TS);
 }
 
 static struct msm_commit *commit_init(struct drm_atomic_state *state,
