@@ -5360,8 +5360,8 @@ CONFIG_QCOM_KGSL_IOMMU=y
 #
 # Qualcomm RmNet extensions
 #
-CONFIG_RMNET_PERF=m
-CONFIG_RMNET_SHS=m
+CONFIG_RMNET_PERF=y
+CONFIG_RMNET_SHS=y
 
 #
 # File systems
