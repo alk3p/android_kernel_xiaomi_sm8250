@@ -19,6 +19,7 @@
 #include <dsp/q6common.h>
 #include <dsp/q6core.h>
 #include <dsp/msm-audio-event-notify.h>
+#include <dsp/apr_elliptic.h>
 #include <ipc/apr_tal.h>
 /* for mius start */
 #ifdef CONFIG_US_PROXIMITY
