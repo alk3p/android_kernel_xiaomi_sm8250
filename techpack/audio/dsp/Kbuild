@@ -217,6 +217,8 @@ CDEFINES +=	-DANI_LITTLE_BYTE_ENDIAN \
 		-Werror\
 		-D__linux__
 
+CDEFINES += -DTFA_ADSP_SUPPORTED
+
 KBUILD_CPPFLAGS += $(CDEFINES)
 
 # Currently, for versions of gcc which support it, the kernel Makefile
