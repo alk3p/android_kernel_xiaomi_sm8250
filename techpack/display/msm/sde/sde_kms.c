@@ -1042,6 +1042,11 @@ static void sde_kms_commit(struct msm_kms *kms,
 		}
 	}
 
+/*
+	for_each_old_crtc_in_state(old_state, crtc, old_crtc_state, i) {
+		sde_crtc_fod_ui_ready(crtc, old_crtc_state);
+	}
+*/
 	SDE_ATRACE_END("sde_kms_commit");
 }
 
@@ -1156,6 +1161,8 @@ static void sde_kms_complete_commit(struct msm_kms *kms,
 			pr_err("Connector Post kickoff failed rc=%d\n",
 					 rc);
 		}
+
+		sde_connector_fod_notify(connector);
 	}
 
 	_sde_kms_drm_check_dpms(old_state, DRM_PANEL_EVENT_BLANK);
@@ -1218,7 +1225,7 @@ static void sde_kms_wait_for_commit_done(struct msm_kms *kms,
 		sde_crtc_complete_flip(crtc, NULL);
 	}
 
-	SDE_ATRACE_END("sde_ksm_wait_for_commit_done");
+	SDE_ATRACE_END("sde_kms_wait_for_commit_done");
 }
 
 static void sde_kms_prepare_fence(struct msm_kms *kms,
