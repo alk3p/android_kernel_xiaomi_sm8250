@@ -1119,7 +1119,7 @@ static int rx_macro_get_channel_map(struct snd_soc_dai *dai,
 			ch_mask = 0x1;
 		*rx_slot = ch_mask;
 		*rx_num = rx_priv->active_ch_cnt[dai->id];
-		dev_dbg(rx_priv->dev,
+		dev_dbg(rx_dev,
 			"%s: dai->id:%d, ch_mask:0x%x, active_ch_cnt:%d active_mask: 0x%x\n",
 			__func__, dai->id, *rx_slot, *rx_num, rx_priv->active_ch_mask[dai->id]);
 		break;
@@ -1687,6 +1687,27 @@ static int rx_macro_config_compander(struct snd_soc_component *component,
 	dev_dbg(component->dev, "%s: event %d compander %d, enabled %d\n",
 		__func__, event, comp + 1, rx_priv->comp_enabled[comp]);
 
+	rx_path_cfg3_reg = BOLERO_CDC_RX_RX0_RX_PATH_CFG3 +
+					(comp * RX_MACRO_RX_PATH_OFFSET);
+	rx0_path_ctl_reg = BOLERO_CDC_RX_RX0_RX_PATH_CTL +
+					(comp * RX_MACRO_RX_PATH_OFFSET);
+	pcm_rate = (snd_soc_component_read32(component, rx0_path_ctl_reg)
+						& 0x0F);
+	if (pcm_rate < 0x06)
+		val = 0x03;
+	else if (pcm_rate < 0x08)
+		val = 0x01;
+	else if (pcm_rate < 0x0B)
+		val = 0x02;
+	else
+		val = 0x00;
+
+	if (SND_SOC_DAPM_EVENT_ON(event))
+		snd_soc_component_update_bits(component, rx_path_cfg3_reg,
+					0x03, val);
+	if (SND_SOC_DAPM_EVENT_OFF(event))
+		snd_soc_component_update_bits(component, rx_path_cfg3_reg,
+					0x03, 0x03);
 	if (!rx_priv->comp_enabled[comp])
 		return 0;
 
@@ -3829,6 +3850,18 @@ static int rx_macro_init(struct snd_soc_component *component)
 	snd_soc_dapm_ignore_suspend(dapm, "RX_TX DEC3_INP");
 	snd_soc_dapm_sync(dapm);
 
+	snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX0_RX_PATH_SEC7,
+				0x07, 0x02);
+	snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX1_RX_PATH_SEC7,
+				0x07, 0x02);
+	snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX2_RX_PATH_SEC7,
+				0x07, 0x02);
+	snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX0_RX_PATH_CFG3,
+				0x03, 0x02);
+	snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX1_RX_PATH_CFG3,
+				0x03, 0x02);
+	snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX2_RX_PATH_CFG3,
+				0x03, 0x02);
 	for (i = 0; i < ARRAY_SIZE(rx_macro_reg_init); i++)
 		snd_soc_component_update_bits(component,
 				rx_macro_reg_init[i].reg,

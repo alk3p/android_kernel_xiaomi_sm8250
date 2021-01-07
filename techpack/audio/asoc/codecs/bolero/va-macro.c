@@ -452,6 +452,10 @@ static int va_macro_swr_pwr_event(struct snd_soc_dapm_widget *w,
 					"%s: lpass audio hw enable failed\n",
 					__func__);
 		}
+		if (!ret)
+			if (bolero_tx_clk_switch(component, CLK_SRC_VA_RCG))
+				dev_dbg(va_dev, "%s: clock switch failed\n",
+					__func__);
 		if (va_priv->lpi_enable) {
 			bolero_register_event_listener(component, true);
 			va_priv->register_event_listener = true;
@@ -462,6 +466,8 @@ static int va_macro_swr_pwr_event(struct snd_soc_dapm_widget *w,
 			va_priv->register_event_listener = false;
 			bolero_register_event_listener(component, false);
 		}
+		if (bolero_tx_clk_switch(component, CLK_SRC_TX_RCG))
+			dev_dbg(va_dev, "%s: clock switch failed\n",__func__);
 		if (va_priv->lpass_audio_hw_vote)
 			digital_cdc_rsc_mgr_hw_vote_disable(
 				va_priv->lpass_audio_hw_vote);
@@ -523,6 +529,22 @@ static int va_macro_mclk_event(struct snd_soc_dapm_widget *w,
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		if (va_priv->lpi_enable) {
+			if (va_priv->version == BOLERO_VERSION_2_1) {
+				if (va_priv->swr_ctrl_data) {
+					clk_src = CLK_SRC_TX_RCG;
+					ret = swrm_wcd_notify(
+					va_priv->swr_ctrl_data[0].va_swr_pdev,
+					SWR_REQ_CLK_SWITCH, &clk_src);
+					if (ret)
+						dev_dbg(va_dev,
+					"%s: clock switch failed\n",
+						__func__);
+				}
+			} else if (bolero_tx_clk_switch(component,
+					CLK_SRC_TX_RCG)) {
+				dev_dbg(va_dev, "%s: clock switch failed\n",
+					__func__);
+			}
 			va_macro_mclk_enable(va_priv, 0, true);
 		} else {
 			bolero_tx_mclk_enable(component, 0);
