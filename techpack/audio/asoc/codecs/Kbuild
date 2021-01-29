@@ -198,8 +198,11 @@ CDEFINES +=	-DANI_LITTLE_BYTE_ENDIAN \
 		-DPTT_SOCK_SVC_ENABLE \
 		-Wall\
 		-Werror\
-		-Wno-error=restrict\
 		-D__linux__
+
+ifeq ($(cc-name),gcc)
+CDEFINES +=	-Wno-error=restrict
+endif
 
 KBUILD_CPPFLAGS += $(CDEFINES)
 
