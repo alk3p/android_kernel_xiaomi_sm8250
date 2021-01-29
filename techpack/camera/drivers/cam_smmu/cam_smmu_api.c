@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2020 XiaoMi, Inc.
  */
 
 #include <linux/module.h>
@@ -401,7 +402,7 @@ static uint32_t cam_smmu_find_closest_mapping(int idx, void *vaddr)
 	list_for_each_entry(mapping,
 			&iommu_cb_set.cb_info[idx].smmu_buf_list, list) {
 		start_addr = (unsigned long)mapping->paddr;
-		end_addr = (unsigned long)mapping->paddr + mapping->len - 1;
+		end_addr = (unsigned long)mapping->paddr + mapping->len;
 
 		if (start_addr <= current_addr && current_addr <= end_addr) {
 			closest_mapping = mapping;
@@ -436,7 +437,7 @@ end:
 			closest_mapping->ion_fd, current_addr,
 			closest_mapping->len,
 			(unsigned long)closest_mapping->paddr,
-			(unsigned long)closest_mapping->paddr + mapping->len - 1,
+			(unsigned long)closest_mapping->paddr + mapping->len,
 			closest_mapping->buf,
 			buf_handle);
 	} else
