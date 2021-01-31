@@ -519,6 +519,7 @@ KBUILD_AFLAGS	+= $(call cc-option,-fno-PIE)
 # CC_VERSION_TEXT is referenced from Kconfig (so it needs export),
 # and from include/config/auto.conf.cmd to detect the compiler upgrade.
 CC_VERSION_TEXT = $(shell $(CC) --version | head -n 1)
+CC_VERSION_KCON = $(shell $(CC) --version | head -n 1 | sed 's/.(.*)//g')
 
 ifeq ($(config-targets),1)
 # ===========================================================================
@@ -529,7 +530,7 @@ ifeq ($(config-targets),1)
 # KBUILD_DEFCONFIG may point out an alternative default configuration
 # used for 'make defconfig'
 include arch/$(SRCARCH)/Makefile
-export KBUILD_DEFCONFIG KBUILD_KCONFIG CC_VERSION_TEXT
+export KBUILD_DEFCONFIG KBUILD_KCONFIG CC_VERSION_TEXT CC_VERSION_KCON
 
 config: scripts_basic outputmakefile FORCE
 	$(Q)$(MAKE) $(build)=scripts/kconfig $@
