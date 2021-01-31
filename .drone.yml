@@ -18,7 +18,6 @@ steps:
     commands:
       - apt update && apt install -y curl liblz4-1 libyaml-0-2 p7zip-full gcc g++ bison bc make git zip flex zipalign libssl-dev
       - git clone https://github.com/alk3p/build-scripts /drone/build-tools/build-scripts --branch apollo --depth 1
-      - git clone https://github.com/arter97/arm64-gcc /drone/build-tools/arm64-gcc --depth 1
-      - git clone https://github.com/arter97/arm32-gcc /drone/build-tools/arm32-gcc --depth 1
+      - git clone https://github.com/kdrag0n/proton-clang /drone/build-tools/proton-clang --depth 1
       - git clone https://github.com/alk3p/AnyKernel3 /drone/build-tools/anykernel --branch apollo --depth 1
       - bash /drone/build-tools/build-scripts/build.sh
