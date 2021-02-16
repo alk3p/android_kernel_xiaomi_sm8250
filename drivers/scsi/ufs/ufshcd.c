@@ -50,7 +50,6 @@
 #include "ufs-sysfs.h"
 #include "ufs-debugfs.h"
 #include "ufs-qcom.h"
-#include <linux/oem/project_info.h>
 
 static bool ufshcd_wb_sup(struct ufs_hba *hba);
 static int ufshcd_wb_ctrl(struct ufs_hba *hba, bool enable);
@@ -4876,7 +4875,6 @@ int ufs_fill_info(struct ufs_hba *hba)
 	strlcat(ufs_vendor_and_rev, " ", sizeof(ufs_vendor_and_rev));
 	strlcat(ufs_vendor_and_rev, ufs_rev, sizeof(ufs_vendor_and_rev));
 
-	push_component_info(UFS, ufs_product_id, ufs_vendor_and_rev);
 out:
 	return err;
 
