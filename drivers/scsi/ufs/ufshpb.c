@@ -52,6 +52,48 @@ static int ufshpb_create_sysfs(struct ufsf_feature *ufsf,
 			       struct ufshpb_lu *hpb);
 static int ufshpb_remove_sysfs(struct ufshpb_lu *hpb);
 
+static void ufshcd_pm_qos_get_worker(struct work_struct *work)
+{
+	struct ufs_hba *hba = container_of(work, typeof(*hba), pm_qos.get_work);
+
+	if (!atomic_read(&hba->pm_qos.count))
+		return;
+
+	mutex_lock(&hba->pm_qos.lock);
+	if (atomic_read(&hba->pm_qos.count) && !hba->pm_qos.active) {
+		pm_qos_update_request(&hba->pm_qos.req, 100);
+		hba->pm_qos.active = true;
+	}
+	mutex_unlock(&hba->pm_qos.lock);
+}
+
+static void ufshcd_pm_qos_put_worker(struct work_struct *work)
+{
+	struct ufs_hba *hba = container_of(work, typeof(*hba), pm_qos.put_work);
+
+	if (atomic_read(&hba->pm_qos.count))
+		return;
+
+	mutex_lock(&hba->pm_qos.lock);
+	if (!atomic_read(&hba->pm_qos.count) && hba->pm_qos.active) {
+		pm_qos_update_request(&hba->pm_qos.req, PM_QOS_DEFAULT_VALUE);
+		hba->pm_qos.active = false;
+	}
+	mutex_unlock(&hba->pm_qos.lock);
+}
+
+static void ufshcd_pm_qos_get(struct ufs_hba *hba)
+{
+	if (atomic_inc_return(&hba->pm_qos.count) == 1)
+		queue_work(system_unbound_wq, &hba->pm_qos.get_work);
+}
+
+static void ufshcd_pm_qos_put(struct ufs_hba *hba)
+{
+	if (atomic_dec_return(&hba->pm_qos.count) == 0)
+		queue_work(system_unbound_wq, &hba->pm_qos.put_work);
+}
+
 static inline void
 ufshpb_get_pos_from_lpn(struct ufshpb_lu *hpb, unsigned long lpn, int *rgn_idx,
 			int *srgn_idx, int *offset)
@@ -763,6 +805,7 @@ int ufshpb_prepare_add_lrbp(struct ufsf_feature *ufsf, int add_tag)
 crypto_err:
 	scsi_dma_unmap(pre_cmd);
 map_err:
+	ufshcd_pm_qos_put(hba);
 	ufshcd_release_all(hba);
 hold_err:
 	add_lrbp->cmd = NULL;
