@@ -48,10 +48,6 @@
 #define PINCTRL_STATE_RELEASE		"pmx_ts_release"
 #define MI_DRM_NOTIFIER
 
-#define NVT_DEBUG 1
-#define TOUCH_DISABLE_LPM 1
-#define TOUCH_IRQ_BOOST 2
-
 /*---GPIO number---*/
 #define NVTTOUCH_RST_PIN 980
 #define NVTTOUCH_INT_PIN 943
@@ -66,12 +62,8 @@
 /*---SPI driver info.---*/
 #define NVT_SPI_NAME "NVT-ts-spi"
 
-#if NVT_DEBUG
-#define NVT_LOG(fmt, args...)    pr_err("[%s] %s %d: " fmt, NVT_SPI_NAME, __func__, __LINE__, ##args)
-#else
-#define NVT_LOG(fmt, args...)    pr_info("[%s] %s %d: " fmt, NVT_SPI_NAME, __func__, __LINE__, ##args)
-#endif
-#define NVT_ERR(fmt, args...)    pr_err("[%s] %s %d: " fmt, NVT_SPI_NAME, __func__, __LINE__, ##args)
+#define NVT_LOG(fmt, args...)    pr_debug("[%s] %s %d: " fmt, NVT_SPI_NAME, __func__, __LINE__, ##args)
+#define NVT_ERR(fmt, args...)    pr_debug("[%s] %s %d: " fmt, NVT_SPI_NAME, __func__, __LINE__, ##args)
 
 /*---Input device info.---*/
 #define NVT_TS_NAME "NVTCapacitiveTouchScreen"
