@@ -815,6 +815,7 @@ config SPECULATIVE_PAGE_FAULT
 config HAVE_USERSPACE_LOW_MEMORY_KILLER
 	bool "Have userspace low memory killer"
 	default n
+	depends on PSI
 	help
 	  The page allocator cannot directly call into a
 	  userspace low memory killer as it can call into the OOM killer.
