@@ -60,6 +60,7 @@ static struct msm_bus_scale_pdata clk_measure_scale_table = {
 	.name = "clk_measure",
 };
 
+#ifdef CONFIG_DEBUG_FS
 static struct measure_clk_data debug_mux_priv = {
 	.ctl_reg = 0x62038,
 	.status_reg = 0x6203C,
@@ -1012,12 +1013,14 @@ struct clk_hw *debugcc_kona_hws[] = {
 	&measure_only_ipa_2x_clk.hw,
 	&measure_only_snoc_clk.hw,
 };
+#endif /* CONFIG_DEBUG_FS */
 
 static const struct of_device_id clk_debug_match_table[] = {
 	{ .compatible = "qcom,kona-debugcc" },
 	{ }
 };
 
+#ifdef CONFIG_DEBUG_FS
 static int clk_debug_kona_probe(struct platform_device *pdev)
 {
 	struct clk *clk;
@@ -1083,6 +1086,9 @@ static int clk_debug_kona_probe(struct platform_device *pdev)
 
 	return ret;
 }
+#else
+static int clk_debug_kona_probe(struct platform_device *pdev) { return 0; }
+#endif /* CONFIG_DEBUG_FS */
 
 static struct platform_driver clk_debug_driver = {
 	.probe = clk_debug_kona_probe,
