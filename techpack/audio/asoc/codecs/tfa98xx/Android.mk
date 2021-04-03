@@ -2,8 +2,7 @@
 
 # Assume no targets will be supported
 # Check if this driver needs be built for current target
-ifeq ($(TARGET_PRODUCT), $(filter $(TARGET_PRODUCT),lmi lmiin lmiinpro))
-$(warning  TARGET_PRODUCT=$(TARGET_PRODUCT))
+ifeq ($(CONFIG_MACH_XIAOMI_LMI), y)
 ifeq ($(call is-board-platform,kona),true)
 AUDIO_SELECT  := CONFIG_SND_SOC_KONA=m
 endif

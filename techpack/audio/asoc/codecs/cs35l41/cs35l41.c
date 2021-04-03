@@ -1300,11 +1300,10 @@ static const struct cs35l41_global_fs_config cs35l41_fs_rates[] = {
 	{ 16000,	0x12 },
 	{ 32000,	0x13 },
 };
-#if defined (CONFIG_TARGET_PRODUCT_ALIOTH)
 #define SPK_DAI_NAME "cs35l41.1-0040"
+#ifdef CONFIG_MACH_XIAOMI_ALIOTH
 #define RCV_DAI_NAME "cs35l41.1-0041"
 #else
-#define SPK_DAI_NAME "cs35l41.1-0040"
 #define RCV_DAI_NAME "cs35l41.1-0042"
 #endif
 
@@ -1372,7 +1371,7 @@ static int cs35l41_pcm_hw_params(struct snd_pcm_substream *substream,
 	asp_wl = params_width(params);
 	asp_width = params_physical_width(params);
 
-#if defined(CONFIG_TARGET_PRODUCT_APOLLO) || defined(CONFIG_TARGET_PRODUCT_CAS) || defined (CONFIG_TARGET_PRODUCT_ALIOTH)
+#if defined(CONFIG_MACH_XIAOMI_APOLLO) || defined(CONFIG_MACH_XIAOMI_CAS) || defined(CONFIG_MACH_XIAOMI_ALIOTH)
 	cs35l41_component_set_sysclk(dai->component, 0, 0, 8 * rate * asp_width, 0);
 #else
 	cs35l41_component_set_sysclk(dai->component, 0, 0, 2 * rate * asp_width, 0);
@@ -1444,7 +1443,7 @@ static int cs35l41_pcm_startup(struct snd_pcm_substream *substream,
 	//struct snd_soc_codec *codec = dai->codec;
 	pr_debug("++++>CSPL: %s.\n", __func__);
 
-#if defined(CONFIG_TARGET_PRODUCT_APOLLO) || defined(CONFIG_TARGET_PRODUCT_CAS) || defined (CONFIG_TARGET_PRODUCT_ALIOTH)
+#if defined(CONFIG_MACH_XIAOMI_APOLLO) || defined(CONFIG_MACH_XIAOMI_CAS) || defined(CONFIG_MACH_XIAOMI_ALIOTH)
 	cs35l41_set_dai_fmt(dai, SND_SOC_DAIFMT_CBS_CFS|SND_SOC_DAIFMT_DSP_A);
 #else
 	cs35l41_set_dai_fmt(dai, SND_SOC_DAIFMT_CBS_CFS|SND_SOC_DAIFMT_I2S);
@@ -1834,11 +1833,7 @@ static int cs35l41_component_probe(struct snd_soc_component *component)
 	}
 
 	wm_adsp2_component_probe(&cs35l41->dsp, component);
-#if defined(CONFIG_TARGET_PRODUCT_MONET) || defined(CONFIG_TARGET_PRODUCT_VANGOGH)
-        if (0 == cs35l41->pdata.right_channel) {
-#else
 	if (cs35l41->pdata.right_channel) {
-#endif
 		snd_soc_dapm_ignore_suspend(dapm, "AMP Playback");
 		snd_soc_dapm_ignore_suspend(dapm, "AMP Capture");
 		snd_soc_dapm_ignore_suspend(dapm, "Main AMP");
@@ -2278,7 +2273,7 @@ static int cs35l41_dsp_init(struct cs35l41_private *cs35l41)
 	return ret;
 }
 
-#if defined(CONFIG_TARGET_PRODUCT_APOLLO) || defined(CONFIG_TARGET_PRODUCT_CAS) || defined (CONFIG_TARGET_PRODUCT_ALIOTH)
+#if defined(CONFIG_MACH_XIAOMI_APOLLO) || defined(CONFIG_MACH_XIAOMI_CAS) || defined(CONFIG_MACH_XIAOMI_ALIOTH)
 static int cs35l41_96k_sample_rate_init(struct cs35l41_private *cs35l41)
 {
 	int i;
@@ -2477,16 +2472,16 @@ int cs35l41_probe(struct cs35l41_private *cs35l41,
 	}
 	//init brownout parameter
 	ret = regmap_update_bits(cs35l41->regmap, CS35L41_PWR_CTRL3, 0x1000, 0x1000);
-#if defined(CONFIG_TARGET_PRODUCT_APOLLO)
+#if defined(CONFIG_MACH_XIAOMI_APOLLO)
 	ret = regmap_write(cs35l41->regmap, CS35L41_VPBR_CFG, 0x0200530C);
 #else
 	ret = regmap_write(cs35l41->regmap, CS35L41_VPBR_CFG, 0x0200530E);
 #endif
-#if defined(CONFIG_TARGET_PRODUCT_CAS) || defined (CONFIG_TARGET_PRODUCT_ALIOTH)
+#if defined(CONFIG_MACH_XIAOMI_CAS) || defined (CONFIG_MACH_XIAOMI_ALIOTH)
 	ret = regmap_write(cs35l41->regmap, CS35L41_DAC_MSM_CFG, 0x00100000);
 #endif
 
-	#if defined(CONFIG_TARGET_PRODUCT_APOLLO) || defined(CONFIG_TARGET_PRODUCT_CAS) || defined (CONFIG_TARGET_PRODUCT_ALIOTH)
+	#if defined(CONFIG_MACH_XIAOMI_APOLLO) || defined(CONFIG_MACH_XIAOMI_CAS) || defined(CONFIG_MACH_XIAOMI_ALIOTH)
 	cs35l41_96k_sample_rate_init(cs35l41);
 	#endif
 	//external clock frequency initialize
