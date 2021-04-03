@@ -32,6 +32,11 @@
 #include <dsp/q6common.h>
 #include <dsp/audio_cal_utils.h>
 
+#ifdef CONFIG_US_PROXIMITY
+#include <dsp/apr_mius.h>
+#include <mius/mius_mixer_controls.h>
+#endif
+
 #include "msm-pcm-routing-v2.h"
 #include "msm-pcm-routing-devdep.h"
 #include "msm-qti-pp-config.h"
@@ -31084,6 +31089,10 @@ static int msm_routing_probe(struct snd_soc_component *component)
 	snd_soc_add_component_controls(component,
 			port_multi_channel_map_mixer_controls,
 			ARRAY_SIZE(port_multi_channel_map_mixer_controls));
+
+#ifdef CONFIG_US_PROXIMITY
+	mius_add_component_controls(component);
+#endif
 
 	snd_soc_add_component_controls(component, pll_clk_drift_controls,
 				      ARRAY_SIZE(pll_clk_drift_controls));
