@@ -239,7 +239,7 @@ static ssize_t swrm_debug_reg_dump(struct file *file, char __user *ubuf,
 static ssize_t swrm_debug_read(struct file *file, char __user *ubuf,
 				size_t count, loff_t *ppos)
 {
-	char lbuf[SWR_MSTR_RD_BUF_LEN];
+	char lbuf[SWR_MSTR_RD_BUF_LEN] = { 0 };
 	struct swr_mstr_ctrl *swrm = NULL;
 
 	if (!count || !file || !ppos || !ubuf)
@@ -261,7 +261,7 @@ static ssize_t swrm_debug_read(struct file *file, char __user *ubuf,
 static ssize_t swrm_debug_peek_write(struct file *file, const char __user *ubuf,
 				     size_t count, loff_t *ppos)
 {
-	char lbuf[SWR_MSTR_RD_BUF_LEN];
+	char lbuf[SWR_MSTR_RD_BUF_LEN] = { 0 };
 	int rc;
 	u32 param[5];
 	struct swr_mstr_ctrl *swrm = NULL;
@@ -301,7 +301,7 @@ static ssize_t swrm_debug_peek_write(struct file *file, const char __user *ubuf,
 static ssize_t swrm_debug_write(struct file *file,
 	const char __user *ubuf, size_t count, loff_t *ppos)
 {
-	char lbuf[SWR_MSTR_WR_BUF_LEN];
+	char lbuf[SWR_MSTR_WR_BUF_LEN] = { 0 };
 	int rc;
 	u32 param[5];
 	struct swr_mstr_ctrl *swrm;
