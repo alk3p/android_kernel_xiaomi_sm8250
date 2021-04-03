@@ -355,10 +355,9 @@ static void sde_hw_sspp_setup_format(struct sde_hw_pipe *ctx,
 		(fmt->unpack_align_msb << 18) |
 		((fmt->bpp - 1) << 9);
 
-	if(IS_SDE_MAJOR_SAME(core_rev, SDE_HW_VER_600)) {
-		if(flags & SDE_SSPP_ROT_90)
+	if (IS_SDE_MAJOR_SAME(core_rev, SDE_HW_VER_600))
+		if (flags & SDE_SSPP_ROT_90)
 			const_color_en = false;
-	}
 
 	if (fmt->fetch_mode != SDE_FETCH_LINEAR) {
 		if (SDE_FORMAT_IS_UBWC(fmt))

@@ -379,7 +379,7 @@ static int reg_dmav1_get_dspp_blk(struct sde_hw_cp_cfg *hw_cfg,
 
 	/* Treat first dspp as master to simplify setup */
 	dspp = hw_cfg->dspp[0];
-	if(!dspp) {
+	if (!dspp) {
 		DRM_ERROR("Invalid dspp NULL");
 		return -EINVAL;
 	}
