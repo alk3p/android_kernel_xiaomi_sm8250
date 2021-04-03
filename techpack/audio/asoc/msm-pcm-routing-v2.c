@@ -31097,6 +31097,10 @@ static int msm_routing_probe(struct snd_soc_component *component)
 	mius_add_component_controls(component);
 #endif
 
+#ifdef CONFIG_MSM_CSPL
+	msm_crus_pb_add_controls(component);
+#endif
+
 	snd_soc_add_component_controls(component, pll_clk_drift_controls,
 				      ARRAY_SIZE(pll_clk_drift_controls));
 
