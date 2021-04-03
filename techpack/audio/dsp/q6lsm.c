@@ -229,7 +229,7 @@ static int q6lsm_callback(struct apr_client_data *data, void *priv)
 		}
 
 		if (client->param_size != param_size) {
-			pr_err("%s: response payload size %d mismatched with user requested %d\n",
+			pr_err("%s: response payload size %d mismatched with user requested %ld\n",
 			    __func__, param_size, client->param_size);
 			ret = -EINVAL;
 			goto done;
@@ -1229,7 +1229,7 @@ int q6lsm_set_afe_data_format(uint64_t fe_id, uint16_t afe_data_format)
 			lsm_client_afe_data[n].fe_id = fe_id;
 			lsm_client_afe_data[n].unprocessed_data =
 							afe_data_format;
-			pr_debug("%s: session ID is %d, fe_id is %llu\n",
+			pr_debug("%s: session ID is %d, fe_id is %lld\n",
 				 __func__, n, fe_id);
 			return 0;
 		}
@@ -1262,7 +1262,7 @@ void q6lsm_get_afe_data_format(uint64_t fe_id, uint16_t *afe_data_format)
 		if (fe_id == lsm_client_afe_data[n].fe_id) {
 			*afe_data_format =
 				lsm_client_afe_data[n].unprocessed_data;
-			pr_debug("%s: session: %d, fe_id: %llu, afe data: %s\n",
+			pr_debug("%s: session: %d, fe_id: %lld, afe data: %s\n",
 				__func__, n, fe_id,
 				*afe_data_format ? "unprocessed" : "processed");
 			return;
