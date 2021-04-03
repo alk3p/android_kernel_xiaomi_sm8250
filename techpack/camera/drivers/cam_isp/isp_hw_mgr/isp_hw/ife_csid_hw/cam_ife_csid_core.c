@@ -3907,6 +3907,10 @@ int cam_ife_csid_stop(void *hw_priv,
 		}
 	}
 
+	spin_lock_irqsave(&csid_hw->lock_state, flags);
+	csid_hw->device_enabled = 0;
+	spin_unlock_irqrestore(&csid_hw->lock_state, flags);
+
 	if (res_mask)
 		rc = cam_ife_csid_poll_stop_status(csid_hw, res_mask);
 
