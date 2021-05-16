@@ -1331,8 +1331,8 @@ static int16_t aw8697_haptic_effect_strength(struct aw8697 *aw8697)
 		aw8697->level = 0x80; /*128*/
 	else if (aw8697->play.vmax_mv <= 0x3FFF)
 		aw8697->level = 0x1E; /*30*/
-    else
-	aw8697->level = (aw8697->play.vmax_mv - 16383) / 128;
+	else
+		aw8697->level = (aw8697->play.vmax_mv - 16383) / 128;
 	if ( aw8697->level < 0x1E)
 		aw8697->level = 0x1E; /*30*/
 #endif
