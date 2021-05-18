@@ -364,10 +364,6 @@
 					<2553600>,
 					<2841600>;
 
-			cpu7_notify: cpu7-notify {
-				qcom,cooling-cpu = <&CPU7>;
-				#cooling-cells = <2>;
-			};
 		};
 	};
 
