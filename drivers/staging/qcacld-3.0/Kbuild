@@ -3298,6 +3298,9 @@ ccflags-y += -Wframe-larger-than=4096
 endif
 endif
 ccflags-y += -Wmissing-prototypes
+ifeq ($(cc-name), gcc)
+ccflags-y += -Wno-error=array-parameter
+endif
 
 ifeq ($(call cc-option-yn, -Wheader-guard), y)
 ccflags-y += -Wheader-guard
