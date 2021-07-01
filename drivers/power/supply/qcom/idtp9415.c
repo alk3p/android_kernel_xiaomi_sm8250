@@ -13,7 +13,6 @@
 #include <linux/workqueue.h>
 #include <linux/sysfs.h>
 #include <asm/unaligned.h>
-#include <idtp9415.h>
 #include <linux/regmap.h>
 #include <linux/spinlock.h>
 #include <linux/of_gpio.h>
@@ -26,6 +25,8 @@
 
 #include <linux/power/ln8282.h>
 #include <soc/qcom/socinfo.h>
+
+#include "idtp9415.h"
 
 static struct idtp9220_device_info *g_di;
 #define REVERSE_CHG_CHECK_DELAY_MS 100000
