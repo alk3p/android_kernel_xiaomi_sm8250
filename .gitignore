@@ -21,6 +21,7 @@
 *-dtb-hdr
 *.dwo
 *.elf
+*.ftb
 *.gcno
 *.gz
 *.i
