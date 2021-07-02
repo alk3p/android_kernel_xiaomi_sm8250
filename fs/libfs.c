@@ -1338,11 +1338,6 @@ err:
 	return ret;
 }
 EXPORT_SYMBOL(generic_ci_d_hash);
-
-static const struct dentry_operations generic_ci_dentry_ops = {
-	.d_hash = generic_ci_d_hash,
-	.d_compare = generic_ci_d_compare,
-};
 #endif
 
 #ifdef CONFIG_FS_ENCRYPTION
