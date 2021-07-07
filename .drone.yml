@@ -13,10 +13,10 @@ steps:
   - name: build
     image: alk3p/archlinux:kernel-devel
     environment:
-      KBUILD_BUILD_USER: lmi
+      KBUILD_BUILD_USER: hiira
       KBUILD_BUILD_HOST: equinix-ci
     commands:
-      - git clone https://github.com/alk3p/build-scripts /drone/build-tools/build-scripts --branch lmi-r --depth 1
-      - git clone https://github.com/alk3p/anykernel3 /drone/build-tools/anykernel --branch lmi-r --depth 1
+      - git clone https://github.com/alk3p/build-scripts /drone/build-tools/build-scripts --branch kona-r --depth 1
+      - git clone https://github.com/alk3p/anykernel3 /drone/build-tools/anykernel --branch kona-r --depth 1
       - cd /drone/src
       - bash ../build-tools/build-scripts/build.sh upload
